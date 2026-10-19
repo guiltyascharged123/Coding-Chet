@@ -1,7 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { Activity, Agent, Bootstrap, Project, Provider, Task } from '../shared/types.js';
+import type {
+  Activity,
+  Agent,
+  Bootstrap,
+  DocumentPack,
+  Project,
+  Provider,
+  Task,
+} from '../shared/types.js';
 import { Store } from './store.js';
 import { planProject, runTask, runtimeInfo } from './providers.js';
 
@@ -76,7 +84,7 @@ export class Engine extends EventEmitter {
     if (!task) throw new AppError('Task not found.', 404);
     return task;
   }
-  async createProject(title: string, brief: string) {
+  async createProject(title: string, brief: string, documentPack: DocumentPack = 'studio') {
     const project: Project = {
       id: randomUUID(),
       title,
@@ -84,6 +92,7 @@ export class Engine extends EventEmitter {
       createdAt: Date.now(),
       status: 'ready',
       provider: this.state.provider,
+      documentPack,
     };
     const tasks = await planProject(project, this.state.agents);
     this.state.projects.unshift(project);

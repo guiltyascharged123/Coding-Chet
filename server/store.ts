@@ -16,6 +16,14 @@ export class Store {
     const row = this.db.prepare('SELECT payload FROM workspace WHERE id=1').get() as
       { payload: string } | undefined;
     this.state = row ? JSON.parse(row.payload) : initialState();
+    // Upgrade the original built-in palette without touching custom agent colors or work.
+    const palette: Record<string, string> = {
+      '#8c9cf5': '#5285b5',
+      '#f1b94b': '#bd914b',
+      '#68b49b': '#428578',
+      '#d28ba8': '#ad6b50',
+    };
+    for (const agent of this.state.agents) agent.color = palette[agent.color] || agent.color;
     // A process cannot retain in-flight model requests across a restart.
     for (const task of this.state.tasks)
       if (task.status === 'working') {

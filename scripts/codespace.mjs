@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  openSync,
+  closeSync,
+  readFileSync,
+  writeFileSync,
+  readlinkSync,
+  existsSync,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,12 +28,39 @@ async function health() {
     return false;
   }
 }
+if (process.argv.includes('--restart')) {
+  const pidFile = `.data/codespace-${port}.pid`;
+  if (existsSync(pidFile)) {
+    const pid = Number(readFileSync(pidFile, 'utf8').trim());
+    if (!Number.isInteger(pid) || pid < 2) throw new Error('The saved demo process ID is invalid.');
+    try {
+      const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+      const absoluteLauncher = resolve(root, 'scripts/launch.mjs');
+      const belongsHere =
+        args.includes(absoluteLauncher) ||
+        (args.includes('scripts/launch.mjs') &&
+          resolve(readlinkSync(`/proc/${pid}/cwd`)) === resolve(root));
+      if (!belongsHere)
+        throw new Error(
+          'The saved process is not this workspace’s demo launcher. Stop the demo in its terminal and try again.',
+        );
+      process.kill(pid, 'SIGTERM');
+      for (let attempt = 0; attempt < 40 && (await health()); attempt++) await delay(250);
+    } catch (error) {
+      if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error;
+    }
+  }
+  if (await health())
+    throw new Error(
+      'The demo is still running outside this helper. Stop it with Ctrl+C in its terminal, then run npm run demo.',
+    );
+}
 if (await health()) {
   console.log(`Workroom is already ready. Open its forwarded port (${port}), then click Run team.`);
   process.exit(0);
 }
 const log = openSync('.data/codespace.log', 'a');
-const child = spawn(process.execPath, ['scripts/launch.mjs'], {
+const child = spawn(process.execPath, [resolve(root, 'scripts/launch.mjs')], {
   cwd: root,
   detached: true,
   stdio: ['ignore', log, log],

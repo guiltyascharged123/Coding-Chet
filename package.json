@@ -11,6 +11,7 @@
     "demo": "node scripts/launch.mjs",
     "demo:prepare": "node scripts/launch.mjs --prepare-only",
     "codespace:start": "node scripts/codespace.mjs",
+    "codespace:restart": "node scripts/codespace.mjs --restart",
     "dev": "concurrently -k -n runtime,web \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite --host 127.0.0.1",
@@ -26,6 +27,7 @@
     "@fontsource/manrope": "^5.3.0",
     "@react-three/drei": "^10.0.7",
     "@react-three/fiber": "^9.1.2",
+    "docx": "^9.12.0",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
     "lucide-react": "^0.468.0",
@@ -34,6 +36,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "three": "^0.176.0",
+    "write-excel-file": "^4.1.1",
     "zod": "^3.24.3"
   },
   "devDependencies": {
@@ -45,6 +48,7 @@
     "@types/three": "^0.176.0",
     "@vitejs/plugin-react": "^4.4.1",
     "concurrently": "^9.1.2",
+    "fflate": "^0.8.3",
     "prettier": "^3.9.10",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",

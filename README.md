@@ -45,6 +45,26 @@ npm run demo
 The demo runs on port **3000** and saves its own state in `.data/demo.sqlite`.
 It starts with the demo runtime even if a model provider was used previously.
 
+## Update an existing copy
+
+On your computer, stop the app with **Ctrl+C**, then run:
+
+```bash
+git pull --ff-only origin workroom-starter
+npm run demo
+```
+
+In an existing Codespace, run these in its terminal instead:
+
+```bash
+git pull --ff-only origin workroom-starter
+npm run codespace:restart
+```
+
+Refresh the app's browser tab after restarting. Saved projects and documents stay
+in the database. Create a new project and select **Office document pack** to try
+the new business documents; existing projects keep their original task plan.
+
 ## Development
 
 For hot reloading, use `npm ci` followed by `npm run dev`. Vite serves port **5173**
@@ -63,14 +83,21 @@ worktree is unnecessary. If npm’s default cache is unwritable, use
 
 ## Included
 
-- Interactive Three.js office with orbit, zoom, reset, and floor-plan views.
+- Slate, walnut, and brass interface with readable text and an interactive Three.js office.
+  Agents walk around furniture, visit the planning wall, meeting area, coffee counter,
+  and printer, and meet for runtime handoffs. Orbit, zoom, floor-plan, and a separate
+  movement pause control are included. Reduced motion starts with movement paused.
 - Four teammates with editable names, roles, perspectives, and assigned desks.
   Selecting an occupied desk swaps seats.
 - Project creation and switching, task decomposition, dependency scheduling,
   pause/resume, failure reporting, and retry.
-- Live character states, handoff lines, and activity via server-sent events.
+- Live task states and handoffs via server-sent events; the office visualizes their activity.
 - Human approval gates, revision requests, and optional browser notifications.
-- Markdown deliverables with individual and combined downloads.
+- Office document packs: executive brief, project plan/action register, budget estimate,
+  risk/decision register, meeting template, and status report. Select a pack in New project.
+- Editable Word (`.docx`) documents, Excel (`.xlsx`) workbooks with separate table sheets
+  and calculated budget totals, Markdown, and Print / PDF exports. Individual and combined
+  downloads preserve draft/review status. Excel notes retain the narrative context.
 - SQLite persistence in ignored `.data/workroom.sqlite`. On restart, interrupted
   tasks return to the queue and running projects pause. Completed work is retained.
 - Demo, OpenAI, Gemini, and authenticated external-worker adapters.
@@ -83,6 +110,9 @@ code or browse. Tool execution belongs in your external worker; the browser is t
 visual interface, not an arbitrary-code sandbox.
 
 ## Connect a model
+
+See the [AI connection guide](docs/AI-CONNECTIONS.md) for a plain-language comparison,
+step-by-step provider setup, framework choices, and what is still needed for tool-using agents.
 
 Copy `.env.example` to `.env` (ignored by Git), add a server-side key, and restart.
 Open Runtime settings in the sidebar to switch. Pause running projects first.
@@ -192,6 +222,10 @@ If system Chromium is already installed, skip the browser download and use:
 ```bash
 CHROMIUM_PATH=/usr/bin/chromium npm run test:e2e
 ```
+
+Document tests inspect the actual Word/Excel file contents and budget formulas.
+Office tests exercise furniture clearance, character separation, continued movement,
+physical handoff meetings, and desk reassignment.
 
 Browser tests start an isolated server on port 3107 with a temporary database. They
 exercise revision and approval, output downloads, reload persistence, desk swaps,

@@ -2,6 +2,15 @@ export type Provider = 'demo' | 'openai' | 'gemini' | 'external';
 export type ProjectStatus = 'ready' | 'running' | 'paused' | 'needs_input' | 'completed';
 export type TaskStatus = 'queued' | 'working' | 'review' | 'done' | 'failed';
 export type AgentStatus = 'idle' | 'working' | 'waiting';
+export type DocumentPack = 'studio' | 'office';
+export type DocumentKind =
+  | 'brief'
+  | 'project_plan'
+  | 'budget'
+  | 'risk_register'
+  | 'meeting_minutes'
+  | 'status_report'
+  | 'notes';
 export interface Agent {
   id: string;
   name: string;
@@ -19,6 +28,7 @@ export interface Task {
   dependencies: string[];
   status: TaskStatus;
   requiresApproval: boolean;
+  documentKind?: DocumentKind;
   output: string;
   feedback: string;
   error?: string;
@@ -34,6 +44,7 @@ export interface Project {
   status: ProjectStatus;
   createdAt: number;
   provider: Provider;
+  documentPack?: DocumentPack;
 }
 export interface Activity {
   id: string;

@@ -63,9 +63,10 @@ app.post(
       .object({
         title: z.string().trim().min(2).max(80),
         brief: z.string().trim().min(20).max(6000),
+        documentPack: z.enum(['studio', 'office']).default('office'),
       })
       .parse(req.body);
-    const project = await engine.createProject(body.title, body.brief);
+    const project = await engine.createProject(body.title, body.brief, body.documentPack);
     res.status(201).json({ project });
   }),
 );

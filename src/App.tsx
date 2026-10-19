@@ -51,6 +51,7 @@ import { PROVIDER_LABELS, STATUS_LABELS } from '../shared/types';
 import { api, download, getState, relativeTime } from './api';
 import Modal from './components/Modal';
 import Avatar from './components/Avatar';
+import DocumentActions from './components/DocumentActions';
 
 const Office = lazy(() => import('./components/Office'));
 type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs';
@@ -83,6 +84,9 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [officeMoving, setOfficeMoving] = useState(
+    () => !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
   const [cameraMode, setCameraMode] = useState<'orbit' | 'top'>('orbit');
   const [resetCamera, setResetCamera] = useState(0);
   const [activityFilter, setActivityFilter] = useState('all');
@@ -548,6 +552,7 @@ export default function App() {
                         mode={cameraMode}
                         zoom={zoom}
                         reset={resetCamera}
+                        moving={officeMoving}
                         onAgentClick={setAgentId}
                       />
                     </Suspense>
@@ -562,6 +567,21 @@ export default function App() {
                       </span>
                     </div>
                     <div className="scene-controls">
+                      <button
+                        onClick={() => setOfficeMoving((moving) => !moving)}
+                        aria-label={
+                          officeMoving ? 'Pause office movement' : 'Resume office movement'
+                        }
+                        title={
+                          officeMoving
+                            ? 'Pause office movement (tasks continue)'
+                            : 'Resume office movement'
+                        }
+                        aria-pressed={!officeMoving}
+                      >
+                        {officeMoving ? <Pause size={16} /> : <Play size={16} />}
+                      </button>
+                      <span />
                       <button
                         onClick={() => setZoom((z) => Math.max(0.65, z - 0.15))}
                         aria-label="Zoom out"
@@ -670,7 +690,7 @@ export default function App() {
                 <Sparkles size={14} />
                 <span>
                   {state.provider === 'demo'
-                    ? 'You’re exploring the demo. No model calls, no API costs. Connect a runtime when you’re ready.'
+                    ? 'Demo: scripted tasks, template documents, and simulated office movement. No AI model is running.'
                     : 'Credentials stay on the server. Your agents share context through task handoffs.'}
                 </span>
                 <button onClick={() => setModal('runtime')}>
@@ -862,23 +882,21 @@ export default function App() {
               <div className="outputs-heading">
                 <span>{tasks.filter((t) => t.output).length} deliverables in this project</span>
                 {tasks.some((t) => t.output) && (
-                  <button
-                    className="button secondary small"
-                    onClick={() =>
-                      download(
-                        `${project.title}-handoff.md`,
-                        `# ${project.title}\n\n${project.brief}\n\n${tasks
-                          .filter((t) => t.output)
-                          .map((t) => t.output)
-                          .join('\n\n---\n\n')}`,
-                      )
-                    }
-                  >
-                    <ArrowDownToLine size={14} />
-                    Download all
-                  </button>
+                  <DocumentActions
+                    all
+                    title={`${project.title}-handoff`}
+                    content={`# ${project.title}\n\n${project.brief}\n\n${tasks
+                      .filter((t) => t.output)
+                      .map((t) => `> Workflow status: ${taskLabels[t.status]}\n\n${t.output}`)
+                      .join('\n\n---\n\n')}`}
+                  />
                 )}
               </div>
+              <p className="outputs-help">
+                Open a document to download an editable Word file, turn its tables into Excel
+                sheets, or print to PDF. New projects can produce an office document pack with
+                briefs, schedules, budgets, risks, meeting templates, and status reports.
+              </p>
               {tasks.some((t) => t.output) ? (
                 <div className="output-grid">
                   {tasks
@@ -911,11 +929,16 @@ export default function App() {
                             <h3>{task.title}</h3>
                             <div>
                               <Avatar color={agent.color} size={24} />
-                              <span>{agent.name} · Markdown</span>
+                              <span>
+                                {agent.name} ·{' '}
+                                {task.documentKind
+                                  ? task.documentKind.replace(/_/g, ' ')
+                                  : 'Document'}
+                              </span>
                             </div>
                             <div className="output-actions">
                               <button onClick={() => setTaskId(task.id)}>
-                                Read output <ArrowUpRight size={14} />
+                                Read & export <ArrowUpRight size={14} />
                               </button>
                               <button
                                 aria-label={`Download ${task.title}`}
@@ -1012,7 +1035,7 @@ export default function App() {
               [
                 '04',
                 'Take the good work with you',
-                'Read and download Markdown deliverables in Outputs. Demo mode uses templates; model runtimes generate text, while external workers can connect your own tools.',
+                'Export Word documents, Excel workbooks, Markdown, or print to PDF in Outputs. Demo mode uses labeled templates; model runtimes generate text, while external workers can connect your own tools.',
               ],
             ].map(([n, title, text]) => (
               <div key={n}>
@@ -1074,10 +1097,10 @@ export default function App() {
                     <FileText size={15} />
                     Deliverable
                   </span>
-                  <button onClick={() => download(`${selectedTask.title}.md`, selectedTask.output)}>
-                    <ArrowDownToLine size={14} />
-                    Download
-                  </button>
+                  <DocumentActions
+                    title={selectedTask.title}
+                    content={`> Workflow status: ${taskLabels[selectedTask.status]}\n\n${selectedTask.output}`}
+                  />
                 </div>
                 <article className="markdown">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedTask.output}</ReactMarkdown>
@@ -1196,6 +1219,7 @@ function ProjectModal({
 }) {
   const [title, setTitle] = useState('');
   const [brief, setBrief] = useState('');
+  const [documentPack, setDocumentPack] = useState<'studio' | 'office'>('office');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   async function submit(e: FormEvent) {
@@ -1203,7 +1227,7 @@ function ProjectModal({
     setSubmitting(true);
     setError('');
     try {
-      const result = await api<{ project: Project }>('/projects', { title, brief });
+      const result = await api<{ project: Project }>('/projects', { title, brief, documentPack });
       onCreated(result.project.id);
     } catch (err) {
       setError((err as Error).message);
@@ -1242,6 +1266,22 @@ function ProjectModal({
             maxLength={6000}
             required
           />
+        </label>
+        <label>
+          Deliverables
+          <select
+            aria-label="Deliverables"
+            value={documentPack}
+            onChange={(e) => setDocumentPack(e.target.value as 'studio' | 'office')}
+          >
+            <option value="office">Office document pack</option>
+            <option value="studio">Creative & technical planning</option>
+          </select>
+          <span className="field-hint">
+            {documentPack === 'office'
+              ? 'Brief, project plan, budget, risk register, meeting template, and status report.'
+              : 'Brief, creative direction, experience map, implementation plan, review, and handoff.'}
+          </span>
         </label>
         <div className="brief-ideas">
           <span>A starting point?</span>
@@ -1502,10 +1542,10 @@ function RuntimeModal({
   const [saving, setSaving] = useState(false);
   const descriptions: Record<Provider, string> = {
     demo: 'A local, scripted workflow. Explore tasks, reviews, and handoffs without API calls.',
-    openai: `Model-generated plans and documents using ${data.runtime.models.openai}.`,
-    gemini: `Model-generated plans and documents using ${data.runtime.models.gemini}.`,
+    openai: `Real AI plans and documents using ${data.runtime.models.openai}. Requires an OpenAI API key and API billing. No file or command tools in this adapter.`,
+    gemini: `Real AI plans and documents using ${data.runtime.models.gemini}. Requires a Gemini API key, model access, and available quota. No file or command tools in this adapter.`,
     external:
-      'Connect agents running anywhere through authenticated task leases and event callbacks.',
+      'Run your own agent processes and attach them to the office. Requires a shared RUNNER_TOKEN, a running worker, and whatever model or tools that worker uses.',
   };
   return (
     <Modal
@@ -1542,7 +1582,11 @@ function RuntimeModal({
               <p>{descriptions[provider]}</p>
               <small>
                 {data.runtime.available[provider]
-                  ? 'Configured and available'
+                  ? provider === 'demo'
+                    ? 'Simulation · no model calls'
+                    : provider === 'external'
+                      ? 'Token configured · start a worker separately'
+                      : 'API key present · access checked on first request'
                   : 'Needs server configuration'}
               </small>
             </span>
@@ -1551,16 +1595,36 @@ function RuntimeModal({
         ))}
       </div>
       <div className="runtime-instructions">
-        <strong>Connect your own runtime</strong>
+        <strong>These are implemented connection options</strong>
+        <p>
+          Start with OpenAI or Gemini for document work. All four characters can share one provider
+          account; their roles and task context make each assignment different. You do not need to
+          build four separate AIs.
+        </p>
+        <p>
+          A ChatGPT or Gemini app subscription is separate from API access. API use needs its own
+          credentials and may incur charges. Keys stay on the server.
+        </p>
+        <strong>Connect a provider</strong>
         <p>
           Copy <code>.env.example</code> to <code>.env</code>, add your provider’s key on the
           server, and restart. Use <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, or a{' '}
           <code>RUNNER_TOKEN</code> of at least 24 characters for external workers.
         </p>
         <p>
-          Model runtimes produce text deliverables. External workers can bring their own tools.
-          Pause running projects before switching. This single-user app should stay on a trusted
-          local network until authentication is added.
+          For coding, browsing, file editing, or specialist tools, connect an external worker built
+          with an agent framework such as OpenAI Agents SDK, LangGraph, CrewAI, or Google ADK. These
+          need a custom bridge using the documented runner API; they are not preinstalled
+          integrations. A local model server can also be used inside that worker. Pause running
+          projects before switching. This single-user app should stay on a trusted local network
+          until authentication is added.{' '}
+          <a
+            href="https://github.com/guiltyascharged123/Coding-Chet/blob/workroom-starter/docs/AI-CONNECTIONS.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Read the AI connection guide ↗
+          </a>
         </p>
       </div>
     </Modal>

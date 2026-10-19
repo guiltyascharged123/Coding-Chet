@@ -27,7 +27,10 @@ export function relativeTime(time: number) {
       : new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 export function download(name: string, content: string) {
-  const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
+  saveBlob(name, new Blob([content], { type: 'text/markdown;charset=utf-8' }));
+}
+export function saveBlob(name: string, content: Blob) {
+  const url = URL.createObjectURL(content);
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
