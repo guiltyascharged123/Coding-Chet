@@ -52,6 +52,7 @@ import { api, download, getState, relativeTime } from './api';
 import Modal from './components/Modal';
 import Avatar from './components/Avatar';
 import DocumentActions from './components/DocumentActions';
+import WorkspaceControls from './components/WorkspaceControls';
 
 const Office = lazy(() => import('./components/Office'));
 type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs';
@@ -77,7 +78,7 @@ export default function App() {
   const [view, setView] = useState<View>('workspace');
   const [projectId, setProjectId] = useState(localStorage.getItem('workroom-project') || '');
   const [projectMenu, setProjectMenu] = useState(false);
-  const [modal, setModal] = useState<'project' | 'runtime' | 'help' | null>(null);
+  const [modal, setModal] = useState<'project' | 'runtime' | 'help' | 'controls' | null>(null);
   const [agentId, setAgentId] = useState<string>();
   const [taskId, setTaskId] = useState<string>();
   const [reviewId, setReviewId] = useState<string>();
@@ -286,6 +287,14 @@ export default function App() {
             <ArrowUpRight size={14} />
           </button>
           <button
+            className="nav-item"
+            aria-label="Workspace controls"
+            onClick={() => setModal('controls')}
+          >
+            <Settings2 size={18} />
+            <span>Workspace controls</span>
+          </button>
+          <button
             className="runtime-card"
             aria-label={`${PROVIDER_LABELS[state.provider]} ${state.provider === 'demo' ? 'No API key needed' : 'Server-side connection'}`}
             onClick={() => setModal('runtime')}
@@ -295,9 +304,7 @@ export default function App() {
             </span>
             <span>
               <strong>{PROVIDER_LABELS[state.provider]}</strong>
-              <small>
-                {state.provider === 'demo' ? 'No API key needed' : 'Server-side connection'}
-              </small>
+              <small>Default for new projects</small>
             </span>
             <Settings2 size={15} />
           </button>
@@ -424,7 +431,7 @@ export default function App() {
             <div className="project-info">
               <div className="project-eyebrow">
                 CURRENT PROJECT <span>·</span>{' '}
-                {state.provider === 'demo'
+                {project.provider === 'demo'
                   ? 'DEMO SESSION'
                   : PROVIDER_LABELS[project.provider].toUpperCase()}
               </div>
@@ -689,12 +696,12 @@ export default function App() {
               <div className="bottom-note">
                 <Sparkles size={14} />
                 <span>
-                  {state.provider === 'demo'
+                  {project.provider === 'demo'
                     ? 'Demo: scripted tasks, template documents, and simulated office movement. No AI model is running.'
                     : 'Credentials stay on the server. Your agents share context through task handoffs.'}
                 </span>
                 <button onClick={() => setModal('runtime')}>
-                  {state.provider === 'demo' ? 'Connect a runtime' : 'Runtime settings'}
+                  {project.provider === 'demo' ? 'Connect a runtime' : 'Runtime settings'}
                   <ArrowUpRight size={13} />
                 </button>
               </div>
@@ -1000,12 +1007,18 @@ export default function App() {
           }}
         />
       )}
+      {modal === 'controls' && (
+        <WorkspaceControls data={data} project={project} onClose={() => setModal(null)} />
+      )}
       {modal === 'runtime' && (
         <RuntimeModal
           data={data}
           onClose={() => setModal(null)}
           onChange={(provider) =>
-            act(() => api('/runtime', { provider }), `Switched to ${PROVIDER_LABELS[provider]}.`)
+            act(
+              () => api('/runtime', { provider }),
+              `Default for new projects: ${PROVIDER_LABELS[provider]}. Existing projects keep their connection.`,
+            )
           }
         />
       )}
@@ -1219,6 +1232,7 @@ function ProjectModal({
 }) {
   const [title, setTitle] = useState('');
   const [brief, setBrief] = useState('');
+  const [planning, setPlanning] = useState<'template' | 'ai'>('template');
   const [documentPack, setDocumentPack] = useState<'studio' | 'office'>('office');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -1227,7 +1241,12 @@ function ProjectModal({
     setSubmitting(true);
     setError('');
     try {
-      const result = await api<{ project: Project }>('/projects', { title, brief, documentPack });
+      const result = await api<{ project: Project }>('/projects', {
+        title,
+        brief,
+        documentPack,
+        planning,
+      });
       onCreated(result.project.id);
     } catch (err) {
       setError((err as Error).message);
@@ -1283,6 +1302,19 @@ function ProjectModal({
               : 'Brief, creative direction, experience map, implementation plan, review, and handoff.'}
           </span>
         </label>
+        <label>
+          Task planning
+          <select
+            aria-label="Task planning"
+            value={planning}
+            onChange={(e) => setPlanning(e.target.value as 'template' | 'ai')}
+          >
+            <option value="template">Use the six-task starter plan · no model call</option>
+            <option value="ai" disabled={provider === 'demo' || provider === 'external'}>
+              Ask the selected model to plan · uses allowance or API budget
+            </option>
+          </select>
+        </label>
         <div className="brief-ideas">
           <span>A starting point?</span>
           {[
@@ -1317,7 +1349,9 @@ function ProjectModal({
               ? 'Demo mode creates a six-task plan using local templates. No model calls or API costs.'
               : provider === 'external'
                 ? 'A starter plan will be queued for your connected external workers.'
-                : 'Your model will plan the tasks. Agent calls use your provider account and may incur costs.'}
+                : planning === 'ai'
+                  ? 'Creating this project will request an AI plan, subject to workspace limits.'
+                  : 'Creating this project makes no model call. Run team uses the connection selected for this project.'}
           </p>
         </div>
         {error && (
@@ -1356,6 +1390,7 @@ function AgentModal({
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState(agent.role);
   const [specialty, setSpecialty] = useState(agent.specialty);
+  const [goal, setGoal] = useState(agent.goal || '');
   const [desk, setDesk] = useState(agent.desk);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -1363,7 +1398,7 @@ function AgentModal({
     e.preventDefault();
     setSaving(true);
     try {
-      await api(`/agents/${agent.id}`, { name, role, specialty, desk }, 'PATCH');
+      await api(`/agents/${agent.id}`, { name, role, specialty, desk, goal }, 'PATCH');
       onSaved();
     } catch (err) {
       setError((err as Error).message);
@@ -1410,6 +1445,16 @@ function AgentModal({
             required
             minLength={5}
             maxLength={600}
+          />
+        </label>
+        <label>
+          Goal within a project
+          <textarea
+            aria-label="Agent goal"
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            maxLength={1000}
+            rows={2}
           />
         </label>
         <label>
@@ -1540,7 +1585,14 @@ function RuntimeModal({
   onChange: (provider: Provider) => Promise<void>;
 }) {
   const [saving, setSaving] = useState(false);
+  const [checkMessage, setCheckMessage] = useState('');
   const descriptions: Record<Provider, string> = {
+    codex:
+      'Managed document worker using Codex CLI signed in with ChatGPT. Uses your included allowance, not the paid API. Requires explicit setup; no fallback.',
+    ollama:
+      'A model running on your computer through Ollama. Uses local RAM and CPU/GPU. No automatic model download.',
+    compatible:
+      'Connect a configured OpenAI-compatible model server such as LM Studio or llama.cpp. API compatibility and billing depend on that server.',
     demo: 'A local, scripted workflow. Explore tasks, reviews, and handoffs without API calls.',
     openai: `Real AI plans and documents using ${data.runtime.models.openai}. Requires an OpenAI API key and API billing. No file or command tools in this adapter.`,
     gemini: `Real AI plans and documents using ${data.runtime.models.gemini}. Requires a Gemini API key, model access, and available quota. No file or command tools in this adapter.`,
@@ -1553,8 +1605,34 @@ function RuntimeModal({
       subtitle="The studio is the interface. Your runtime does the thinking."
       onClose={onClose}
     >
+      <div className="runtime-check">
+        <button
+          className="button secondary"
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true);
+            try {
+              await api('/connections/check');
+              setCheckMessage('Readiness refreshed. No model was run.');
+            } catch (e) {
+              setCheckMessage((e as Error).message);
+            } finally {
+              setSaving(false);
+            }
+          }}
+        >
+          Check connections
+        </button>
+        <p role="status">{checkMessage}</p>
+        <p>
+          This chooses the default for new projects. Use Workspace controls to explicitly change an
+          existing project’s connection.
+        </p>
+      </div>
       <div className="runtime-options">
-        {(['demo', 'openai', 'gemini', 'external'] as Provider[]).map((provider) => (
+        {(
+          ['demo', 'codex', 'ollama', 'compatible', 'openai', 'gemini', 'external'] as Provider[]
+        ).map((provider) => (
           <button
             className={`runtime-option ${data.state.provider === provider ? 'chosen' : ''}`}
             key={provider}
@@ -1582,12 +1660,13 @@ function RuntimeModal({
               <p>{descriptions[provider]}</p>
               <small>
                 {data.runtime.available[provider]
-                  ? provider === 'demo'
-                    ? 'Simulation · no model calls'
-                    : provider === 'external'
-                      ? 'Token configured · start a worker separately'
-                      : 'API key present · access checked on first request'
-                  : 'Needs server configuration'}
+                  ? data.runtime.diagnostics?.[provider] ||
+                    (provider === 'demo'
+                      ? 'Simulation · no model calls'
+                      : provider === 'external'
+                        ? 'Token configured · start a worker separately'
+                        : 'API key present · access checked on first request')
+                  : data.runtime.diagnostics?.[provider] || 'Needs server configuration'}
               </small>
             </span>
             {data.state.provider === provider && <Check size={18} />}
@@ -1597,19 +1676,20 @@ function RuntimeModal({
       <div className="runtime-instructions">
         <strong>These are implemented connection options</strong>
         <p>
-          Start with OpenAI or Gemini for document work. All four characters can share one provider
-          account; their roles and task context make each assignment different. You do not need to
-          build four separate AIs.
+          Start with Codex through your ChatGPT account or a local model to explore document work.
+          All four characters can share one model; their roles and task context make each assignment
+          different. You do not need to build four separate AIs.
         </p>
         <p>
-          A ChatGPT or Gemini app subscription is separate from API access. API use needs its own
-          credentials and may incur charges. Keys stay on the server.
+          Codex uses your account’s Codex allowance. Local models use your hardware. Paid API access
+          is separate and starts disabled; enable it and set price estimates in Workspace controls.
+          Keys stay on the server.
         </p>
         <strong>Connect a provider</strong>
         <p>
-          Copy <code>.env.example</code> to <code>.env</code>, add your provider’s key on the
-          server, and restart. Use <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, or a{' '}
-          <code>RUNNER_TOKEN</code> of at least 24 characters for external workers.
+          Copy <code>.env.example</code> to <code>.env</code> and follow the connection guide. Codex
+          needs CLI sign-in and an exact available model ID; Ollama needs a running local service
+          and installed model. Restart after configuration, then check connections.
         </p>
         <p>
           For coding, browsing, file editing, or specialist tools, connect an external worker built

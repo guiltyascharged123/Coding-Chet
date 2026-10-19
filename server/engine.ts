@@ -12,6 +12,10 @@ import type {
 } from '../shared/types.js';
 import { Store } from './store.js';
 import { planProject, runTask, runtimeInfo } from './providers.js';
+import { demoPlan } from './seed.js';
+import { hash, memoryCurrent, policy, reserve, selectedMemory, relevantContext } from './policy.js';
+import { policySchema } from '../shared/schemas.js';
+import type { CostPolicy } from '../shared/types.js';
 
 export class AppError extends Error {
   constructor(
@@ -33,17 +37,31 @@ export class Engine extends EventEmitter {
     const configured = process.env.AGENT_PROVIDER as Provider | undefined;
     if (configured && runtimeInfo().available[configured]) {
       store.state.provider = configured;
-      for (const project of store.state.projects)
-        if (project.status !== 'completed') project.provider = configured;
     }
     if (!runtimeInfo().available[store.state.provider]) store.state.provider = 'demo';
+    for (const project of store.state.projects)
+      if (!project.model && project.provider !== 'demo' && project.provider !== 'external')
+        project.model = runtimeInfo().models[project.provider];
     store.save();
   }
   get state() {
     return this.store.state;
   }
   bootstrap(): Bootstrap {
-    return { state: this.state, runtime: runtimeInfo() };
+    return {
+      state: {
+        ...this.state,
+        memory: (this.state.memory || []).map((m) => ({
+          ...m,
+          stale: !memoryCurrent(m, this.state.tasks),
+        })),
+      },
+      runtime: runtimeInfo(),
+      attempts: this.store
+        .attempts()
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 500),
+    };
   }
   commit() {
     this.state.activities = this.state.activities.slice(0, 250);
@@ -84,7 +102,12 @@ export class Engine extends EventEmitter {
     if (!task) throw new AppError('Task not found.', 404);
     return task;
   }
-  async createProject(title: string, brief: string, documentPack: DocumentPack = 'studio') {
+  async createProject(
+    title: string,
+    brief: string,
+    documentPack: DocumentPack = 'studio',
+    planning: 'template' | 'ai' = 'template',
+  ) {
     const project: Project = {
       id: randomUUID(),
       title,
@@ -93,8 +116,16 @@ export class Engine extends EventEmitter {
       status: 'ready',
       provider: this.state.provider,
       documentPack,
+      planning,
+      model:
+        this.state.provider === 'demo' || this.state.provider === 'external'
+          ? undefined
+          : runtimeInfo().models[this.state.provider],
     };
-    const tasks = await planProject(project, this.state.agents);
+    const tasks =
+      planning === 'ai'
+        ? await planProject(project, this.state.agents, { store: this.store, project })
+        : demoPlan(project, this.state.agents);
     this.state.projects.unshift(project);
     this.state.tasks.push(...tasks);
     this.event(
@@ -109,16 +140,85 @@ export class Engine extends EventEmitter {
   setProvider(provider: Provider) {
     if (!runtimeInfo().available[provider])
       throw new AppError(
-        'This runtime is not configured. Add its credentials to the server environment and restart the server.',
+        'This runtime is not configured. Configure it on the server, restart, and check connections.',
       );
     if (this.active.size || this.state.projects.some((p) => p.status === 'running'))
       throw new AppError('Pause running projects before changing the runtime.', 409);
     this.state.provider = provider;
-    for (const project of this.state.projects)
-      if (project.status !== 'completed') project.provider = provider;
+
     this.commit();
   }
-  updateAgent(id: string, values: Pick<Agent, 'name' | 'role' | 'specialty' | 'desk'>) {
+
+  setProjectProvider(id: string, provider: Provider) {
+    const p = this.project(id);
+    if (
+      p.status === 'running' ||
+      this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
+    )
+      throw new AppError('Pause the project before changing its connection.');
+    if (!runtimeInfo().available[provider])
+      throw new AppError('The selected connection is not configured.');
+    p.provider = provider;
+    p.model =
+      provider === 'demo' || provider === 'external' ? undefined : runtimeInfo().models[provider];
+    this.event(
+      id,
+      'system',
+      `You explicitly selected ${provider} for this project. Existing outputs and tasks were retained.`,
+    );
+    this.commit();
+  }
+  updatePolicy(value: unknown) {
+    this.state.policy = policySchema.parse(value);
+    this.commit();
+  }
+  acknowledge(id: string) {
+    const a = this.store.attempts().find((a) => a.id === id);
+    if (!a || a.status !== 'uncertain')
+      throw new AppError('Only uncertain attempts can be acknowledged.');
+    this.store.putAttempt({ ...a, status: 'acknowledged' });
+    this.commit();
+  }
+  restore(value: unknown) {
+    if (this.active.size || this.state.tasks.some((t) => t.status === 'working'))
+      throw new AppError('Pause all work before restoring a backup.');
+    this.store.restore(value);
+    this.commit();
+  }
+  addMemory(projectId: string, content: string, sourceTaskId?: string) {
+    this.project(projectId);
+    const source = sourceTaskId ? this.task(sourceTaskId) : undefined;
+    if (source && (source.projectId !== projectId || source.status !== 'done'))
+      throw new AppError('Memory sources must be completed tasks in this project.');
+    this.state.memory ||= [];
+    this.state.memory.push({
+      id: randomUUID(),
+      projectId,
+      content,
+      status: 'proposed',
+      sourceTaskId,
+      sourceHash: source ? hash(source.output) : undefined,
+      createdAt: Date.now(),
+    });
+    this.commit();
+  }
+  changeMemory(id: string, action: 'verify' | 'delete') {
+    const m = this.state.memory?.find((m) => m.id === id);
+    if (!m) throw new AppError('Memory record not found.');
+    if (action === 'delete') this.state.memory = this.state.memory!.filter((m) => m.id !== id);
+    else {
+      if (!memoryCurrent(m, this.state.tasks))
+        throw new AppError(
+          'The source is stale. Add a fresh memory record from the current document.',
+        );
+      m.status = 'verified';
+    }
+    this.commit();
+  }
+  updateAgent(
+    id: string,
+    values: Pick<Agent, 'name' | 'role' | 'specialty' | 'desk'> & { goal?: string },
+  ) {
     const agent = this.state.agents.find((a) => a.id === id);
     if (!agent) throw new AppError('Agent not found.', 404);
     const other = this.state.agents.find((a) => a.desk === values.desk && a.id !== id);
@@ -130,9 +230,13 @@ export class Engine extends EventEmitter {
     const project = this.project(id);
     if (project.status === 'completed')
       throw new AppError('This project is complete. Create a new project to run another brief.');
+    if (this.state.tasks.filter((t) => t.projectId === id).length > policy(this.store).maxTasks)
+      throw new AppError(
+        'This plan exceeds the task limit. Increase the limit in Workspace controls; no tasks have been discarded.',
+      );
     if (!runtimeInfo().available[project.provider])
       throw new AppError(
-        'The project runtime is not configured. Open Runtime settings to choose an available runtime.',
+        'The project runtime is not configured. Configure it and check connections, or explicitly change this project’s connection in Workspace controls.',
       );
     project.status = this.state.approvals.some((a) => a.projectId === id && a.status === 'pending')
       ? 'needs_input'
@@ -155,6 +259,15 @@ export class Engine extends EventEmitter {
       (t) => t.projectId === id && t.status === 'working',
     )) {
       this.active.get(task.id)?.abort();
+      if (task.attemptId) {
+        const a = this.store.attempts().find((a) => a.id === task.attemptId);
+        if (a?.status === 'running')
+          this.store.putAttempt({
+            ...a,
+            status: 'uncertain',
+            error: 'Cancelled; provider usage may already have been consumed.',
+          });
+      }
       task.status = 'queued';
       delete task.startedAt;
       delete task.leaseId;
@@ -166,6 +279,8 @@ export class Engine extends EventEmitter {
   retryTask(id: string) {
     const task = this.task(id);
     if (task.status !== 'failed') throw new AppError('Only failed tasks can be retried.');
+    if (this.store.attempts().some((a) => a.taskId === id && a.status === 'uncertain'))
+      throw new AppError('Acknowledge uncertain usage in Workspace controls before retrying.');
     task.status = 'queued';
     delete task.error;
     const project = this.project(task.projectId);
@@ -186,6 +301,10 @@ export class Engine extends EventEmitter {
     if (decision === 'revise' && !feedback.trim())
       throw new AppError('Tell the agent what you would like changed.');
     const task = this.task(approval.taskId);
+    if (decision === 'revise' && (task.revisions || 0) >= policy(this.store).maxRevisions)
+      throw new AppError(
+        'The revision limit is reached. Increase it explicitly in Workspace controls before requesting another revision.',
+      );
     approval.status = decision === 'approve' ? 'approved' : 'revision';
     approval.feedback = feedback;
     if (decision === 'approve') {
@@ -195,6 +314,7 @@ export class Engine extends EventEmitter {
     } else {
       task.status = 'queued';
       task.feedback = feedback;
+      task.revisions = (task.revisions || 0) + 1;
       delete task.startedAt;
     }
     const project = this.project(approval.projectId);
@@ -227,20 +347,26 @@ export class Engine extends EventEmitter {
     let expired = false;
     for (const task of this.state.tasks)
       if (task.status === 'working' && task.leaseExpiresAt && task.leaseExpiresAt < Date.now()) {
-        task.status = 'queued';
-        delete task.leaseId;
-        delete task.leaseExpiresAt;
-        this.event(
-          task.projectId,
-          'error',
-          'An external worker lease expired. The task is available for another worker.',
-          task.agentId,
+        const attempt = this.store.attempts().find((a) => a.id === task.attemptId);
+        if (attempt?.status === 'running')
+          this.store.putAttempt({
+            ...attempt,
+            status: 'uncertain',
+            error: 'Worker lease expired. Work or usage may already have happened.',
+          });
+        this.fail(
+          task,
+          'The worker lease expired. Review uncertain usage before retrying; work will not be repeated automatically.',
         );
         expired = true;
       }
     if (expired) this.commit();
     for (const task of this.state.tasks) {
-      if (this.active.size >= 4) break;
+      if (
+        this.state.tasks.filter((t) => t.status === 'working').length >=
+        policy(this.store).maxConcurrent
+      )
+        break;
       if (
         this.active.has(task.id) ||
         !this.runnable(task) ||
@@ -296,6 +422,15 @@ export class Engine extends EventEmitter {
         agent,
         context,
         controller.signal,
+        {
+          store: this.store,
+          project,
+          task,
+          onAttempt: (id) => {
+            task.attemptId = id;
+            this.commit();
+          },
+        },
       );
       if (!controller.signal.aborted) this.complete(task, output);
     } catch (error) {
@@ -365,6 +500,11 @@ export class Engine extends EventEmitter {
     }
   }
   claim(agentId?: string) {
+    if (
+      this.state.tasks.filter((t) => t.status === 'working').length >=
+      policy(this.store).maxConcurrent
+    )
+      return null;
     const task = this.state.tasks.find(
       (t) =>
         this.project(t.projectId).provider === 'external' &&
@@ -372,6 +512,16 @@ export class Engine extends EventEmitter {
         this.runnable(t),
     );
     if (!task) return null;
+    const attempt = reserve(
+      this.store,
+      this.project(task.projectId),
+      'external',
+      'task',
+      'unmanaged',
+      0,
+      task,
+    );
+    task.attemptId = attempt.id;
     task.leaseId = randomUUID();
     task.leaseExpiresAt = Date.now() + 120_000;
     this.begin(task);
@@ -379,9 +529,15 @@ export class Engine extends EventEmitter {
       task: structuredClone(task),
       agent: this.state.agents.find((a) => a.id === task.agentId),
       project: this.project(task.projectId),
-      context: this.state.tasks
-        .filter((t) => t.projectId === task.projectId && t.status === 'done')
-        .map((t) => ({ title: t.title, output: t.output })),
+      context: relevantContext(
+        task,
+        this.state.tasks.filter((t) => t.projectId === task.projectId && t.status === 'done'),
+      ),
+      memory: selectedMemory(this.store, task.projectId),
+      limits: {
+        maxOutputTokens: policy(this.store).maxOutputTokens,
+        maxInputBytes: policy(this.store).maxInputBytes,
+      },
     };
   }
   private leased(id: string, leaseId: string) {
@@ -402,9 +558,20 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   workerComplete(id: string, leaseId: string, output: string) {
-    this.complete(this.leased(id, leaseId), output);
+    const task = this.leased(id, leaseId);
+    const a = this.store.attempts().find((a) => a.id === task.attemptId);
+    if (a) this.store.putAttempt({ ...a, status: 'completed' });
+    this.complete(task, output);
   }
   workerFail(id: string, leaseId: string, message: string) {
-    this.fail(this.leased(id, leaseId), message);
+    const task = this.leased(id, leaseId),
+      a = this.store.attempts().find((a) => a.id === task.attemptId);
+    if (a)
+      this.store.putAttempt({
+        ...a,
+        status: 'uncertain',
+        error: 'The worker reported failure; external usage is not metered by Workroom.',
+      });
+    this.fail(task, message);
   }
 }

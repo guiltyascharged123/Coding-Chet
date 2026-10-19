@@ -7,10 +7,12 @@ import { z } from 'zod';
 import { Engine, AppError } from './engine.js';
 import { Store } from './store.js';
 import { allowedOrigin } from './origin.js';
+import { providerSchema } from '../shared/schemas.js';
+import { refreshManagedInfo } from './managed.js';
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '300kb' }));
+app.use(express.json({ limit: '25mb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
@@ -21,6 +23,7 @@ app.use((req, res, next) => {
   next();
 });
 const store = new Store(process.env.DATABASE_PATH || resolve('.data/workroom.sqlite'));
+await refreshManagedInfo();
 const engine = new Engine(store);
 const route =
   (handler: express.RequestHandler): express.RequestHandler =>
@@ -64,9 +67,15 @@ app.post(
         title: z.string().trim().min(2).max(80),
         brief: z.string().trim().min(20).max(6000),
         documentPack: z.enum(['studio', 'office']).default('office'),
+        planning: z.enum(['template', 'ai']).default('template'),
       })
       .parse(req.body);
-    const project = await engine.createProject(body.title, body.brief, body.documentPack);
+    const project = await engine.createProject(
+      body.title,
+      body.brief,
+      body.documentPack,
+      body.planning,
+    );
     res.status(201).json({ project });
   }),
 );
@@ -113,6 +122,7 @@ app.patch(
         role: z.string().trim().min(2).max(50),
         specialty: z.string().trim().min(5).max(600),
         desk: z.number().int().min(0).max(3),
+        goal: z.string().trim().max(1000).optional(),
       })
       .parse(req.body);
     engine.updateAgent(param(req, 'id'), body);
@@ -122,10 +132,68 @@ app.patch(
 app.post(
   '/api/runtime',
   route((req, res) => {
-    engine.setProvider(
-      z.object({ provider: z.enum(['demo', 'openai', 'gemini', 'external']) }).parse(req.body)
-        .provider,
-    );
+    engine.setProvider(z.object({ provider: providerSchema }).parse(req.body).provider);
+    res.json({ ok: true });
+  }),
+);
+
+app.get(
+  '/api/backup',
+  route((_req, res) => {
+    res.setHeader('Content-Disposition', 'attachment; filename="workroom-backup.json"');
+    res.json(store.backup());
+  }),
+);
+app.post(
+  '/api/restore',
+  route((req, res) => {
+    engine.restore(req.body);
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/policy',
+  route((req, res) => {
+    engine.updatePolicy(req.body);
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/attempts/:id/acknowledge',
+  route((req, res) => {
+    engine.acknowledge(param(req, 'id'));
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/projects/:id/runtime',
+  route((req, res) => {
+    engine.setProjectProvider(param(req, 'id'), providerSchema.parse(req.body.provider));
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/connections/check',
+  route(async (_req, res) => {
+    await refreshManagedInfo(true);
+    engine.commit();
+    res.json(engine.bootstrap());
+  }),
+);
+app.post(
+  '/api/projects/:id/memory',
+  route((req, res) => {
+    const b = z
+      .object({ content: z.string().trim().min(1).max(3000), sourceTaskId: z.string().optional() })
+      .parse(req.body);
+    engine.addMemory(param(req, 'id'), b.content, b.sourceTaskId);
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/memory/:id',
+  route((req, res) => {
+    engine.changeMemory(param(req, 'id'), z.enum(['verify', 'delete']).parse(req.body.action));
     res.json({ ok: true });
   }),
 );

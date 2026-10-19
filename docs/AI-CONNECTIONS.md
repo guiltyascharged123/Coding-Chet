@@ -1,117 +1,198 @@
 # Connecting real AI workers
 
-Workroom is the office interface and task coordinator. A runtime supplies the model
-or agent process behind each character. Walking, meetings, and handing over a folder
-are visual representations; the runtime exchanges the actual task context.
+Workroom schedules work; a runtime supplies the intelligence behind each character.
+Walking and meetings visualize activity. Assignments, documents, verified project
+memory, and review decisions carry the actual collaboration.
 
-## Choose a starting point
+| Connection        | What it uses                                            | Costs and setup                                                       |
+| ----------------- | ------------------------------------------------------- | --------------------------------------------------------------------- |
+| Demo              | Labeled local templates                                 | No model or credentials                                               |
+| Codex             | Codex CLI signed in with ChatGPT                        | Your account's Codex allowance; install CLI and sign in locally       |
+| Ollama            | An installed local model                                | Your hardware and electricity; no automatic downloads                 |
+| OpenAI-compatible | Chat Completions server, such as LM Studio or llama.cpp | Local hardware, or separate hosted billing                            |
+| OpenAI / Gemini   | Provider APIs                                           | API key, quota, explicit paid-request permission and price estimates  |
+| External worker   | Your independently running agent                        | Your worker's models, tools and billing; internal calls are unmetered |
 
-| Option           | What works today                                                                      | What you supply                                                               |
-| ---------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Demo             | Scripted planning, labeled document templates, human review, office movement          | Nothing; no model calls                                                       |
-| OpenAI           | AI-generated task plans and documents, role instructions, teammate context, revisions | An OpenAI API key, API billing, and access to your chosen compatible model    |
-| Gemini           | AI-generated task plans and documents, role instructions, teammate context, revisions | A Gemini API key and available model quota; billing depends on the tier/model |
-| External workers | Authenticated assignments, activity events, heartbeats, and saved outputs             | A running worker, shared runner token, model access, and any tools it needs   |
+One connection serves the team. Each task receives the character's role, specialty,
+bounded goal, assignment, brief, feedback, dependency outputs and verified memory.
+Separate models or subscriptions per character are unnecessary. Connections are
+chosen per project; per-character model routing is not implemented.
 
-**Recommended first step:** connect one provider to produce useful documents. One API
-key can support the whole team. Each assignment includes the character's name, role,
-specialty, the project brief, revision feedback, and completed teammate outputs.
-You do not need four paid subscriptions or four custom models.
+## Start locally
 
-The built-in OpenAI/Gemini adapters generate text. They do not edit files, execute
-commands, browse, run tests, or deploy. They use the same selected provider/model
-for every character. Per-character providers and models are not implemented.
+See [Ubuntu/Windows setup and migration](LOCAL-SETUP.md). Use Node.js 24 and
+`npm run local`. Copy `.env.example` to `.env`, edit locally, then restart after
+changing environment settings. Keep credentials out of Git and browser inputs.
 
-## Connect OpenAI or Gemini
+**Runtime settings** chooses the default for **new projects**. Existing projects
+retain their provider and exact model. To change one, pause it, open **Workspace
+controls → Limits & connections**, and explicitly set its project connection.
+Changing it preserves existing task plans and outputs. Changes to model settings
+in `.env` take effect for new projects, or when you explicitly reset a connection.
 
-1. In the project folder, copy `.env.example` to `.env` if you have not already.
-   Keep `.env` private; never paste keys into the browser or a Git commit.
-2. Put your key in that file: `OPENAI_API_KEY=...` or `GEMINI_API_KEY=...`.
-   Use a model your API account can access; change `OPENAI_MODEL` or `GEMINI_MODEL`
-   if necessary. The built-in adapters use OpenAI Chat Completions or Gemini
-   `generateContent`, so the selected model must support that API.
-3. Stop the server with **Ctrl+C**, then run `npm run demo` again. In Codespaces,
-   run `npm run codespace:restart` after adding the key.
-4. Open **Runtime settings**, select the provider, then create a **new project**.
-   Select **Office document pack** for business documents. That project's plan
-   will be generated by the selected model. An existing demo project retains its
-   original template plan when you change providers.
-5. Run the team, review its proposal, and inspect the documents. A configured key
-   is not proof of working billing, quota, or model access; the first request
-   verifies those and reports failures. Never assume generated costs or dates
-   are verified facts.
+New projects normally use a six-task starter plan and make **no model request**.
+Choose **Ask the selected model to plan** only when you want AI decomposition;
+planning consumes allowance/budget too. Select **Office document pack** for a brief,
+project plan, budget, risk register, meeting template and status report. Then
+**Run team**, review its proposal, and inspect/export the results.
 
-`npm run demo` starts in Demo mode on each restart, preserving its separate demo
-workspace. You must select your real provider again after restarting that launcher.
-For a workspace that retains the selected runtime, use `npm run build` and `npm start`
-with your `.env`; it uses a separate `.data/workroom.sqlite` database and port 3001.
-Do not set `AGENT_PROVIDER=demo` in `.env` if you want that selection retained.
+Input limits are measured in UTF-8 bytes, not exact model tokens. Respect your model
+server's context window too; raising the app's byte limit does not enlarge it.
 
-A ChatGPT or Gemini application subscription does not supply these API credentials.
-API quotas and billing are managed separately. Only project data and relevant
-outputs go to the selected model provider; keys remain on the server. Workroom
-currently has no spending cap or usage meter, so use provider-side budgets and quotas.
+## ChatGPT access through Codex
 
-Official setup: [OpenAI API quickstart](https://platform.openai.com/docs/quickstart),
-[OpenAI API pricing](https://openai.com/api/pricing/),
-[Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key),
-[Gemini billing](https://ai.google.dev/gemini-api/docs/billing).
+ChatGPT web access is not an API key. This adapter uses the official
+[Codex SDK](https://developers.openai.com/codex/sdk/) and bundled CLI (0.163.0) with ChatGPT sign-in.
+Your account must include Codex access; subscription limits still apply.
 
-## When to use custom agents
+1. On the computer running Workroom:
 
-Use external workers when a teammate needs to do something beyond writing a document:
-edit a repository, run commands/tests, read local business files, search approved
-sources, or call business tools. The bridge in `examples/external-worker.mjs` is
-an example process you can replace. Without a model key that example returns
-labeled sample text; a runner token alone does not make it intelligent.
+   ```bash
+   npx --no-install codex login
+   npx --no-install codex login status
+   ```
 
-Framework choices include:
+2. Choose **Sign in with ChatGPT**, not an API key. Use `npx --no-install codex` and its `/model`
+   picker to find an exact model ID available to your account, then exit it.
+3. In `.env`, replace the model value with that ID:
 
-| Framework or runtime                                                  | Good fit                                                         | Workroom integration                                            |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------- |
-| [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/)   | Role instructions, tools, handoffs, and tracing                  | Custom worker using the runner API                              |
-| [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) | Explicit state, recovery, long-running tool workflows            | Custom worker using the runner API                              |
-| [CrewAI](https://docs.crewai.com/)                                    | Role-oriented teams and delegated tasks                          | Custom worker; avoid duplicating Workroom's task scheduler      |
-| [Google ADK](https://google.github.io/adk-docs/)                      | Gemini-oriented agents and tool integrations                     | Custom worker using the runner API                              |
-| [Ollama](https://docs.ollama.com/) or another local model server      | Local inference, with hardware-dependent speed and model quality | Custom worker calling that server; no native Ollama adapter yet |
+   ```dotenv
+   WORKROOM_CODEX_ENABLED=1
+   WORKROOM_CODEX_MODEL=your-exact-model-id
+   ```
 
-These are integration options, not preinstalled, tested framework plugins. A worker
-can also call Anthropic or another provider; that requires its own API adapter.
+4. Restart Workroom, open Runtime settings, click **Check connections**, and select
+   **Codex · ChatGPT sign-in**. Create an office project, or explicitly change a
+   paused project's connection in Workspace controls.
 
-The protocol:
+The sign-in check requests no generation. The worker excludes API keys and custom
+`CODEX_HOME` from its environment, forces ChatGPT authentication, and never falls
+back to paid APIs. Sign in under the OS account running Workroom, using the CLI's
+standard credential location.
 
-1. Set a strong `RUNNER_TOKEN` on the Workroom server and worker.
-2. Select **External workers**, create/run a project, and start the worker separately.
-3. Claim an assignment; it includes the task, role, brief, context, and lease ID.
-4. Run your model/tool workflow. Send activity and a heartbeat at least every 30 seconds.
-5. Return the document/result through the completion endpoint, or report a failure.
-6. Workroom stores the output, applies human review, and releases dependent tasks.
+The document worker requests a temporary read-only directory, denies other
+filesystem access and tool network access in a named permissions profile, disables
+shell/patch features and configured MCP servers/hooks, and stops on tool events.
+Unsupported restrictions fail the assignment, with no unrestricted retry. This is
+a document adapter, not an autonomous coding worker. Authentication and model
+traffic to OpenAI still occur. Mocked tests verify the bridge contract, not native
+sandbox enforcement or your live account; check those on your own machine. Windows
+users can use WSL2 if their native Codex CLI setup fails.
 
-Set `AGENT_ID=mira`, `sol`, `atlas`, or `echo` to bind separate processes to separate
-characters. A worker without `AGENT_ID` can claim work for any character. In external
-mode the current planner uses a starter task plan; the workers do not automatically
-replace the planner. Agent names, roles, and specialties are editable in **Your team**.
+One job can include multiple internal model turns. The ledger records jobs and
+reported tokens, not remaining subscription allowance. The API/local output-token
+setting does not control Codex. Keep a single worker, low request limit and short
+assignments while learning your account's usage.
 
-See the [runner endpoint reference](../README.md#embody-independently-running-agents)
-for exact requests. Workers can run on this computer, a server, or a private container
-host. A remote worker needs an authenticated, reachable HTTPS endpoint. The default
-private Codespaces port may also require Codespaces authentication; a runner token
-does not bypass that platform authentication. Do not make the unauthenticated
-Workroom dashboard public just to connect a worker.
+## Ollama and other local servers
 
-## A practical route toward a full agent office
+Install [Ollama](https://ollama.com/download), start its service and install a model
+whose license and hardware needs suit you. `ollama list` shows exact installed tags.
 
-Start with a real provider and office documents, then connect one isolated worker
-with a narrowly scoped tool, such as editing a dedicated project directory and
-running its tests. Expand tools after the complete task/review/retry flow works.
-A framework is useful for tools and recovery; the 3D scene can stay independent of
-which framework runs the work.
+```dotenv
+OLLAMA_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=your-installed-model:tag
+```
 
-Before public or multi-user deployment, add dashboard authentication, worker
-isolation and permissions, provider budgets, durable distributed job ownership,
-and approval at the point of consequential tool actions. The existing human gate
-holds dependent Workroom tasks; it cannot undo a purchase or file change a worker
-already made. Workers must enforce permissions before their own side effects.
+Restart, check connections, select **Local model · Ollama**, and create a project.
+The check lists installed models without downloading/running one. Generation uses
+`/api/chat`, bounded output and an 8K context window. Oversized inputs stop visibly;
+adjust limits or reduce the assignment rather than assuming unlimited memory.
 
-Live provider calls and these framework integrations require your credentials and
-have not been verified by the credential-free automated tests.
+For LM Studio, llama.cpp or another OpenAI-compatible server:
+
+```dotenv
+COMPATIBLE_API_URL=http://127.0.0.1:1234/v1
+COMPATIBLE_MODEL=your-exact-model-id
+COMPATIBLE_BILLING=local
+```
+
+Start that server and load a model first. Workroom checks `/models` for the selected
+ID and uses `/chat/completions`. Add `COMPATIBLE_API_KEY` if required. Local billing
+mode accepts only loopback addresses; remote endpoints require HTTPS and default
+to paid-API controls. JSON planning and generation compatibility are confirmed by
+actual assignments, not just successful metadata checks. Other native protocols
+need an external worker; support for different models is not universal API support.
+
+On an i7-1185G7 with about 16 GB RAM and integrated Intel Xe, first evaluate a
+quantized 3–4B instruct model. A quantized 7–8B model may fit but will leave less
+headroom and run more slowly. Don't run multiple copies. Integrated graphics shares
+system memory. No weights are bundled; choose after quality, RAM and license review.
+
+## Paid APIs and spending controls
+
+Set `OPENAI_API_KEY` / `GEMINI_API_KEY` and a model your API account supports
+(`OPENAI_MODEL` / `GEMINI_MODEL`). OpenAI uses Chat Completions; Gemini uses
+`generateContent`. Consumer chat subscriptions do not supply these API credentials.
+
+Paid requests start **disabled**. In **Workspace controls → Limits & connections**,
+explicitly enable them and enter current USD prices per million input/output tokens
+for the exact project model. Enter zero only for a verified free quota/rate.
+
+Defaults: one active task globally, six tasks per project, one revision per task,
+30 requests per rolling 24 hours, 24,000 input bytes, 2,000 output tokens, estimated
+API budgets $2 per rolling day / $1 per project. These are editable. Large existing
+plans are preserved and blocked until you raise their task limit. Changing a limit
+does not cancel an already dispatched request.
+
+Before paid planning, execution or revisions, Workroom records a conservative
+reservation using input bytes plus a protocol allowance and the output limit at
+your supplied rates. Reported usage replaces it with a receipt estimate. Failures,
+timeouts and lost receipts retain the reservation. Review **Usage** and acknowledge
+uncertain attempts before retrying. Acknowledgment retains historical reservation
+and request count. Cancellation cannot undo usage already incurred.
+
+These are **application dispatch estimates, not provider billing guarantees**.
+Prices/token accounting can change; other apps and external worker calls are outside
+the cap. Use provider-side quotas too. Codex uses subscription allowance. Successful
+documents are cached within the same project using the complete prompt, provider,
+model and output limit. Revised context/instructions change the key. Restore clears
+the cache and disables paid requests. Full original outputs are preserved.
+
+**Check connections** queries model metadata without generation; that does not
+prove billing/quota. Provider error bodies and credential values are not displayed.
+Live calls require your account and are not performed by credential-free tests.
+Official references: [OpenAI pricing](https://openai.com/api/pricing/),
+[Gemini billing](https://ai.google.dev/gemini-api/docs/billing),
+[Codex authentication](https://developers.openai.com/codex/auth/).
+
+## Local memory and practical value
+
+Use **Workspace controls → Project memory** to propose a requirement, decision or
+constraint. Link a completed source document if applicable, check the evidence,
+then verify it. Only verified, current records for that project enter assignments.
+Changed/unapproved source documents make records stale and exclude them. You must
+keep human-supplied records current. Memory is evidence storage, not model training
+or a truth guarantee. There is no automatic memory extraction or unbounded
+self-starting agent loop; goal prompts guide the tasks you authorize.
+
+Normal tasks receive dependency documents; final status/handoff tasks receive
+completed project documents. A useful first benchmark: supply real constraints,
+produce six office documents, check assumptions/totals, and compare editing time
+with your usual process. Track accepted documents, unresolved claims, human editing
+time and usage. The documents and review process must earn their place in your work.
+
+## Custom agents and tools
+
+External workers preserve the authenticated lease protocol. OpenAI Agents SDK,
+LangGraph, CrewAI and Google ADK are frameworks you could implement in a worker;
+they are not bundled/tested plugins. Avoid a second scheduler conflicting with
+Workroom's queue. Workers may use other model APIs, local services or tools.
+
+Set a strong shared `RUNNER_TOKEN`, select External workers for a project, run the
+team, and start `npm run worker` separately. `AGENT_ID=mira`, `sol`, `atlas` or `echo`
+binds a process to one character. Assignments include task, role, project, relevant
+context, verified memory, advisory limits and lease ID. Heartbeat every 30 seconds.
+See the [endpoint reference](../README.md#embody-independently-running-agents).
+
+Expired leases stop for explicit review; they are not automatically rerun. Workers
+need their own idempotency, tool permissions, cost limits and approval before side
+effects. The included example returns labeled samples without a key; with its own
+OpenAI key it makes separately billed, unmetered calls. Prefer built-in controlled
+adapters for document work.
+
+This remains a trusted single-user app. Private Codespaces ports also require
+platform authentication for remote workers; runner tokens don't bypass it. Add
+dashboard authentication, worker isolation, distributed ownership and permissions
+before public/multi-user deployment. The human gate holds dependent tasks; it cannot
+undo a worker's earlier file changes or actions.

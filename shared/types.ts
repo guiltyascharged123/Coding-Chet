@@ -1,4 +1,5 @@
-export type Provider = 'demo' | 'openai' | 'gemini' | 'external';
+export type Provider =
+  'demo' | 'openai' | 'gemini' | 'external' | 'codex' | 'ollama' | 'compatible';
 export type ProjectStatus = 'ready' | 'running' | 'paused' | 'needs_input' | 'completed';
 export type TaskStatus = 'queued' | 'working' | 'review' | 'done' | 'failed';
 export type AgentStatus = 'idle' | 'working' | 'waiting';
@@ -18,6 +19,7 @@ export interface Agent {
   specialty: string;
   color: string;
   desk: number;
+  goal?: string;
 }
 export interface Task {
   id: string;
@@ -29,6 +31,8 @@ export interface Task {
   status: TaskStatus;
   requiresApproval: boolean;
   documentKind?: DocumentKind;
+  revisions?: number;
+  attemptId?: string;
   output: string;
   feedback: string;
   error?: string;
@@ -45,6 +49,51 @@ export interface Project {
   createdAt: number;
   provider: Provider;
   documentPack?: DocumentPack;
+  model?: string;
+  planning?: 'template' | 'ai';
+}
+export interface MemoryItem {
+  id: string;
+  projectId: string;
+  content: string;
+  status: 'proposed' | 'verified';
+  sourceTaskId?: string;
+  sourceHash?: string;
+  createdAt: number;
+  stale?: boolean;
+}
+export interface CostPolicy {
+  allowPaid: boolean;
+  maxConcurrent: number;
+  maxTasks: number;
+  maxRevisions: number;
+  maxRequests24h: number;
+  maxInputBytes: number;
+  maxOutputTokens: number;
+  dailyBudgetUsd: number;
+  projectBudgetUsd: number;
+  rates: Partial<
+    Record<
+      'openai' | 'gemini' | 'compatible',
+      { model: string; inputPerMillion: number; outputPerMillion: number }
+    >
+  >;
+}
+export interface Attempt {
+  id: string;
+  projectId: string;
+  taskId?: string;
+  provider: Provider;
+  model?: string;
+  billing?: 'api' | 'subscription' | 'local' | 'external' | 'none';
+  phase: 'plan' | 'task';
+  status: 'running' | 'completed' | 'uncertain' | 'cached' | 'acknowledged';
+  createdAt: number;
+  reservedUsd: number;
+  actualUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  error?: string;
 }
 export interface Activity {
   id: string;
@@ -71,20 +120,28 @@ export interface WorkspaceState {
   activities: Activity[];
   approvals: Approval[];
   provider: Provider;
+  schemaVersion?: number;
+  policy?: CostPolicy;
+  memory?: MemoryItem[];
 }
 export interface RuntimeInfo {
   available: Record<Provider, boolean>;
-  models: { openai: string; gemini: string };
+  models: { openai: string; gemini: string; codex: string; ollama: string; compatible: string };
+  diagnostics?: Record<string, string>;
 }
 export interface Bootstrap {
   state: WorkspaceState;
   runtime: RuntimeInfo;
+  attempts?: Attempt[];
 }
 export const PROVIDER_LABELS: Record<Provider, string> = {
   demo: 'Demo runtime',
   openai: 'OpenAI',
   gemini: 'Gemini',
   external: 'External workers',
+  codex: 'Codex · ChatGPT sign-in',
+  ollama: 'Local model · Ollama',
+  compatible: 'OpenAI-compatible model',
 };
 export const STATUS_LABELS: Record<ProjectStatus, string> = {
   ready: 'Ready to run',

@@ -4311,3 +4311,129 @@ select:focus {
   pointer-events: none;
   overflow: hidden;
 }
+.sidebar {
+  overflow-y: auto;
+}
+.controls-panel {
+  padding: 24px;
+  font-size: 16px;
+}
+.controls-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+}
+.controls-tabs button {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #3a4a57;
+}
+.controls-tabs button[aria-selected='true'] {
+  background: #c09a60;
+  color: #202e39;
+}
+.control-section {
+  display: grid;
+  gap: 16px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line);
+}
+.control-section h3 {
+  font-size: 21px;
+}
+.control-section h4 {
+  font-size: 18px;
+}
+.control-section p,
+.runtime-check p {
+  color: #c1cdd6;
+  line-height: 1.65;
+}
+.control-section label {
+  display: grid;
+  gap: 8px;
+}
+.control-section input,
+.control-section select,
+.control-section textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #687c8b;
+  border-radius: 6px;
+}
+.control-section label.check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.control-section .check-row input {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+}
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.control-row select {
+  flex: 1;
+  min-width: 180px;
+}
+.price-row {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 15px;
+}
+.usage-list {
+  display: grid;
+  gap: 12px;
+}
+.usage-list article {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 9px;
+}
+.usage-list span {
+  color: #b8c6d0;
+  font-size: 14px;
+}
+.control-message {
+  padding: 16px;
+  background: #3b514f;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+.runtime-check {
+  padding: 20px 24px 0;
+  display: grid;
+  gap: 12px;
+}
+@media (max-width: 560px) {
+  .controls-panel {
+    padding: 18px;
+  }
+  .controls-grid {
+    grid-template-columns: 1fr;
+  }
+  .controls-tabs button {
+    font-size: 14px;
+    padding: 8px;
+  }
+  .runtime-check {
+    padding-inline: 18px;
+  }
+}

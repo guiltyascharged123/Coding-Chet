@@ -13,6 +13,11 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
     AGENT_PROVIDER: 'demo',
     DEMO_STEP_MS: '2000',
     RUNNER_TOKEN: 'browser-test-token-not-a-real-secret',
+    OPENAI_API_KEY: '',
+    GEMINI_API_KEY: '',
+    WORKROOM_CODEX_ENABLED: '',
+    OLLAMA_MODEL: '',
+    COMPATIBLE_API_URL: '',
   },
 });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill('SIGTERM'));

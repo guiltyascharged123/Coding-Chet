@@ -40,6 +40,8 @@ test('task dependencies, human revision, approval, and final handoff work end to
     assert.match(tasks[1].output, /Use a bolder accent/);
     const nextReview = engine.state.approvals.find((a) => a.status === 'pending')!;
     assert.notEqual(firstReview.id, nextReview.id);
+    assert.throws(() => engine.review(nextReview.id, 'revise', 'Try once more.'), /revision limit/);
+    assert.equal(nextReview.status, 'pending');
     engine.review(nextReview.id, 'approve', 'This direction works.');
     assert.throws(() => engine.review(nextReview.id, 'approve', ''), /already been resolved/);
     await until(engine, () => project.status === 'completed');
@@ -95,13 +97,14 @@ test('an agent is not scheduled for two simultaneous projects', async () => {
   }
 });
 
-test('external leases reject stale completion, recover expired work, and support retry', () => {
+test('external leases stop uncertain work and require acknowledgment before retry', () => {
   const previous = process.env.RUNNER_TOKEN;
   process.env.RUNNER_TOKEN = 'test-runner-token-not-a-real-secret';
   const store = new Store(':memory:');
   const engine = new Engine(store);
   try {
     engine.setProvider('external');
+    engine.setProjectProvider(engine.state.projects[0].id, 'external');
     engine.runProject(engine.state.projects[0].id);
     const assignment = engine.claim('mira')!;
     assert.ok(assignment.task.leaseId);
@@ -111,11 +114,20 @@ test('external leases reject stale completion, recover expired work, and support
     );
     engine.state.tasks[0].leaseExpiresAt = Date.now() - 10;
     engine.tick();
+    assert.equal(engine.claim('mira'), null);
+    assert.equal(engine.state.tasks[0].status, 'failed');
+    assert.throws(() => engine.retryTask(assignment.task.id), /Acknowledge/);
+    engine.acknowledge(engine.store.attempts().find((a) => a.taskId === assignment.task.id)!.id);
+    engine.retryTask(assignment.task.id);
     const second = engine.claim('mira')!;
     assert.notEqual(second.task.leaseId, assignment.task.leaseId);
     engine.workerEvent(second.task.id, second.task.leaseId!, 'Inspecting the shared context.');
     engine.workerFail(second.task.id, second.task.leaseId!, 'A temporary worker failure.');
     assert.equal(engine.state.projects[0].status, 'paused');
+    engine.acknowledge(
+      engine.store.attempts().find((a) => a.taskId === second.task.id && a.status === 'uncertain')!
+        .id,
+    );
     engine.retryTask(second.task.id);
     const third = engine.claim('mira')!;
     engine.workerComplete(third.task.id, third.task.leaseId!, '# A real external deliverable');

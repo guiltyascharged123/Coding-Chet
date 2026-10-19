@@ -1,0 +1,220 @@
+import { createHash, randomUUID } from 'node:crypto';
+import type { Attempt, CostPolicy, MemoryItem, Project, Provider, Task } from '../shared/types.js';
+import type { Store } from './store.js';
+import { defaultPolicy } from '../shared/schemas.js';
+
+export type GenerationContext = {
+  store?: Store;
+  project?: Project;
+  task?: Task;
+  phase?: 'plan' | 'task';
+  model?: string;
+  onAttempt?: (id: string) => void;
+};
+export type Generated = { text: string; inputTokens?: number; outputTokens?: number };
+export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+export function billingFor(provider: Provider): Attempt['billing'] {
+  return provider === 'codex'
+    ? 'subscription'
+    : provider === 'external'
+      ? 'external'
+      : provider === 'demo'
+        ? 'none'
+        : provider === 'ollama' ||
+            (provider === 'compatible' && process.env.COMPATIBLE_BILLING === 'local')
+          ? 'local'
+          : 'api';
+}
+export function memoryCurrent(item: MemoryItem, tasks: Task[]) {
+  if (!item.sourceTaskId) return true;
+  const source = tasks.find((t) => t.id === item.sourceTaskId && t.projectId === item.projectId);
+  return source?.status === 'done' && hash(source.output) === item.sourceHash;
+}
+export function selectedMemory(store: Store | undefined, projectId: string) {
+  return (store?.state.memory || [])
+    .filter(
+      (m) =>
+        m.projectId === projectId &&
+        m.status === 'verified' &&
+        memoryCurrent(m, store!.state.tasks),
+    )
+    .map((m) => ({
+      id: m.id,
+      content: m.content,
+      sourceTaskId: m.sourceTaskId || 'Human supplied',
+    }));
+}
+export function relevantContext(task: Task, context: Task[]) {
+  const final =
+    task.documentKind === 'status_report' || /handoff|bring it all together/i.test(task.title);
+  return context
+    .filter((t) => final || task.dependencies.includes(t.id))
+    .map((t) => ({ title: t.title, output: t.output }));
+}
+export function policy(store?: Store): CostPolicy {
+  return store?.state.policy || structuredClone(defaultPolicy);
+}
+export function reserve(
+  store: Store,
+  project: Project,
+  provider: Provider,
+  phase: 'plan' | 'task',
+  model: string,
+  inputBytes: number,
+  task?: Task,
+): Attempt {
+  const p = policy(store),
+    all = store.attempts(),
+    recent = all.filter((a) => a.status !== 'cached' && a.createdAt >= Date.now() - 86400000);
+  if (inputBytes > p.maxInputBytes)
+    throw new Error(
+      'Input exceeds the configured context limit. Increase it in Workspace controls or reduce the assignment. No request was sent.',
+    );
+  if (recent.length >= p.maxRequests24h)
+    throw new Error(
+      'The request limit for the last 24 hours has been reached. No request was sent.',
+    );
+  if (all.filter((a) => a.status === 'running').length >= p.maxConcurrent)
+    throw new Error('Another worker is active. Wait for it to finish.');
+  if (task && all.some((a) => a.taskId === task.id && a.status === 'uncertain'))
+    throw new Error(
+      'An earlier attempt is uncertain. Acknowledge it in Usage before retrying; it may already have consumed usage.',
+    );
+  let reservedUsd = 0;
+  if (
+    provider === 'openai' ||
+    provider === 'gemini' ||
+    (provider === 'compatible' && process.env.COMPATIBLE_BILLING !== 'local')
+  ) {
+    if (!p.allowPaid)
+      throw new Error(
+        'Paid APIs are disabled. Enable them explicitly in Workspace controls before running this project.',
+      );
+    const rate = p.rates[provider as 'openai' | 'gemini' | 'compatible'];
+    if (!rate || rate.model !== model)
+      throw new Error(
+        'Set a price estimate matching this project’s exact model in Workspace controls before using a paid API.',
+      );
+    // UTF-8 bytes plus protocol allowance deliberately overestimates text tokens.
+    // This is an application estimate, not an account-wide provider billing cap.
+    reservedUsd =
+      Math.ceil(
+        (inputBytes + 4096) * rate.inputPerMillion + p.maxOutputTokens * rate.outputPerMillion,
+      ) / 1e6;
+    const value = (a: Attempt) => a.actualUsd ?? a.reservedUsd;
+    const daily = recent.reduce((sum, a) => sum + value(a), 0),
+      projectCost = all
+        .filter((a) => a.projectId === project.id)
+        .reduce((sum, a) => sum + value(a), 0);
+    if (daily + reservedUsd > p.dailyBudgetUsd || projectCost + reservedUsd > p.projectBudgetUsd)
+      throw new Error(
+        'The next request would exceed the workspace or project budget estimate. No request was sent.',
+      );
+  }
+  const a: Attempt = {
+    id: randomUUID(),
+    projectId: project.id,
+    taskId: task?.id,
+    provider,
+    phase,
+    status: 'running',
+    createdAt: Date.now(),
+    reservedUsd,
+    model,
+    billing: billingFor(provider),
+  };
+  store.putAttempt(a);
+  return a;
+}
+export async function guarded(
+  provider: Provider,
+  system: string,
+  user: string,
+  ctx: GenerationContext,
+  generate: () => Promise<Generated>,
+): Promise<string> {
+  const { store, project, task } = ctx,
+    model = ctx.model || project?.model || '';
+  const key = hash(
+    JSON.stringify({
+      version: 2,
+      project: project?.id,
+      provider,
+      model,
+      system,
+      user,
+      maxOutput: policy(store).maxOutputTokens,
+    }),
+  );
+  const cached = store?.cached(key);
+  if (cached !== undefined && project) {
+    store!.putAttempt({
+      id: randomUUID(),
+      projectId: project.id,
+      taskId: task?.id,
+      provider,
+      phase: ctx.phase || 'task',
+      status: 'cached',
+      createdAt: Date.now(),
+      reservedUsd: 0,
+      model,
+      billing: billingFor(provider),
+    });
+    return cached;
+  }
+  const attempt =
+    store && project
+      ? reserve(
+          store,
+          project,
+          provider,
+          ctx.phase || 'task',
+          model,
+          Buffer.byteLength(system + user, 'utf8'),
+          task,
+        )
+      : undefined;
+  if (attempt) ctx.onAttempt?.(attempt.id);
+  // Keep the dispatch quote even if settings are edited while a request is running.
+  const rate =
+    billingFor(provider) === 'api'
+      ? structuredClone(policy(store).rates[provider as 'openai' | 'gemini' | 'compatible'])
+      : undefined;
+  try {
+    const result = await generate();
+    if (!result.text.trim()) throw new Error('The model returned no document.');
+    if (result.text.length > 200000)
+      throw new Error('The model response exceeds the document limit.');
+    if (attempt && store) {
+      const usageKnown =
+        Number.isFinite(result.inputTokens) &&
+        Number.isFinite(result.outputTokens) &&
+        result.inputTokens! >= 0 &&
+        result.outputTokens! >= 0;
+      const actual =
+        rate && usageKnown
+          ? (result.inputTokens! * rate.inputPerMillion +
+              result.outputTokens! * rate.outputPerMillion) /
+            1e6
+          : undefined;
+      store.putAttempt({
+        ...attempt,
+        status: 'completed',
+        actualUsd: actual,
+        inputTokens: usageKnown ? result.inputTokens : undefined,
+        outputTokens: usageKnown ? result.outputTokens : undefined,
+      });
+      store.cache(key, result.text);
+    }
+    return result.text;
+  } catch (error) {
+    if (attempt && store)
+      store.putAttempt({
+        ...attempt,
+        status: 'uncertain',
+        error:
+          'No confirmed completion receipt. Review before retrying; usage may have been consumed.',
+      });
+    throw error;
+  }
+}

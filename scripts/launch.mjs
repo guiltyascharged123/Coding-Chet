@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const root = fileURLToPath(new URL('../', import.meta.url));
 process.chdir(root);
 const prepareOnly = process.argv.includes('--prepare-only');
+const workspace = process.argv.includes('--workspace');
 const workspaceId = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 16);
 let server;
 
@@ -98,7 +99,7 @@ async function health(url) {
     return (
       result.ok &&
       result.service === 'workroom' &&
-      result.mode === 'demo' &&
+      result.mode === (workspace ? 'workspace' : 'demo') &&
       result.workspaceId === workspaceId
     );
   } catch {
@@ -127,14 +128,20 @@ try {
     writeFileSync(buildStamp, buildHash);
   } else console.log('2/3 · Browser app is ready.');
   if (prepareOnly) {
-    console.log('\nWorkroom is prepared. Run npm run demo to open it.\n');
+    console.log(
+      '\nWorkroom is prepared. Run npm run local for your saved workspace, or npm run demo for a test drive.\n',
+    );
     process.exit(0);
   }
   // Keep this test drive separate from the normal workspace and any paid runtime.
   if (existsSync('.env')) process.loadEnvFile('.env');
-  const port = Number(process.env.WORKROOM_DEMO_PORT || 3000);
+  const port = Number(
+    workspace ? process.env.PORT || 3001 : process.env.WORKROOM_DEMO_PORT || 3000,
+  );
   if (!Number.isInteger(port) || port < 1024 || port > 65535)
-    throw new Error('WORKROOM_DEMO_PORT must be a port number between 1024 and 65535.');
+    throw new Error(
+      'Set PORT (workspace) or WORKROOM_DEMO_PORT (demo) to a port between 1024 and 65535.',
+    );
   const localUrl = `http://127.0.0.1:${port}`;
   const forwardedUrl =
     process.env.CODESPACES === 'true' && process.env.CODESPACE_NAME
@@ -145,7 +152,7 @@ try {
     console.log(`\nWorkroom is already ready: ${displayUrl}\nClick Run team in the page.\n`);
     openBrowser(displayUrl);
   } else {
-    console.log('\n3/3 · Opening your demo studio…\n');
+    console.log(`\n3/3 · Opening your ${workspace ? 'saved workspace' : 'demo studio'}…\n`);
     server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
       cwd: root,
       stdio: 'inherit',
@@ -153,10 +160,12 @@ try {
         ...process.env,
         PORT: String(port),
         HOST: process.env.CODESPACES === 'true' ? '0.0.0.0' : '127.0.0.1',
-        AGENT_PROVIDER: 'demo',
-        WORKROOM_DEMO: '1',
+        ...(!workspace ? { AGENT_PROVIDER: 'demo' } : {}),
+        WORKROOM_DEMO: workspace ? '0' : '1',
         DATABASE_PATH: resolve(
-          process.env.WORKROOM_DEMO_DATABASE_PATH || join(root, '.data', 'demo.sqlite'),
+          workspace
+            ? process.env.DATABASE_PATH || join(root, '.data', 'workroom.sqlite')
+            : process.env.WORKROOM_DEMO_DATABASE_PATH || join(root, '.data', 'demo.sqlite'),
         ),
         ...(forwardedUrl ? { WORKROOM_ORIGIN: forwardedUrl } : {}),
       },
@@ -180,10 +189,10 @@ try {
     }
     if (!ready)
       throw new Error(
-        `Workroom could not start on port ${port}. Check the server message above. If another app uses that port, set WORKROOM_DEMO_PORT to a free port and try again.`,
+        `Workroom could not start on port ${port}. Check the server message above. If another app uses that port, set ${workspace ? 'PORT' : 'WORKROOM_DEMO_PORT'} to a free port and try again.`,
       );
     console.log(
-      `\nWORKROOM IS READY\n${displayUrl}\n\nClick Run team → wait for Review work → approve the draft.\nNo API key is needed. This demo makes no model calls.\nKeep this terminal open; press Ctrl+C to stop.\n`,
+      `\nWORKROOM IS READY\n${displayUrl}\n\nClick Run team → wait for Review work → approve the draft.\n${workspace ? 'Demo is available without keys. Select a real connection explicitly in Runtime settings.' : 'No API key is needed. Demo mode makes no model calls.'}\nKeep this terminal open; press Ctrl+C to stop.\n`,
     );
     openBrowser(displayUrl);
   }

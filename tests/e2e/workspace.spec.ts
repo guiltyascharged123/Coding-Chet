@@ -3,6 +3,47 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { unzipSync, strFromU8 } from 'fflate';
 
+test('workspace limits, verified memory, backup downloads and validated restore work in the browser', async ({
+  page,
+  request,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Workspace controls', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('Enable separately billed API requests')).not.toBeChecked();
+  await expect(dialog.getByLabel('Active tasks across the workspace')).toHaveValue('1');
+  await dialog.getByRole('button', { name: 'Save limits', exact: true }).click();
+  await expect(dialog.getByRole('status')).toContainText('limits saved');
+  await dialog.getByRole('tab', { name: 'Project memory', exact: true }).click();
+  await dialog.getByLabel('Memory content').fill('The office budget requires human approval.');
+  await dialog.getByRole('button', { name: 'Propose memory', exact: true }).click();
+  await expect(dialog).toContainText('Awaiting your verification');
+  await dialog.getByRole('button', { name: 'Verify memory', exact: true }).click();
+  await expect(dialog).toContainText('Verified by you');
+  await dialog.getByRole('tab', { name: 'Backup & restore', exact: true }).click();
+  const pending = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download workspace backup', exact: true }).click();
+  const file = await pending,
+    backup = JSON.parse(await readFile((await file.path())!, 'utf8'));
+  expect(backup.version).toBe(2);
+  expect(backup.state.memory[0].status).toBe('verified');
+  const invalid = structuredClone(backup);
+  invalid.state.agents[0].desk = invalid.state.agents[1].desk;
+  expect((await request.post('/api/restore', { data: invalid })).status()).toBe(400);
+  await dialog
+    .getByLabel('Workspace backup file')
+    .setInputFiles({
+      name: 'backup.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(backup)),
+    });
+  await dialog.getByLabel('I understand this replaces the current projects and documents.').check();
+  await dialog.getByRole('button', { name: 'Restore workspace backup', exact: true }).click();
+  await expect(dialog.getByRole('status')).toContainText('Workspace restored');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test('a project runs through revision, human approval, outputs, and persistent reload', async ({
   page,
 }) => {
