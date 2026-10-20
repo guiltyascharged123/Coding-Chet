@@ -1,5 +1,8 @@
 # Run your saved office on Ubuntu or Windows
 
+For a guided first project and ChatGPT/Codex sign-in, start with the
+[easy guide](EASY-GUIDE.md). This page covers installation and migration in more detail.
+
 The same browser app runs on both systems. Node.js runs the local server; SQLite
 saves work on disk. A Python/desktop rewrite is unnecessary. Internet is needed
 for installation and hosted models. After preparation, Demo/local inference runs

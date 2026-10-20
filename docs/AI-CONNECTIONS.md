@@ -1,5 +1,9 @@
 # Connecting real AI workers
 
+New to Workroom? Follow the [easy guide](EASY-GUIDE.md) for basic startup,
+ChatGPT/Codex sign-in, account safety, and your first project. This page is the
+reference for all supported connections.
+
 Workroom schedules work; a runtime supplies the intelligence behind each character.
 Walking and meetings visualize activity. Assignments, documents, verified project
 memory, and review decisions carry the actual collaboration.

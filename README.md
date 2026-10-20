@@ -6,6 +6,9 @@ An open-source browser workspace for collaborating AI agents. Give the team a
 brief, follow their handoffs in a 3D studio, review decisions, and download the
 deliverables. Built in Coding-Chet for office documents, planning, and project coordination.
 
+**Start here:** [Easy guide: run Workroom, connect ChatGPT/Codex, and understand account safety](docs/EASY-GUIDE.md).
+It covers the first project, everyday startup, costs, disconnecting, and common problems.
+
 ![The Workroom studio](docs/screenshots/workspace.png)
 
 ## Try it in your browser — no installation
