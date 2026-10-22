@@ -89,6 +89,28 @@ The **Server connected** indicator reports the browser's connection to Workroom.
 
 Old demo projects and six-document packs remain available with their original outputs. They are not imposed on new projects. Briefs lost by the old failed-planning bug were never saved and cannot be recovered by updating.
 
+### Team discussions, specialists and reasoning
+
+Open **Team discussions** to start a meeting with your own agenda. Each of the four specialists makes a public proposal or critique, then the chair writes a decision record with objections, evidence gaps, owners and next actions. Contributions appear as they finish and remain saved after reload. Upcoming tasks receive recent completed meeting decisions as context. These are requested public contributions, not a display of private model reasoning.
+
+For automatic meetings, open **Edit plan**, enable **Automatic team meetings**, set the number of completed tasks between meetings, and **Save plan**. They run at kickoff and progress milestones when more work is ready. The queue waits during a meeting. A completed or paused project does not hold recurring meetings. New projects created in the dashboard offer this setting enabled; older projects retain their configuration until you change it. External workers do not use this built-in meeting protocol.
+
+Each meeting adds **up to five model requests** (four contributions and a chair summary). Your existing request, concurrency and API budget controls apply. A failed meeting keeps completed contributions; review uncertain Usage, then **Retry remaining contributions**, or explicitly **Skip meeting**. Stop a running meeting from its discussion card or pause the team. Closing the page does not stop the server's work.
+
+Characters now travel for assignments, reviews, handoffs and saved meetings. They stay at their desks during focused work and idle time. The glass meeting room shows the current speaker and listeners; the transcript carries the actual collaboration. Pausing office movement affects animation only.
+
+**Edit plan → Codex reasoning effort** offers Economy (low), Balanced (medium, the new default), and Deep work (high). High can improve difficult work and use more allowance; choose an effort supported by your model. These settings do not change a non-Codex provider's reasoning configuration. Use **Your team → Edit role & desk → Specialist preset** for software engineering, architecture, project management, coordination, independent code review, testing, market research, commercial strategy, finance/risk, or product/UX. There are four active seats; presets supply role-specific goals and instructions, not separate trained models.
+
+For broad money-making goals, choose **Venture & opportunity validation**. The team compares distinct approaches, identifies a buyer/problem and distribution route, challenges AI substitutes and weak differentiation, checks estimated economics, and proposes a low-cost test with go/stop criteria. Supply your budget, skills/assets, available time and success measures in the brief or verified project memory. Market demand and income cannot be assumed or guaranteed by stronger prompts.
+
+**Allow Codex web research** enables built-in, read-only search for text tasks. Searches appear in task details; reports should cite direct URLs and dates and identify uncertainty. It starts off. Meetings use supplied context; they do not browse independently. Software command-network access is a separate setting. Other providers remain text-only. Live research depends on the Codex account/model; failures retain reports/usage and do not switch to a paid API.
+
+### Feedback and memory drafts
+
+Review feedback, retry direction, meeting agendas, task-plan edits and memory drafts are saved **as you type in this browser**. Closing dialogs, opening settings, and reloading preserve them. A failed submission keeps the draft; a confirmed successful submission clears it. If feedback hits the revision limit, **Open Workspace controls · keep feedback** leads to limits, and reopening Review restores the text. Plan drafts can be explicitly discarded to reload the server's saved plan.
+
+Drafts stay in this browser/origin and are not portable workspace backups. If browser storage is blocked or full, a warning appears when saving. A memory draft is not automatically a fact: **Propose memory**, check the evidence, then **Verify memory** before agents use it.
+
 ## 4. Connect your ChatGPT account through Codex
 
 Your ChatGPT account must include Codex access. Workroom uses the official Codex
@@ -188,7 +210,7 @@ small project while checking your account's usage. The paid-API checkbox is unde
 
 **Keep the dashboard private.** It has no dashboard login. `npm run local` binds
 to your computer; do not expose it through a public tunnel or public forwarded
-port. Text workflows disable tool execution. Software delivery allows file changes and commands in its managed folder, with read access to system tooling. Commands and dependency scripts can change or delete files inside that folder; keep copies of valuable work. Tool network is enabled only if you choose it in Edit plan. Keep credentials out of managed project folders.
+port. Text workflows disable file and command execution; opted-in Codex research permits read-only web search. Software delivery allows file changes and commands in its managed folder, with read access to system tooling. Commands and dependency scripts can change or delete files inside that folder; keep copies of valuable work. Tool network is enabled only if you choose it in Edit plan. Keep credentials out of managed project folders.
 
 The coding readiness check executes a tiny offline command, verifies a project write and denial of a sibling probe file, and makes no model call. Coding stays unavailable if it fails; there is no unrestricted fallback. That check is not a security audit or proof of model quality. It also does not verify generation access or remaining quota. For software delivery on Windows, use Ubuntu in WSL2 if native sandbox checks fail.
 

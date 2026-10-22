@@ -4659,3 +4659,152 @@ button.connection:hover {
     gap: 12px;
   }
 }
+
+.collaboration-panel {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #2c3944;
+  min-width: 0;
+  line-height: 1.65;
+}
+.collaboration-panel > p {
+  max-width: 1000px;
+  color: var(--muted);
+}
+.collaboration-panel > label {
+  display: grid;
+  gap: 10px;
+  font-weight: 600;
+}
+.collaboration-panel textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #718392;
+  border-radius: 8px;
+  font: inherit;
+  color: var(--ink);
+  background: #25333e;
+}
+.collaboration-panel > .button {
+  justify-self: start;
+}
+.collaboration-panel .section-header {
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.meeting-banner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #718b99;
+  background: #334b58;
+  border-radius: 12px;
+  color: var(--ink);
+  padding: 18px 22px;
+  margin: 18px 0;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.6;
+}
+.meeting-banner > span:first-of-type {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+}
+.meeting-banner > span:last-child {
+  font-size: 14px;
+}
+.meeting-record {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid #627584;
+  border-radius: 12px;
+  background: #303f4a;
+  display: grid;
+  gap: 20px;
+  overflow-wrap: anywhere;
+}
+.meeting-record > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.meeting-record h3 {
+  font-size: 19px;
+  line-height: 1.55;
+  margin: 8px 0;
+}
+.meeting-record header span {
+  color: #bfcdd7;
+  font-size: 14px;
+}
+.meeting-contribution {
+  border-left: 3px solid #6c8595;
+  padding: 16px 18px;
+  background: #293843;
+  border-radius: 0 8px 8px 0;
+  min-width: 0;
+}
+.meeting-contribution h4 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  font-size: 17px;
+  flex-wrap: wrap;
+}
+.meeting-contribution h4 > span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.meeting-decision {
+  padding: 20px;
+  background: #344e52;
+  border: 1px solid #6f9793;
+  border-radius: 8px;
+  min-width: 0;
+}
+@media (max-width: 650px) {
+  .collaboration-panel {
+    padding: 14px;
+  }
+  .meeting-record,
+  .meeting-decision {
+    padding: 14px;
+  }
+  .meeting-record > header,
+  .meeting-banner {
+    flex-wrap: wrap;
+  }
+  .meeting-banner > span:last-child {
+    width: 100%;
+  }
+}
+.meeting-agenda-editor {
+  min-width: 0;
+  border: 1px solid var(--line);
+  padding: 14px;
+  border-radius: 8px;
+}
+.meeting-agenda-editor summary {
+  cursor: pointer;
+  color: #d1dce4;
+  font-weight: 600;
+}
+.meeting-agenda-editor label {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+  font-weight: 600;
+}
+.meeting-agenda-editor p {
+  margin: 14px 0;
+}

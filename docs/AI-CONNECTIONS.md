@@ -34,7 +34,7 @@ controls → Limits & connections**, and explicitly set its project connection.
 Changing it preserves existing task plans and outputs. Changes to model settings
 in `.env` take effect for new projects, or when you explicitly reset a connection.
 
-New projects use an editable workflow template and make **no model request**. Choose office coordination, software delivery, research/decision support, or a custom plan. Each project stores its own four-role team, so editing one team's roles does not change other projects. Add/remove tasks and change assignments, dependencies, approval gates and instructions through **Edit plan**. A 30-task default ceiling is configurable; six is not a workflow constraint.
+New projects use an editable workflow template and make **no model request**. Choose office coordination, software delivery, research/decision support, venture validation, or a custom plan. Each project stores its own four-role team, so editing one team's roles does not change other projects. Add/remove tasks and change assignments, dependencies, approval gates and instructions through **Edit plan**. A 30-task default ceiling is configurable; six is not a workflow constraint.
 
 AI planning is optional and uses allowance/budget. The project and brief are saved before dispatch; the saved project reports planning state and offers retry or an explicit template fallback. Duplicate submissions reuse a project ID. Uncertain planning receipts require acknowledgment before retry. Invalid model plans are not replayed from the text cache. Stopped/restarted planning becomes a visible failed plan without losing the brief.
 
@@ -74,7 +74,7 @@ standard credential location.
 
 The document worker requests a temporary read-only directory, denies other
 filesystem access and tool network access in a named permissions profile, disables
-shell/patch features and configured MCP servers/hooks, and stops on tool events.
+shell/patch features and configured MCP servers/hooks, and stops on unsupported tool events. Explicitly enabled Codex research permits built-in web search for text tasks; file/command/MCP tools remain blocked.
 Its supported `never` approval policy prevents approval escalation while retaining
 the named permissions profile. Local AGENTS.md and skill instructions are not
 loaded: the worker receives its document context explicitly from Workroom.
@@ -112,13 +112,13 @@ remain in place; there is no unrestricted or paid-API fallback.
 | `CODEX_AUTH`                                           | Sign in through `npx --no-install codex login`, restart, and check connections.                                                                                        |
 | `CODEX_MODEL`                                          | Choose an exact model ID offered by your ChatGPT Codex account. Update `.env`, restart, then explicitly reset the existing project's connection in Workspace controls. |
 | `CODEX_QUOTA`                                          | Check account allowance/rate limits and wait before retrying.                                                                                                          |
-| `CODEX_REASONING`                                      | The model rejected the worker's low reasoning setting; choose a model that supports it.                                                                                |
+| `CODEX_REASONING`                                      | Choose a supported reasoning effort in Edit plan or a model supporting that effort.                                                                                    |
 | `CODEX_CONFIG`                                         | Update/restart Workroom. If it persists, report the code and app/CLI versions.                                                                                         |
 | `CODEX_SANDBOX`                                        | Check local directory permissions and native sandbox support. Keep restrictions enabled.                                                                               |
 | `CODEX_NETWORK`                                        | Check network/proxy/certificate configuration.                                                                                                                         |
 | `CODEX_INSTALL`                                        | Run `npm run local` to prepare dependencies and check any custom CLI executable override.                                                                              |
 | `CODEX_TIMEOUT`, `CODEX_CANCELLED`, `CODEX_NO_RECEIPT` | Review Usage before explicitly retrying; allowance may already have been consumed.                                                                                     |
-| `CODEX_TOOL_BLOCKED`                                   | Text workflows disable tools. Use Software delivery for Codex file/command tools; MCP and web search remain disabled.                                                  |
+| `CODEX_TOOL_BLOCKED`                                   | Text tasks disable file/command tools. Explicit Codex research permits built-in web search. Software delivery enables scoped file/command tools; MCP remains disabled. |
 | `CODEX_UNKNOWN`                                        | Report the code, selected model ID, and whether failure was immediate or delayed.                                                                                      |
 
 Error messages never copy raw CLI response bodies, prompts, paths, or credentials.
@@ -244,3 +244,15 @@ undo a worker's earlier file changes or actions.
 Software folders are named with a readable title and a stable project-ID hash under `projects/` beside the database (normally `.data/projects/`). Roles share files; project titles may repeat without sharing folders. Files are retained on failures, retries, restarts and record restores. Outputs includes a source browser and a real ZIP download. Hidden files, symlinks, dependency folders and private-key extensions are omitted from browser exports. File previews are limited to 256 KB, ZIPs to 25 MB and 2,000 files. Use the local folder directly for larger projects.
 
 Portable JSON backups contain records, not source. Copy managed folders separately with workers stopped, or download source ZIPs. Record restores never revert file edits. Existing legacy projects, six-document packs, exports and external leases remain supported. Normal new workspaces start empty; the explicit demo launcher retains a sample fixture.
+
+## Saved team meetings and specialist quality
+
+Team discussions are persisted model conversations: four role-specific contributions, then a chair's proposed decisions, dissent, evidence gaps and owner-assigned next actions. Contributions are deliberate public summaries, not internal model reasoning. Later tasks receive excerpts of the latest two completed decision records alongside dependency outputs and verified memory. Full records remain in the dashboard and JSON backups. Meeting notes never override human-approved scope.
+
+Optional automatic kickoff and milestone meetings hold the task queue, use the existing project's frozen connection/model, and count as up to five `meeting` requests against policy. They run serially and do not repeat while idle, paused, awaiting approval or complete. Model turns inside a Codex request are not capped by the job count. A stopped/failed meeting retains completed speakers, marks interrupted usage uncertain, and resumes only the remaining speakers and chair after explicit retry. The user can skip it while retaining its record. Restarts/restores mark active meetings failed and never replay them automatically. Existing projects do not gain automatic calls until configured; new dashboard projects show the setting before creation. External workers retain their separate task protocol.
+
+Codex effort is now project-configurable (`low`, `medium`, `high`), with medium used when unspecified. Effort is included in text-cache keys. High is an allowance/latency tradeoff, not a guarantee of expertise. The specialist library supplies concrete goals and verification duties for ten professions on four active desks. Venture validation requires competing approaches, buyer pain, distribution, AI-substitution checks, explicit economics assumptions and a falsifiable test; missing customer evidence is not treated as validation.
+
+Read-only Codex web research is a separate opt-in for non-software project tasks. It enables the native web-search tool and saves query events in task details, with source URLs/dates requested in reports. Shell, patch and MCP tools remain disabled. Search-enabled tasks bypass the text cache to avoid silently replaying stale research. Meetings and AI planning still use supplied information without search; software tool network remains a separate permission. This bridge is tested with SDK event fixtures; real account/model search access and research quality require live evaluation locally.
+
+Feedback, retry direction, memory, plan and agenda drafts are written synchronously to browser localStorage on editing. They survive dialog closure, limit errors, settings navigation and reloads; confirmed saves clear them. Drafts are browser-local, not server facts or portable backup content. Memory remains explicitly proposed and verified. Blocked/full storage is reported.

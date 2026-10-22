@@ -46,20 +46,25 @@ import type {
   Provider,
   Task,
   TaskStatus,
+  Meeting,
 } from '../shared/types';
 import { PROVIDER_LABELS, STATUS_LABELS } from '../shared/types';
 import { api, download, getState, relativeTime } from './api';
 import Modal from './components/Modal';
 import Avatar from './components/Avatar';
 import DocumentActions from './components/DocumentActions';
+import { useSavedDraft } from './drafts';
+import { SPECIALISTS } from '../shared/specialists';
 import WorkspaceControls from './components/WorkspaceControls';
 import ProjectModal from './components/ProjectModal';
 import PlanEditor from './components/PlanEditor';
 import ProjectFiles from './components/ProjectFiles';
+import Collaboration from './components/Collaboration';
 
 const Office = lazy(() => import('./components/Office'));
-type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs';
+type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs' | 'discussions';
 const nav = [
+  { id: 'discussions' as View, label: 'Team discussions', icon: MessageCircle },
   { id: 'workspace' as View, label: 'Workspace', icon: LayoutDashboard },
   { id: 'team' as View, label: 'Your team', icon: Users },
   { id: 'tasks' as View, label: 'Task board', icon: ClipboardList },
@@ -91,10 +96,13 @@ export default function App() {
     null,
   );
   const [controlsTab, setControlsTab] = useState('limits');
-  const [retryFeedback, setRetryFeedback] = useState('');
   const [agentId, setAgentId] = useState<string>();
   const [taskId, setTaskId] = useState<string>();
   const [reviewId, setReviewId] = useState<string>();
+  const [retryFeedback, setRetryFeedback, clearRetryFeedback, retryDraftError] = useSavedDraft(
+    `workroom-retry-${taskId || 'none'}`,
+    '',
+  );
   const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -108,6 +116,8 @@ export default function App() {
   const rawState = data?.state;
   const project = rawState?.projects.find((p) => p.id === projectId) || rawState?.projects[0];
   const state = rawState ? { ...rawState, agents: project?.team || rawState.agents } : undefined;
+  const meetings = (state?.meetings || []).filter((m) => m.projectId === project?.id);
+  const currentMeeting = meetings.find((m) => m.status === 'gathering' || m.status === 'running');
   const tasks = state?.tasks.filter((t) => t.projectId === project?.id) || [];
   const activities = state?.activities.filter((a) => a.projectId === project?.id) || [];
   const pending = state?.approvals.filter((a) => a.status === 'pending') || [];
@@ -158,9 +168,6 @@ export default function App() {
         /* Project remains saved on the server. */
       }
   }, [project?.id]);
-  useEffect(() => {
-    setRetryFeedback('');
-  }, [taskId]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 5500);
@@ -378,7 +385,7 @@ export default function App() {
           </button>
           <div className="sidebar-footer">
             <span className={`status-dot ${connected ? '' : 'offline'}`} />
-            {connected ? 'All systems connected' : 'Reconnecting…'}
+            {connected ? 'Workroom server online' : 'Workroom server offline'}
             <span>v0.1</span>
           </div>
         </div>
@@ -467,24 +474,28 @@ export default function App() {
               <h1>
                 {view === 'workspace'
                   ? 'Good work starts with a little space.'
-                  : view === 'team'
-                    ? 'Different minds. One shared goal.'
-                    : view === 'tasks'
-                      ? 'Big ideas, manageable steps.'
-                      : view === 'outputs'
-                        ? 'A little less talk. A little more made.'
-                        : 'The conversation behind the work.'}
+                  : view === 'discussions'
+                    ? 'Better decisions through debate.'
+                    : view === 'team'
+                      ? 'Different minds. One shared goal.'
+                      : view === 'tasks'
+                        ? 'Big ideas, manageable steps.'
+                        : view === 'outputs'
+                          ? 'A little less talk. A little more made.'
+                          : 'The conversation behind the work.'}
               </h1>
               <p>
                 {view === 'workspace'
                   ? 'Your team is here. Give them a direction and watch ideas become progress.'
-                  : view === 'team'
-                    ? 'Give each teammate a role, a perspective, and a place in the studio.'
-                    : view === 'tasks'
-                      ? 'Every handoff has a purpose. Follow the work from brief to done.'
-                      : view === 'outputs'
-                        ? 'The documents, decisions, and handoffs your team has created.'
-                        : 'Live handoffs, working notes, and the decisions that move things forward.'}
+                  : view === 'discussions'
+                    ? 'Proposals, objections, evidence and next actions, saved with the project.'
+                    : view === 'team'
+                      ? 'Give each teammate a role, a perspective, and a place in the studio.'
+                      : view === 'tasks'
+                        ? 'Every handoff has a purpose. Follow the work from brief to done.'
+                        : view === 'outputs'
+                          ? 'The documents, decisions, and handoffs your team has created.'
+                          : 'Live handoffs, working notes, and the decisions that move things forward.'}
               </p>
             </div>
             <button className="button primary new-project" onClick={() => setModal('project')}>
@@ -667,6 +678,37 @@ export default function App() {
             </div>
           )}
 
+          {(currentMeeting || meetings.some((m) => m.status === 'failed')) && (
+            <button className="meeting-banner" onClick={() => setView('discussions')}>
+              <Users size={20} />
+              <span>
+                <strong>
+                  {currentMeeting
+                    ? currentMeeting.status === 'gathering'
+                      ? 'Team gathering in the meeting room'
+                      : 'Team discussion in progress'
+                    : 'A saved team meeting needs attention'}
+                </strong>
+                <span>
+                  {currentMeeting?.agenda ||
+                    'Read the saved contributions, review usage and retry or skip the meeting.'}
+                </span>
+              </span>
+              <span>Open discussion →</span>
+            </button>
+          )}
+          {view === 'discussions' && (
+            <Collaboration
+              key={project.id}
+              project={project}
+              meetings={meetings}
+              onUsage={() => {
+                setControlsTab('usage');
+                setModal('controls');
+              }}
+              onSettings={() => setModal('plan')}
+            />
+          )}
           {view === 'workspace' && (
             <>
               <div className="workspace-grid">
@@ -674,9 +716,16 @@ export default function App() {
                   <div className="section-header">
                     <div>
                       <span className="section-title">The studio</span>
-                      <span className="live-pill">
+                      <span
+                        className="live-pill"
+                        title="State comes from saved Workroom tasks and meetings."
+                      >
                         <i />
-                        LIVE
+                        {currentMeeting
+                          ? 'TEAM MEETING'
+                          : working
+                            ? `${working} WORKING`
+                            : 'OFFICE VIEW'}
                       </span>
                     </div>
                     <div className="view-toggle" aria-label="Camera view">
@@ -707,6 +756,7 @@ export default function App() {
                         agents={state.agents}
                         tasks={tasks}
                         activities={activities}
+                        meeting={currentMeeting}
                         mode={cameraMode}
                         zoom={zoom}
                         reset={resetCamera}
@@ -717,7 +767,11 @@ export default function App() {
                     <div className="scene-top">
                       <span className={`scene-status ${project.status}`}>
                         <i />
-                        {STATUS_LABELS[project.status]}
+                        {currentMeeting
+                          ? currentMeeting.status === 'gathering'
+                            ? 'Team gathering'
+                            : 'In a team meeting'
+                          : STATUS_LABELS[project.status]}
                       </span>
                       <span className="scene-agent-count">
                         <Users size={13} />
@@ -836,6 +890,7 @@ export default function App() {
                   <AgentCard
                     key={agent.id}
                     agent={agent}
+                    meeting={currentMeeting}
                     task={tasks.find(
                       (t) =>
                         t.agentId === agent.id && (t.status === 'working' || t.status === 'review'),
@@ -851,7 +906,9 @@ export default function App() {
                     ? 'Demo preview: no AI or tools run. Connect a model for real work.'
                     : project.workflow === 'software'
                       ? 'Each role uses Codex tools in the shared project folder. Task details show actual tool activity.'
-                      : 'Each role receives its assignment and relevant handoffs. This connection produces text; it does not execute code.'}
+                      : project.provider === 'codex' && project.researchEnabled
+                        ? 'Codex can search public sources for project tasks. Search queries and results appear in task details; meeting notes guide handoffs.'
+                        : 'Each role receives its assignment, recent meeting decisions and relevant handoffs. This connection produces text.'}
                 </span>
                 <button onClick={() => setModal('runtime')}>
                   {project.provider === 'demo' ? 'Connect a runtime' : 'Runtime settings'}
@@ -1284,20 +1341,24 @@ export default function App() {
                   Additional direction for retry
                   <textarea
                     key={selectedTask.id}
+                    value={retryFeedback}
                     maxLength={4000}
                     rows={3}
                     onChange={(e) => setRetryFeedback(e.target.value)}
                     placeholder="Clarify the assignment or explain what changed."
                   />
                 </label>
+                <p className="field-hint">
+                  {retryDraftError || 'Retry direction is saved in this browser.'}
+                </p>
                 <button
                   className="button secondary"
                   disabled={busy}
                   onClick={() =>
-                    act(
-                      () => api(`/tasks/${selectedTask.id}/retry`, { feedback: retryFeedback }),
-                      'The task is queued for another attempt.',
-                    )
+                    act(async () => {
+                      await api(`/tasks/${selectedTask.id}/retry`, { feedback: retryFeedback });
+                      clearRetryFeedback();
+                    }, 'The task is queued for another attempt.')
                   }
                 >
                   <RefreshCw size={15} />
@@ -1341,7 +1402,13 @@ export default function App() {
       )}
       {selectedReview && (
         <ReviewModal
+          key={selectedReview.id}
           approval={selectedReview}
+          onConfigure={() => {
+            setReviewId(undefined);
+            setControlsTab('limits');
+            setModal('controls');
+          }}
           task={state.tasks.find((t) => t.id === selectedReview.taskId)!}
           agent={state.agents.find(
             (a) => a.id === state.tasks.find((t) => t.id === selectedReview.taskId)?.agentId,
@@ -1400,7 +1467,17 @@ function ActivityItem({ activity, agents }: { activity: Activity; agents: Agent[
     </article>
   );
 }
-function AgentCard({ agent, task, onClick }: { agent: Agent; task?: Task; onClick: () => void }) {
+function AgentCard({
+  agent,
+  task,
+  meeting,
+  onClick,
+}: {
+  agent: Agent;
+  task?: Task;
+  meeting?: Meeting;
+  onClick: () => void;
+}) {
   return (
     <button className={`agent-card ${task?.status || ''}`} onClick={onClick}>
       <Avatar color={agent.color} size={45} />
@@ -1411,11 +1488,17 @@ function AgentCard({ agent, task, onClick }: { agent: Agent; task?: Task; onClic
         </div>
         <span className="agent-card-role">{agent.role}</span>
         <span className="agent-card-status">
-          {task?.status === 'working'
-            ? 'Making progress'
-            : task?.status === 'review'
-              ? 'Waiting for your review'
-              : 'Ready for what’s next'}
+          {meeting
+            ? meeting.status === 'gathering'
+              ? 'Joining the meeting'
+              : meeting.speakerId === agent.id
+                ? 'Contributing to the meeting'
+                : 'Listening to the team'
+            : task?.status === 'working'
+              ? 'Making progress'
+              : task?.status === 'review'
+                ? 'Waiting for your review'
+                : 'Ready for what’s next'}
         </span>
       </div>
       <ChevronRight size={14} />
@@ -1467,6 +1550,30 @@ function AgentModal({
             <span>Agent ID: {agent.id}</span>
           </div>
         </div>
+        <label>
+          Specialist preset
+          <select
+            aria-label="Specialist preset"
+            defaultValue=""
+            onChange={(e) => {
+              const preset = SPECIALISTS[Number(e.target.value)];
+              if (preset) {
+                setRole(preset.role);
+                setSpecialty(preset.specialty);
+                setGoal(preset.goal);
+              }
+            }}
+          >
+            <option value="" disabled>
+              Choose a specialist or keep custom instructions
+            </option>
+            {SPECIALISTS.map((p, i) => (
+              <option value={i} key={p.role}>
+                {p.role}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="form-row">
           <label>
             Name
@@ -1542,24 +1649,30 @@ function AgentModal({
 
 function ReviewModal({
   approval,
+  onConfigure,
   task,
   agent,
   onClose,
   onDone,
 }: {
   approval: Approval;
+  onConfigure: () => void;
   task: Task;
   agent: Agent;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback, clearFeedback, draftError] = useSavedDraft(
+    `workroom-review-${approval.id}`,
+    '',
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   async function decide(decision: 'approve' | 'revise') {
     setSaving(true);
     try {
       await api(`/approvals/${approval.id}`, { decision, feedback });
+      clearFeedback();
       onDone(
         decision === 'approve'
           ? 'Direction approved. The next handoff is underway.'
@@ -1598,9 +1711,16 @@ function ReviewModal({
             placeholder="What’s working? What would you like to change?"
           />
         </label>
+        <p className="field-hint" role="status">
+          {draftError ||
+            'Feedback draft saved in this browser. Closing or reloading keeps it until successfully submitted.'}
+        </p>
         {error && (
           <p className="form-error" role="alert">
             {error}
+            <button className="button secondary small" onClick={onConfigure}>
+              Open Workspace controls · keep feedback
+            </button>
           </p>
         )}
         <div className="modal-actions">
@@ -1635,7 +1755,7 @@ function RuntimeModal({
   const [checkMessage, setCheckMessage] = useState('');
   const descriptions: Record<Provider, string> = {
     codex:
-      'Uses your ChatGPT Codex sign-in. Software teams can edit files and run commands in their managed folder; other workflows generate text. Subscription allowance applies, with no API-key fallback.',
+      'Uses your ChatGPT Codex sign-in. Software teams can edit files and run commands in their managed folder; text projects can optionally use read-only web research. Subscription allowance applies, with no API-key fallback.',
     ollama:
       'A model running on your computer through Ollama. Uses local RAM and CPU/GPU. No automatic model download.',
     compatible:
@@ -1649,7 +1769,7 @@ function RuntimeModal({
   return (
     <Modal
       title="The minds behind the desks."
-      subtitle="The studio is the interface. Your runtime does the thinking."
+      subtitle="Model readiness and task capabilities."
       onClose={onClose}
     >
       <div className="runtime-check">

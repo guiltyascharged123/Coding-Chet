@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import type { Agent, Project, Task } from '../../shared/types';
+import type { Agent, Project, Task, ReasoningEffort } from '../../shared/types';
 import { api } from '../api';
 import Modal from './Modal';
+import { useSavedDraft } from '../drafts';
 
 export default function PlanEditor({
   project,
@@ -14,8 +15,24 @@ export default function PlanEditor({
   team: Agent[];
   onClose: () => void;
 }) {
-  const [rows, setRows] = useState(() => structuredClone(tasks));
-  const [network, setNetwork] = useState(!!project.toolNetwork);
+  const [draft, saveDraft, clearDraft, draftError] = useSavedDraft(
+    `workroom-plan-draft-${project.id}`,
+    {
+      rows: structuredClone(tasks),
+      network: !!project.toolNetwork,
+      effort: project.reasoningEffort || ('medium' as ReasoningEffort),
+      meetings: !!project.meetingPolicy?.enabled,
+      researchEnabled: !!project.researchEnabled,
+      cadence: project.meetingPolicy?.everyTasks || 3,
+    },
+  );
+  const { rows, network, effort, meetings, cadence } = draft;
+  const setRows = (update: Task[] | ((rows: Task[]) => Task[])) =>
+    saveDraft({ ...draft, rows: typeof update === 'function' ? update(rows) : update });
+  const setNetwork = (network: boolean) => saveDraft({ ...draft, network });
+  const setEffort = (effort: ReasoningEffort) => saveDraft({ ...draft, effort });
+  const setMeetings = (meetings: boolean) => saveDraft({ ...draft, meetings });
+  const setCadence = (cadence: number) => saveDraft({ ...draft, cadence });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   function change(id: string, values: Partial<Task>) {
@@ -25,7 +42,20 @@ export default function PlanEditor({
     setBusy(true);
     setError('');
     try {
-      await api(`/projects/${project.id}/plan`, { tasks: rows, toolNetwork: network }, 'PUT');
+      await api(
+        `/projects/${project.id}/plan`,
+        {
+          tasks: rows,
+          toolNetwork: network,
+          collaboration: {
+            researchEnabled: draft.researchEnabled,
+            reasoningEffort: effort,
+            meetingPolicy: { enabled: meetings, everyTasks: cadence },
+          },
+        },
+        'PUT',
+      );
+      clearDraft();
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -45,6 +75,58 @@ export default function PlanEditor({
           Tasks that have already completed or reached review retain their results. Add follow-up
           tasks to extend a project. Changes take effect when you save.
         </p>
+        <fieldset className="plan-row">
+          <legend>Collaboration & reasoning</legend>
+          <label>
+            Codex reasoning effort
+            <select
+              aria-label="Codex reasoning effort"
+              value={effort}
+              onChange={(e) => setEffort(e.target.value as ReasoningEffort)}
+            >
+              <option value="low">Economy · low</option>
+              <option value="medium">Balanced · medium</option>
+              <option value="high">Deep work · high</option>
+            </select>
+            <span className="field-hint">
+              Higher reasoning can improve difficult work and consume more allowance. This controls
+              Codex; other providers use their configured defaults.
+            </span>
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={draft.researchEnabled}
+              onChange={(e) => saveDraft({ ...draft, researchEnabled: e.target.checked })}
+            />
+            Allow Codex web research for text assignments (read-only searches with cited sources)
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              disabled={project.provider === 'external'}
+              checked={meetings}
+              onChange={(e) => setMeetings(e.target.checked)}
+            />
+            Automatic team meetings
+          </label>
+          <label>
+            Completed tasks between meetings
+            <input
+              aria-label="Completed tasks between meetings"
+              type="number"
+              min={1}
+              max={20}
+              value={cadence}
+              onChange={(e) => setCadence(Number(e.target.value))}
+            />
+          </label>
+          <p className="field-hint">
+            Kickoff, then progress checkpoints when more work is ready. Each meeting adds up to five
+            model requests. Existing limits apply; completed contributions survive retries. Settings
+            save with this plan.
+          </p>
+        </fieldset>
         {rows.map((t, i) => {
           const locked = !['queued', 'failed'].includes(t.status);
           return (
@@ -183,6 +265,12 @@ export default function PlanEditor({
             installed packages can make internet requests when enabled.
           </label>
         )}
+        <p className="field-hint" role="status">
+          {draftError || 'Plan edits saved as a browser draft until you save them to the project.'}
+        </p>
+        <button type="button" className="text-button" onClick={clearDraft}>
+          Discard local plan edits · reload saved plan
+        </button>
         {error && (
           <p className="form-error" role="alert">
             {error}
@@ -190,7 +278,7 @@ export default function PlanEditor({
         )}
         <div className="modal-actions">
           <button className="button secondary" disabled={busy} onClick={onClose}>
-            Cancel
+            Close · keep draft
           </button>
           <button className="button primary" disabled={busy} onClick={save}>
             {busy ? 'Saving…' : 'Save plan'}

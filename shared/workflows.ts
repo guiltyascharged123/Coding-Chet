@@ -109,13 +109,13 @@ export const WORKFLOWS: Record<
         owner: 0,
         approval: true,
         description:
-          'Define the question, decision criteria, constraints, known evidence and important unknowns. Propose a practical approach for user approval. Do not imply live web research is available.',
+          'Define the question, decision criteria, constraints, known evidence and important unknowns. Propose a practical approach for user approval. Identify the evidence needed and use only the tools enabled for this project. Do not claim research was performed when it was not.',
       },
       {
         title: 'Analyze and compare options',
         owner: 1,
         description:
-          'Use the supplied material to compare realistic options against the approved criteria. Cite supplied sources where possible. Mark missing evidence and assumptions; never invent citations or claim web browsing.',
+          'Use supplied material and, when Codex research is enabled, current cited web sources to compare realistic options against the approved criteria. Mark missing evidence and assumptions; never invent citations or claim research you did not perform.',
       },
       {
         title: 'Challenge the analysis',
@@ -128,6 +128,51 @@ export const WORKFLOWS: Record<
         owner: 3,
         description:
           'Summarize the recommendation, tradeoffs, confidence and evidence gaps. Give actionable next steps and only the user choices that remain necessary.',
+      },
+    ],
+  },
+  venture: {
+    label: 'Venture & opportunity validation',
+    description:
+      'Challenge business ideas, compare alternatives and test an actual advantage before building.',
+    roles: [
+      'Project manager',
+      'Commercial strategist',
+      'Market & customer researcher',
+      'Financial & risk analyst',
+    ],
+    goals: [
+      'Define measurable outcomes, constraints, milestones and human decisions; keep the team focused on evidence and viable execution.',
+      'Find a specific buyer problem, distribution advantage and business model that survives competition from ChatGPT and existing tools.',
+      'Challenge demand, differentiation, customer access and willingness-to-pay assumptions. Never invent market research or customers.',
+      'Check unit economics, acquisition and delivery costs, downside risk, and the cheapest experiment with clear go/stop criteria.',
+    ],
+    tasks: [
+      {
+        title: 'Approve constraints and opportunity criteria',
+        owner: 0,
+        approval: true,
+        description:
+          'Clarify available skills/assets, budget, time, geography, risk tolerance and the intended financial outcome. Do not invent missing constraints. Define what would count as a credible opportunity and a useful first validation. Ask the user only essential decisions.',
+      },
+      {
+        title: 'Compare differentiated opportunities',
+        owner: 1,
+        description:
+          'Compare at least three materially different approaches. For each identify a specific buyer, costly recurring problem, distribution route, competing alternatives including ChatGPT/Codex, and a reason the buyer would pay. Reject generic AI services without a credible advantage. Rank against the approved constraints and explicitly label evidence gaps.',
+      },
+      {
+        title: 'Challenge demand and competitive advantage',
+        owner: 2,
+        description:
+          'Independently critique the strongest options. Explain why customers might not pay, why existing tools may be sufficient, and whether distribution is realistic. Do not invent interviews, demand or citations. Improve the best candidate or reject all if none is defensible.',
+      },
+      {
+        title: 'Design the cheapest decision-making experiment',
+        owner: 3,
+        approval: true,
+        description:
+          'Estimate plausible unit economics with clearly marked assumptions and sensitivity to acquisition/delivery costs. Propose a small validation experiment, success and stop thresholds, spending ceiling, owner and next action. Ask approval for any external action. Do not claim revenue or validated demand.',
       },
     ],
   },

@@ -294,6 +294,100 @@ test('Codex failures expose actionable categories without raw responses, credent
   assert.equal(codexFailure(known), known);
 });
 
+test('Codex applies the selected reasoning effort and permits only opted-in web search in research mode', async () => {
+  const before = managedInfo.codexReady;
+  managedInfo.codexReady = true;
+  const tools: string[] = [];
+  const factory = (events: ThreadEvent[]): Pick<Codex, 'startThread'> => ({
+    startThread(options) {
+      assert.equal(options?.modelReasoningEffort, 'high');
+      assert.equal(options?.webSearchMode, 'live');
+      assert.equal(options?.approvalPolicy, 'never');
+      return {
+        async runStreamed(prompt: string) {
+          assert.match(prompt, /Cite direct source URLs/);
+          return {
+            events: (async function* () {
+              for (const event of events) yield event;
+            })(),
+          };
+        },
+      } as ReturnType<Codex['startThread']>;
+    },
+  });
+  const search: ThreadEvent = {
+    type: 'item.completed',
+    item: {
+      id: 'search',
+      type: 'web_search',
+      query: 'specific buyer alternatives current pricing',
+    },
+  };
+  const message: ThreadEvent = {
+    type: 'item.completed',
+    item: {
+      id: 'answer',
+      type: 'agent_message',
+      text: '# Evidence\n\nExample source: https://example.org/research — identify dates and limitations.',
+    },
+  };
+  const receipt: ThreadEvent = {
+    type: 'turn.completed',
+    usage: {
+      input_tokens: 30,
+      output_tokens: 20,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      reasoning_output_tokens: 0,
+    },
+  };
+  try {
+    const result = await codexGenerate(
+      'Research the evidence',
+      'Compare buyer alternatives',
+      'gpt-6.1-sol',
+      undefined,
+      false,
+      () => factory([search, message, receipt]),
+      'high',
+      { enabled: true, onTool: (e) => tools.push(e.detail) },
+    );
+    assert.equal(
+      result.text,
+      message.type === 'item.completed' && message.item.type === 'agent_message'
+        ? message.item.text
+        : '',
+    );
+    assert.deepEqual(tools, ['specific buyer alternatives current pricing']);
+    const command: ThreadEvent = {
+      type: 'item.started',
+      item: {
+        id: 'cmd',
+        type: 'command_execution',
+        command: 'touch outside.txt',
+        aggregated_output: '',
+        status: 'in_progress',
+      },
+    };
+    await assert.rejects(
+      () =>
+        codexGenerate(
+          'Research',
+          'Assignment',
+          'gpt-6.1-sol',
+          undefined,
+          false,
+          () => factory([command]),
+          'high',
+          { enabled: true },
+        ),
+      /CODEX_TOOL_BLOCKED/,
+    );
+  } finally {
+    managedInfo.codexReady = before;
+  }
+});
+
 test('service URLs restrict local billing to loopback and reject insecure remote credentials', () => {
   assert.equal(serviceUrl('http://127.0.0.1:11434', true).protocol, 'http:');
   assert.equal(serviceUrl('https://model.example/v1').pathname, '/v1');

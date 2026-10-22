@@ -10,15 +10,17 @@ import type {
   Provider,
   Task,
   Workflow,
+  Meeting,
+  ReasoningEffort,
 } from '../shared/types.js';
 import { Store } from './store.js';
-import { planProject, runTask, runtimeInfo } from './providers.js';
+import { planProject, runTask, runtimeInfo, meetingTurn } from './providers.js';
 import { templatePlan } from './plans.js';
 import { projectTeam } from '../shared/workflows.js';
 import { stateSchema } from '../shared/schemas.js';
 import { projectWorkspace, workspaceFolder } from './workspaces.js';
 import { hash, memoryCurrent, policy, reserve, selectedMemory, relevantContext } from './policy.js';
-import { policySchema } from '../shared/schemas.js';
+import { collaborationSchema, policySchema } from '../shared/schemas.js';
 import type { CostPolicy } from '../shared/types.js';
 
 export class AppError extends Error {
@@ -33,11 +35,14 @@ export class AppError extends Error {
 export class Engine extends EventEmitter {
   private active = new Map<string, AbortController>();
   private planners = new Map<string, AbortController>();
+  private conferences = new Map<string, AbortController>();
   private timer?: ReturnType<typeof setInterval>;
   constructor(
     public store: Store,
     private stepMs = Number(process.env.DEMO_STEP_MS || 8000),
     private worker: typeof runTask = runTask,
+    private discuss: typeof meetingTurn = meetingTurn,
+    private gatherMs = 6000,
   ) {
     super();
     const configured = process.env.AGENT_PROVIDER as Provider | undefined;
@@ -96,6 +101,7 @@ export class Engine extends EventEmitter {
   }
   stop() {
     clearInterval(this.timer);
+    for (const [id] of this.conferences) this.stopMeeting(id);
     for (const id of [...this.planners.keys()]) this.pauseProject(id);
     for (const controller of this.active.values()) controller.abort();
   }
@@ -116,6 +122,11 @@ export class Engine extends EventEmitter {
     planning: 'template' | 'ai' = 'template',
     requestId?: string,
     workflow?: Workflow,
+    collaboration?: {
+      researchEnabled?: boolean;
+      reasoningEffort: ReasoningEffort;
+      meetingPolicy: { enabled: boolean; everyTasks: number };
+    },
   ) {
     const existing = requestId && this.state.projects.find((p) => p.id === requestId);
     if (existing) {
@@ -142,6 +153,9 @@ export class Engine extends EventEmitter {
       documentPack,
       planning,
       workflow,
+      reasoningEffort: collaboration?.reasoningEffort || 'medium',
+      meetingPolicy: collaboration?.meetingPolicy,
+      researchEnabled: !!collaboration?.researchEnabled,
       team: workflow ? projectTeam(workflow, this.state.agents) : undefined,
       model:
         this.state.provider === 'demo' || this.state.provider === 'external'
@@ -222,9 +236,10 @@ export class Engine extends EventEmitter {
     project.planning = 'template';
     this.finishPlan(project, templatePlan(project, project.team || this.state.agents));
   }
-  editPlan(id: string, rows: Task[], toolNetwork?: boolean) {
+  editPlan(id: string, rows: Task[], toolNetwork?: boolean, collaboration?: unknown) {
     const project = this.project(id);
     if (
+      this.conferences.size ||
       this.planners.has(id) ||
       project.status === 'running' ||
       this.active.size ||
@@ -280,7 +295,10 @@ export class Engine extends EventEmitter {
       ...this.state,
       tasks: [...this.state.tasks.filter((t) => t.projectId !== id), ...merged],
     });
+    const settings =
+      collaboration === undefined ? undefined : collaborationSchema.parse(collaboration);
     this.state.tasks = next.tasks;
+    if (settings) Object.assign(project, settings);
     if (project.workflow === 'software' && toolNetwork !== undefined)
       project.toolNetwork = toolNetwork;
     project.planningStatus = 'ready';
@@ -299,6 +317,7 @@ export class Engine extends EventEmitter {
         'This runtime is not configured. Configure it on the server, restart, and check connections.',
       );
     if (
+      this.conferences.size ||
       this.planners.size ||
       this.active.size ||
       this.state.projects.some((p) => p.status === 'running')
@@ -312,6 +331,7 @@ export class Engine extends EventEmitter {
   setProjectProvider(id: string, provider: Provider) {
     const p = this.project(id);
     if (
+      this.conferences.size ||
       this.planners.has(id) ||
       p.status === 'running' ||
       this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
@@ -342,6 +362,7 @@ export class Engine extends EventEmitter {
   }
   restore(value: unknown) {
     if (
+      this.conferences.size ||
       this.planners.size ||
       this.active.size ||
       this.state.tasks.some((t) => t.status === 'working')
@@ -388,7 +409,12 @@ export class Engine extends EventEmitter {
     const team = projectId
       ? (this.project(projectId).team ||= structuredClone(this.state.agents))
       : this.state.agents;
-    if (projectId && (this.project(projectId).status === 'running' || this.planners.has(projectId)))
+    if (
+      projectId &&
+      (this.project(projectId).status === 'running' ||
+        this.planners.has(projectId) ||
+        this.conferences.size)
+    )
       throw new AppError('Pause the project before editing its team.');
     const agent = team.find((a) => a.id === id);
     if (!agent) throw new AppError('Agent not found.', 404);
@@ -399,6 +425,10 @@ export class Engine extends EventEmitter {
   }
   runProject(id: string) {
     const project = this.project(id);
+    if ((this.state.meetings || []).some((m) => m.projectId === id && m.status === 'failed'))
+      throw new AppError(
+        'Retry or skip the failed meeting before continuing. Saved contributions are retained.',
+      );
     if (
       !this.state.tasks.some((t) => t.projectId === id) ||
       project.planningStatus === 'planning' ||
@@ -438,6 +468,9 @@ export class Engine extends EventEmitter {
   }
   pauseProject(id: string) {
     const project = this.project(id);
+    for (const meeting of this.state.meetings || [])
+      if (meeting.projectId === id && this.conferences.has(meeting.id))
+        this.stopMeeting(meeting.id);
     if (project.status === 'completed') throw new AppError('This project is already complete.');
     project.status = 'paused';
     const planner = this.planners.get(id);
@@ -477,6 +510,8 @@ export class Engine extends EventEmitter {
     if (this.store.attempts().some((a) => a.taskId === id && a.status === 'uncertain'))
       throw new AppError('Acknowledge uncertain usage in Workspace controls before retrying.');
     const target = this.project(task.projectId);
+    if ((this.state.meetings || []).some((m) => m.projectId === target.id && m.status === 'failed'))
+      throw new AppError('Retry or skip the failed meeting before retrying work.');
     if (
       target.workflow === 'software' &&
       (target.provider !== 'codex' ||
@@ -543,8 +578,231 @@ export class Engine extends EventEmitter {
     this.commit();
     this.tick();
   }
+  configureCollaboration(id: string, value: unknown) {
+    const project = this.project(id);
+    if (
+      project.status === 'running' ||
+      this.active.size ||
+      this.planners.size ||
+      this.conferences.size
+    )
+      throw new AppError('Pause active work before changing collaboration settings.');
+    Object.assign(project, collaborationSchema.parse(value));
+    this.commit();
+  }
+  meeting(id: string) {
+    const meeting = this.state.meetings?.find((m) => m.id === id);
+    if (!meeting) throw new AppError('Meeting not found.', 404);
+    return meeting;
+  }
+  startMeeting(projectId: string, agenda: string, trigger: Meeting['trigger'] = 'manual') {
+    const project = this.project(projectId);
+    if (
+      this.active.size ||
+      this.planners.size ||
+      this.conferences.size ||
+      this.state.tasks.some((t) => t.status === 'working')
+    )
+      throw new AppError(
+        'Wait for active work to finish, or pause it, before starting a team meeting.',
+      );
+    if (!runtimeInfo().available[project.provider] || project.provider === 'external')
+      throw new AppError(
+        'Team meetings require a configured direct model connection. External workers retain their task protocol.',
+      );
+    if ((this.state.meetings || []).some((m) => m.projectId === projectId && m.status === 'failed'))
+      throw new AppError('Retry or skip the saved failed meeting first.');
+    const meeting: Meeting = {
+      id: randomUUID(),
+      projectId,
+      agenda,
+      trigger,
+      status: 'gathering',
+      checkpoint: this.state.tasks.filter((t) => t.projectId === projectId && t.status === 'done')
+        .length,
+      participants: structuredClone(project.team || this.state.agents),
+      contributions: [],
+      summary: '',
+      createdAt: Date.now(),
+    };
+    (this.state.meetings ||= []).push(meeting);
+    this.launchMeeting(meeting);
+    return meeting;
+  }
+  retryMeeting(id: string) {
+    const meeting = this.meeting(id);
+    if (meeting.status !== 'failed') throw new AppError('Only failed meetings can be retried.');
+    if (
+      this.active.size ||
+      this.planners.size ||
+      this.conferences.size ||
+      this.state.tasks.some((t) => t.status === 'working')
+    )
+      throw new AppError('Pause active work before retrying a meeting.');
+    if (this.store.attempts().some((a) => a.meetingId === id && a.status === 'uncertain'))
+      throw new AppError(
+        'Acknowledge uncertain meeting usage in Workspace controls before retrying. Completed contributions will not be repeated.',
+      );
+    this.launchMeeting(meeting);
+  }
+  skipMeeting(id: string) {
+    const meeting = this.meeting(id);
+    if (this.conferences.has(id)) throw new AppError('Stop the meeting before skipping it.');
+    if (meeting.status !== 'failed')
+      throw new AppError('Only a stopped or failed meeting can be skipped.');
+    meeting.status = 'cancelled';
+    delete meeting.speakerId;
+    this.event(
+      meeting.projectId,
+      'system',
+      'You skipped the meeting. Saved contributions and usage receipts were retained.',
+    );
+    this.commit();
+  }
+  stopMeeting(id: string) {
+    const meeting = this.meeting(id),
+      controller = this.conferences.get(id);
+    if (!controller) return;
+    controller.abort();
+    meeting.status = 'failed';
+    delete meeting.speakerId;
+    meeting.error =
+      'Meeting stopped. Contributions are saved; review uncertain Usage before retrying.';
+    const project = this.project(meeting.projectId);
+    if (project.status === 'running') project.status = 'paused';
+    for (const a of this.store.attempts())
+      if (a.meetingId === id && a.status === 'running')
+        this.store.putAttempt({ ...a, status: 'uncertain' });
+    this.commit();
+  }
+  private launchMeeting(meeting: Meeting) {
+    const project = this.project(meeting.projectId),
+      controller = new AbortController();
+    this.conferences.set(meeting.id, controller);
+    meeting.status = 'gathering';
+    delete meeting.error;
+    this.event(
+      project.id,
+      'system',
+      `Team gathering for ${meeting.trigger === 'kickoff' ? 'kickoff' : 'a project meeting'}: ${meeting.agenda}`,
+    );
+    this.commit();
+    void (async () => {
+      try {
+        await delay(this.gatherMs, undefined, { signal: controller.signal });
+        meeting.status = 'running';
+        this.commit();
+        for (const agent of meeting.participants) {
+          if (meeting.contributions.some((c) => c.agentId === agent.id)) continue;
+          meeting.speakerId = agent.id;
+          this.commit();
+          if (project.provider === 'demo')
+            await delay(Math.min(1500, this.stepMs / 2), undefined, { signal: controller.signal });
+          const content = await this.discuss(project, meeting, agent, false, {
+            store: this.store,
+            project,
+            signal: controller.signal,
+            onAttempt: () => this.commit(),
+          });
+          if (controller.signal.aborted) return;
+          meeting.contributions.push({
+            agentId: agent.id,
+            role: agent.role,
+            content: content.slice(0, 20000),
+            createdAt: Date.now(),
+          });
+          this.event(
+            project.id,
+            'message',
+            `${agent.name} shared a ${agent.role} contribution in the team discussion.`,
+            agent.id,
+          );
+          this.commit();
+        }
+        meeting.speakerId = meeting.participants[0].id;
+        this.commit();
+        const summary = await this.discuss(project, meeting, meeting.participants[0], true, {
+          store: this.store,
+          project,
+          signal: controller.signal,
+          onAttempt: () => this.commit(),
+        });
+        if (controller.signal.aborted) return;
+        meeting.summary = summary.slice(0, 20000);
+        meeting.status = 'completed';
+        meeting.completedAt = Date.now();
+        delete meeting.speakerId;
+        this.event(
+          project.id,
+          'system',
+          'Team meeting finished. Its decision record and open objections will guide subsequent assignments.',
+        );
+        this.commit();
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          meeting.status = 'failed';
+          meeting.error =
+            error instanceof Error ? error.message : 'Meeting failed; contributions are saved.';
+          delete meeting.speakerId;
+          if (project.status === 'running') project.status = 'paused';
+          this.event(project.id, 'error', meeting.error);
+          this.commit();
+        }
+      } finally {
+        this.conferences.delete(meeting.id);
+      }
+    })();
+  }
+  private scheduleMeetings() {
+    if (
+      this.active.size ||
+      this.planners.size ||
+      this.conferences.size ||
+      this.state.tasks.some((t) => t.status === 'working')
+    )
+      return;
+    for (const project of this.state.projects) {
+      if (
+        project.status !== 'running' ||
+        !project.meetingPolicy?.enabled ||
+        project.provider === 'external' ||
+        !runtimeInfo().available[project.provider]
+      )
+        continue;
+      const meetings = (this.state.meetings || []).filter((m) => m.projectId === project.id);
+      if (
+        meetings.some(
+          (m) => m.status === 'failed' || m.status === 'running' || m.status === 'gathering',
+        )
+      )
+        continue;
+      const tasks = this.state.tasks.filter((t) => t.projectId === project.id),
+        done = tasks.filter((t) => t.status === 'done').length;
+      if (
+        !tasks.some(
+          (t) =>
+            t.status === 'queued' && t.dependencies.every((id) => this.task(id).status === 'done'),
+        )
+      )
+        continue;
+      const last = meetings.at(-1);
+      if (last && done - last.checkpoint < project.meetingPolicy.everyTasks) continue;
+      this.startMeeting(
+        project.id,
+        last
+          ? 'Review actual progress, challenge the approach, resolve blockers and agree the next useful actions.'
+          : 'Compare approaches to the goal, challenge assumptions and weak ideas, and agree a concrete direction with open questions for the user.',
+        last ? 'checkpoint' : 'kickoff',
+      );
+      break;
+    }
+  }
   private runnable(task: Task) {
     return (
+      !this.conferences.size &&
+      !(this.state.meetings || []).some(
+        (m) => m.projectId === task.projectId && m.status === 'failed',
+      ) &&
       task.status === 'queued' &&
       !(
         this.project(task.projectId).workflow === 'software' &&
@@ -573,9 +831,12 @@ export class Engine extends EventEmitter {
         expired = true;
       }
     if (expired) this.commit();
+    this.scheduleMeetings();
     for (const task of this.state.tasks) {
       if (
-        this.planners.size + this.state.tasks.filter((t) => t.status === 'working').length >=
+        this.conferences.size +
+          this.planners.size +
+          this.state.tasks.filter((t) => t.status === 'working').length >=
         policy(this.store).maxConcurrent
       )
         break;
@@ -740,7 +1001,9 @@ export class Engine extends EventEmitter {
   }
   claim(agentId?: string) {
     if (
-      this.planners.size + this.state.tasks.filter((t) => t.status === 'working').length >=
+      this.conferences.size +
+        this.planners.size +
+        this.state.tasks.filter((t) => t.status === 'working').length >=
       policy(this.store).maxConcurrent
     )
       return null;

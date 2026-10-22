@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { Engine, AppError } from './engine.js';
 import { Store } from './store.js';
 import { allowedOrigin } from './origin.js';
-import { providerSchema } from '../shared/schemas.js';
+import { collaborationSchema, providerSchema } from '../shared/schemas.js';
 import { refreshManagedInfo } from './managed.js';
 import { projectWorkspace, workspaceFiles, workspaceFile, workspaceZip } from './workspaces.js';
 
@@ -70,7 +70,8 @@ app.post(
         documentPack: z.enum(['studio', 'office']).default('office'),
         planning: z.enum(['template', 'ai']).default('template'),
         requestId: z.string().uuid().optional(),
-        workflow: z.enum(['office', 'software', 'research', 'custom']).optional(),
+        collaboration: collaborationSchema.optional(),
+        workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
       })
       .parse(req.body);
     const project = await engine.createProject(
@@ -80,6 +81,7 @@ app.post(
       body.planning,
       body.requestId,
       body.workflow || (Object.hasOwn(req.body, 'documentPack') ? undefined : 'office'),
+      body.collaboration,
     );
     res.status(201).json({ project });
   }),
@@ -120,7 +122,32 @@ app.put(
       param(req, 'id'),
       rows as import('../shared/types.js').Task[],
       z.boolean().optional().parse(req.body.toolNetwork),
+      req.body.collaboration,
     );
+    res.json({ ok: true });
+  }),
+);
+app.put(
+  '/api/projects/:id/collaboration',
+  route((req, res) => {
+    engine.configureCollaboration(param(req, 'id'), req.body);
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/projects/:id/meetings',
+  route((req, res) => {
+    const { agenda } = z.object({ agenda: z.string().trim().min(10).max(3000) }).parse(req.body);
+    res.status(201).json({ meeting: engine.startMeeting(param(req, 'id'), agenda) });
+  }),
+);
+app.post(
+  '/api/meetings/:id/:action',
+  route((req, res) => {
+    const action = z.enum(['retry', 'skip', 'stop']).parse(req.params.action);
+    if (action === 'retry') engine.retryMeeting(param(req, 'id'));
+    else if (action === 'skip') engine.skipMeeting(param(req, 'id'));
+    else engine.stopMeeting(param(req, 'id'));
     res.json({ ok: true });
   }),
 );

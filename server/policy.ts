@@ -7,13 +7,15 @@ export type GenerationContext = {
   store?: Store;
   project?: Project;
   task?: Task;
-  phase?: 'plan' | 'task';
+  phase?: 'plan' | 'task' | 'meeting';
+  meetingId?: string;
   model?: string;
   onAttempt?: (id: string) => void;
   signal?: AbortSignal;
   workspace?: string;
   toolNetwork?: boolean;
   readOnly?: boolean;
+  research?: boolean;
   onTool?: (entry: NonNullable<Task['toolLog']>[number]) => void;
   cache?: boolean;
 };
@@ -50,6 +52,12 @@ export function selectedMemory(store: Store | undefined, projectId: string) {
       sourceTaskId: m.sourceTaskId || 'Human supplied',
     }));
 }
+export function humanDirection(store: Store | undefined, projectId: string) {
+  return (store?.state.approvals || [])
+    .filter((a) => a.projectId === projectId && a.status !== 'pending' && a.feedback?.trim())
+    .slice(-4)
+    .map((a) => ({ sourceTaskId: a.taskId, decision: a.status, feedback: a.feedback }));
+}
 export function relevantContext(task: Task, context: Task[]) {
   const final =
     task.documentKind === 'status_report' ||
@@ -67,10 +75,11 @@ export function reserve(
   store: Store,
   project: Project,
   provider: Provider,
-  phase: 'plan' | 'task',
+  phase: 'plan' | 'task' | 'meeting',
   model: string,
   inputBytes: number,
   task?: Task,
+  meetingId?: string,
 ): Attempt {
   const p = policy(store),
     all = store.attempts(),
@@ -89,6 +98,8 @@ export function reserve(
     throw new Error(
       'An earlier attempt is uncertain. Acknowledge it in Usage before retrying; it may already have consumed usage.',
     );
+  if (meetingId && all.some((a) => a.meetingId === meetingId && a.status === 'uncertain'))
+    throw new Error('Acknowledge uncertain meeting usage in Workspace controls before retrying.');
   let reservedUsd = 0;
   if (
     provider === 'openai' ||
@@ -124,6 +135,7 @@ export function reserve(
     id: randomUUID(),
     projectId: project.id,
     taskId: task?.id,
+    meetingId,
     provider,
     phase,
     status: 'running',
@@ -153,6 +165,7 @@ export async function guarded(
       system,
       user,
       maxOutput: policy(store).maxOutputTokens,
+      reasoningEffort: project?.reasoningEffort || 'medium',
     }),
   );
   const cached = ctx.cache === false ? undefined : store?.cached(key);
@@ -181,6 +194,7 @@ export async function guarded(
           model,
           Buffer.byteLength(system + user, 'utf8'),
           task,
+          ctx.meetingId,
         )
       : undefined;
   if (attempt) ctx.onAttempt?.(attempt.id);

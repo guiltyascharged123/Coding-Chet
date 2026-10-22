@@ -1,4 +1,4 @@
-import type { Activity, Agent, Task } from '../../shared/types';
+import type { Activity, Agent, Task, Meeting } from '../../shared/types';
 
 export type Point = { x: number; z: number };
 export const DESKS: [number, number, number][] = [
@@ -6,6 +6,12 @@ export const DESKS: [number, number, number][] = [
   [3.6, 0, -2.4],
   [-4.3, 0, 2.7],
   [3.6, 0, 2.7],
+];
+export const MEETING_SEATS = [
+  { x: -0.55, z: 1.3 },
+  { x: 0.55, z: 1.3 },
+  { x: -0.55, z: 4.05 },
+  { x: 0.55, z: 4.05 },
 ];
 export type Action = 'desk' | 'coffee' | 'whiteboard' | 'meeting' | 'printer' | 'handoff';
 type Goal = Point & { action: Action; label: string; facing: number };
@@ -31,7 +37,10 @@ const furniture = [
     { x, z, halfX: 1.85, halfZ: 1.1 },
     { x, z: z + 1.1, halfX: 0.83, halfZ: 0.9 },
   ]),
-  { x: 0, z: -1.2, halfX: 2.12, halfZ: 1.68 },
+  { x: 0, z: 2.65, halfX: 1.05, halfZ: 0.9 },
+  { x: -1.95, z: 2.65, halfX: 0.32, halfZ: 1.95 },
+  { x: 1.95, z: 2.65, halfX: 0.32, halfZ: 1.95 },
+  { x: 0, z: 0.65, halfX: 2.25, halfZ: 0.32 },
   { x: -5.5, z: -5.9, halfX: 2.1, halfZ: 0.68 },
   { x: 7.5, z: 0.3, halfX: 0.95, halfZ: 1.55 },
   { x: -7.4, z: 1.2, halfX: 0.95, halfZ: 1.0 },
@@ -209,11 +218,17 @@ function station(action: Action, index: number): Goal {
       };
     default:
       return {
-        x: index % 2 === 0 ? -0.75 : 0.75,
-        z: 1.45 + Math.floor(index / 2) * 1.2,
+        ...MEETING_SEATS[index % 4],
         action,
-        label: action === 'handoff' ? 'a team handoff' : 'the meeting area',
-        facing: index % 2 === 0 ? Math.PI / 2 : -Math.PI / 2,
+        label: action === 'handoff' ? 'a team handoff' : 'the meeting room',
+        facing:
+          action === 'handoff'
+            ? index % 2 === 0
+              ? Math.PI / 2
+              : -Math.PI / 2
+            : index < 2
+              ? 0
+              : Math.PI,
       };
   }
 }
@@ -223,8 +238,14 @@ export class OfficeSimulation {
   time = 0;
   private team: Agent[] = [];
   private seen = new Set<string>();
+  private meetingId?: string;
   private encounter?: { a: string; b: string; started: number; settled?: number };
-  update(agents: Agent[], tasks: Task[], activities: Activity[]) {
+  update(agents: Agent[], tasks: Task[], activities: Activity[], meeting?: Meeting) {
+    const activeMeeting =
+      meeting && ['gathering', 'running'].includes(meeting.status) ? meeting : undefined;
+    const changedMeeting = this.meetingId !== activeMeeting?.id;
+    this.meetingId = activeMeeting?.id;
+    if (activeMeeting) this.encounter = undefined;
     this.team = agents;
     for (const [index, agent] of agents.entries()) {
       let person = this.people.get(agent.id);
@@ -249,7 +270,22 @@ export class OfficeSimulation {
         (t) => t.agentId === agent.id && (t.status === 'working' || t.status === 'review'),
       );
       const taskKey = task ? `${task.id}:${task.status}` : '';
-      person.status = task?.status;
+      person.status = activeMeeting
+        ? activeMeeting.speakerId === agent.id
+          ? 'speaking'
+          : 'listening'
+        : task?.status;
+      if (activeMeeting) {
+        person.peer = undefined;
+        person.taskKey = taskKey;
+        if (changedMeeting || person.goal.action !== 'meeting')
+          this.send(person, station('meeting', index));
+        continue;
+      }
+      if (changedMeeting) {
+        person.peer = undefined;
+        this.send(person, task?.status === 'review' ? station('whiteboard', index) : desk(agent));
+      }
       if (person.taskKey !== taskKey) {
         person.taskKey = taskKey;
         if (!person.peer)
@@ -266,6 +302,7 @@ export class OfficeSimulation {
       if (this.seen.has(event.id)) continue;
       this.seen.add(event.id);
       if (
+        activeMeeting ||
         this.encounter ||
         !event.agentId ||
         !event.targetAgentId ||
@@ -335,18 +372,8 @@ export class OfficeSimulation {
           p.blocked = 0;
         }
       }
-      if (!p.path.length && distance(p, p.goal) < 0.1 && !p.peer && this.time > p.waitUntil) {
-        if (p.status === 'review') p.waitUntil = this.time + 8;
-        else if (p.status === 'working') {
-          // Long model/worker tasks alternate focused desk work and planning.
-          this.send(p, p.goal.action === 'desk' ? station('whiteboard', index) : desk(agent));
-          p.waitUntil = this.time + 12;
-        } else {
-          const visits: Action[] = ['coffee', 'whiteboard', 'meeting', 'printer', 'desk'];
-          const action = visits[p.visits++ % visits.length];
-          this.send(p, action === 'desk' ? desk(agent) : station(action, index));
-        }
-      }
+      // Idle and working agents stay at their assigned desk. Travel only follows
+      // task assignment, human review, a real handoff or a persisted team meeting.
       p.walking = false;
       const next = p.path[0];
       if (!next) {

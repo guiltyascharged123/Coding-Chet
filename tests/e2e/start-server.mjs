@@ -22,6 +22,25 @@ const modelServer = createServer(async (req, res) => {
     res.end('{}');
     return;
   }
+  if (input.meeting) {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const chair = request.messages[0].content.includes('Chair this team meeting');
+    res.end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: chair
+                ? '# Agreed next actions\n\nCompare buyer alternatives and test willingness to pay. Owner: coordinator. Record unverified demand and objections before any spending.'
+                : `# Specialist proposal ${input.contributions.length + 1}\n\nA specific buyer must have a costly problem. Challenge generic AI copy services: why pay instead of using ChatGPT? Compare a distinct alternative and define a cheap validation test.`,
+            },
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 50 },
+      }),
+    );
+    return;
+  }
   res.end(
     JSON.stringify({
       choices: [

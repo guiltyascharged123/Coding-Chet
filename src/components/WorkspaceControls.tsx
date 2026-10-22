@@ -4,6 +4,7 @@ import { defaultPolicy } from '../../shared/schemas';
 import { PROVIDER_LABELS } from '../../shared/types';
 import { api, saveBlob } from '../api';
 import Modal from './Modal';
+import { useSavedDraft } from '../drafts';
 
 export default function WorkspaceControls({
   data,
@@ -22,9 +23,15 @@ export default function WorkspaceControls({
     ),
     [message, setMessage] = useState(''),
     [busy, setBusy] = useState(false);
-  const [memory, setMemory] = useState(''),
-    [source, setSource] = useState(''),
-    [restore, setRestore] = useState<unknown>(),
+  const [memoryDraft, saveMemoryDraft, clearMemoryDraft, memoryDraftError] = useSavedDraft(
+    `workroom-memory-draft-${project.id}`,
+    { content: '', source: '' },
+  );
+  const memory = memoryDraft.content || '',
+    source = memoryDraft.source || '';
+  const setMemory = (content: string) => saveMemoryDraft({ content, source });
+  const setSource = (source: string) => saveMemoryDraft({ content: memory, source });
+  const [restore, setRestore] = useState<unknown>(),
     [confirmed, setConfirmed] = useState(false);
   const [connection, setConnection] = useState(project.provider);
   async function act(fn: () => Promise<unknown>, success: string) {
@@ -329,6 +336,10 @@ export default function WorkspaceControls({
                 onChange={(e) => setMemory(e.target.value)}
               />
             </label>
+            <p className="field-hint" role="status">
+              {memoryDraftError ||
+                'Memory draft saved in this browser. Propose and verify it explicitly to use it as a fact.'}
+            </p>
             <label>
               Evidence source
               <select
@@ -355,7 +366,7 @@ export default function WorkspaceControls({
                     content: memory,
                     ...(source ? { sourceTaskId: source } : {}),
                   });
-                  setMemory('');
+                  clearMemoryDraft();
                 }, 'Memory proposal saved. Verify it after checking the evidence.')
               }
             >

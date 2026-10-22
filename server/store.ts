@@ -17,8 +17,8 @@ export class Store {
     const row = this.db.prepare('SELECT payload FROM workspace WHERE id=1').get() as
       { payload: string } | undefined;
     this.state = row ? JSON.parse(row.payload) : initialState(process.env.WORKROOM_DEMO === '1');
-    if (row && (this.state.schemaVersion || 1) < 3) this.snapshot('before-upgrade');
-    this.state.schemaVersion = 3;
+    if (row && (this.state.schemaVersion || 1) < 4) this.snapshot('before-upgrade');
+    this.state.schemaVersion = 4;
     if (
       this.state.policy?.maxTasks === 6 &&
       Object.entries(defaultPolicy).every(
@@ -31,6 +31,7 @@ export class Store {
       this.state.policy.maxTasks = defaultPolicy.maxTasks;
     this.state.policy ||= structuredClone(defaultPolicy);
     this.state.memory ||= [];
+    this.state.meetings ||= [];
     const palette: Record<string, string> = {
       '#8c9cf5': '#5285b5',
       '#f1b94b': '#bd914b',
@@ -118,7 +119,7 @@ export class Store {
       if (!existing.has(a.id))
         existing.set(a.id, { ...a, status: a.status === 'running' ? 'uncertain' : a.status });
     const restored = structuredClone(parsed.state);
-    restored.schemaVersion = 3;
+    restored.schemaVersion = 4;
     restored.policy = { ...structuredClone(defaultPolicy), ...restored.policy, allowPaid: false };
     restored.memory ||= [];
     this.recoverProjects(restored);
@@ -148,6 +149,13 @@ export class Store {
       .run(JSON.stringify(this.state));
   }
   private recoverProjects(state: WorkspaceState) {
+    for (const m of state.meetings || [])
+      if (m.status === 'running' || m.status === 'gathering') {
+        m.status = 'failed';
+        m.error =
+          'Meeting interrupted. Saved contributions are retained; review Usage before retrying.';
+        delete m.speakerId;
+      }
     for (const p of state.projects) {
       if (p.status === 'running') p.status = 'paused';
       if (p.planningStatus === 'planning') {

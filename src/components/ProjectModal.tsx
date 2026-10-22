@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Loader2, Plus } from 'lucide-react';
-import type { Project, Provider, Workflow } from '../../shared/types';
+import type { Project, Provider, Workflow, ReasoningEffort } from '../../shared/types';
 import { WORKFLOWS } from '../../shared/workflows';
 import { api, download } from '../api';
 import Modal from './Modal';
@@ -12,6 +12,9 @@ type Draft = {
   workflow: Workflow;
   planning: 'template' | 'ai';
   requestId: string;
+  reasoningEffort?: ReasoningEffort;
+  meetings?: boolean;
+  researchEnabled?: boolean;
 };
 const fresh = (): Draft => ({
   title: '',
@@ -19,6 +22,8 @@ const fresh = (): Draft => ({
   workflow: 'office',
   planning: 'template',
   requestId: crypto.randomUUID(),
+  reasoningEffort: 'medium',
+  meetings: true,
 });
 function readDraft(): Draft {
   try {
@@ -69,6 +74,14 @@ export default function ProjectModal({
       const result = await api<{ project: Project }>('/projects', {
         ...draft,
         documentPack: 'office',
+        collaboration: {
+          researchEnabled: !!draft.researchEnabled,
+          reasoningEffort: draft.reasoningEffort || 'medium',
+          meetingPolicy: {
+            enabled: provider !== 'external' && (draft.meetings ?? true),
+            everyTasks: 3,
+          },
+        },
       });
       try {
         localStorage.removeItem(PROJECT_DRAFT_KEY);
@@ -157,6 +170,43 @@ export default function ProjectModal({
             is no fixed step count.
           </span>
         </label>
+        <label>
+          Codex reasoning effort
+          <select
+            aria-label="Codex reasoning effort"
+            value={draft.reasoningEffort || 'medium'}
+            onChange={(e) => change({ reasoningEffort: e.target.value as ReasoningEffort })}
+          >
+            <option value="low">Economy · low</option>
+            <option value="medium">Balanced · medium</option>
+            <option value="high">Deep work · high</option>
+          </select>
+          <span className="field-hint">
+            High uses more allowance; the selected model must support it. Other providers use their
+            configured defaults.
+          </span>
+        </label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={!!draft.researchEnabled}
+            onChange={(e) => change({ researchEnabled: e.target.checked })}
+          />
+          Allow Codex web research (read-only search; applies to text work, not coding tools)
+        </label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            disabled={provider === 'external'}
+            checked={provider !== 'external' && (draft.meetings ?? true)}
+            onChange={(e) => change({ meetings: e.target.checked })}
+          />
+          Automatic kickoff and progress meetings
+        </label>
+        <p className="field-hint">
+          Each meeting uses up to five model requests and produces visible proposals, critique and
+          next actions. Change the cadence in Edit plan. Demo meetings make no model calls.
+        </p>
         {draft.workflow === 'software' && (
           <p className="planning-note">
             Software tasks require the Codex connection. Each role works in the same managed project

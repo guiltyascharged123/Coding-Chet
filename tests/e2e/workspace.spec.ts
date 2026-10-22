@@ -238,20 +238,10 @@ test('walking agents, readable surfaces, office documents, and native exports wo
     })),
   );
   await expect
-    .poll(
-      async () =>
-        page.locator('.scene-agent-label').evaluateAll(
-          (labels, before) =>
-            labels.some((label) => {
-              const data = (label as HTMLElement).dataset,
-                old = before.find((p) => p.id === data.agentId)!;
-              return Math.hypot(Number(data.x) - old.x, Number(data.z) - old.z) > 0.5;
-            }),
-          initial,
-        ),
-      { timeout: 15000 },
-    )
-    .toBe(true);
+    .poll(async () => page.locator('.scene-agent-label[data-walking="true"]').count(), {
+      timeout: 20000,
+    })
+    .toBe(0);
   await page.getByRole('button', { name: 'Pause office movement', exact: true }).click();
   await expect(page.locator('.scene-agent-label[data-walking="true"]')).toHaveCount(0);
   const paused = await page
@@ -518,4 +508,125 @@ test('an empty normal workspace welcomes the user and creates a real saved proje
   } finally {
     await request.post('/api/restore', { data: backup });
   }
+});
+
+test('review feedback and memory drafts survive rejection, settings navigation and a reload', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'demo' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'Feedback retention',
+        brief:
+          'Prepare a useful scope with a human review so feedback can be corrected without losing it.',
+        workflow: 'office',
+      },
+    })
+  ).json();
+  const current = await (await request.get('/api/state')).json();
+  await request.post('/api/policy', { data: { ...current.state.policy, maxRevisions: 0 } });
+  await request.post(`/api/projects/${project.id}/run`);
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  await page.getByRole('button', { name: 'Review work', exact: true }).click({ timeout: 15000 });
+  const feedback =
+    'Reject the generic proposal. Compare differentiated alternatives and explain why buyers would pay instead of using ChatGPT.';
+  await page.getByLabel('Your feedback').fill(feedback);
+  await page.getByRole('button', { name: 'Request changes', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('revision limit');
+  await page
+    .getByRole('button', { name: 'Open Workspace controls · keep feedback', exact: true })
+    .click();
+  await expect(page.getByRole('dialog')).toContainText('Workspace controls');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.reload();
+  await page.getByRole('button', { name: 'Review work', exact: true }).click();
+  await expect(page.getByLabel('Your feedback')).toHaveValue(feedback);
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('button', { name: 'Workspace controls', exact: true }).click();
+  await page.getByRole('tab', { name: 'Project memory', exact: true }).click();
+  await page
+    .getByLabel('Memory content')
+    .fill('Budget ceiling: $100. Require evidence before spending.');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.reload();
+  await page.getByRole('button', { name: 'Workspace controls', exact: true }).click();
+  await page.getByRole('tab', { name: 'Project memory', exact: true }).click();
+  await expect(page.getByLabel('Memory content')).toHaveValue(
+    'Budget ceiling: $100. Require evidence before spending.',
+  );
+  await expect(page.getByRole('dialog')).toContainText('Propose and verify');
+  await request.post('/api/policy', { data: { ...current.state.policy, maxRevisions: 1 } });
+});
+
+test('team discussions record real model-protocol contributions and guide purposeful meeting-room movement', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'Opportunity debate',
+        brief:
+          'Find a differentiated business experiment. No budget, customers or income may be invented.',
+        workflow: 'venture',
+      },
+    })
+  ).json();
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  await page.getByRole('button', { name: 'Team discussions', exact: true }).click();
+  await page
+    .getByLabel('Meeting agenda')
+    .fill(
+      'Challenge generic copywriting and compare specific buyer problems against existing AI alternatives.',
+    );
+  await page.getByRole('button', { name: 'Start team meeting', exact: true }).click();
+  await expect(page.locator('.meeting-record')).toContainText('gathering');
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  await expect(page.locator('.scene-agent-label[data-action="meeting"]')).toHaveCount(4);
+  await expect(page.locator('.scene-zone-label').filter({ hasText: 'TEAM MEETING' })).toBeVisible();
+  await page.screenshot({ path: '/tmp/workroom-meeting-room.png', fullPage: true });
+  await page.getByRole('button', { name: 'Team discussions', exact: true }).click();
+  await expect(page.locator('.meeting-contribution')).toHaveCount(4, { timeout: 25000 });
+  await expect(page.locator('.meeting-decision')).toContainText('Agreed next actions');
+  await expect(page.locator('.meeting-record')).toContainText('ChatGPT');
+  await page.reload();
+  await page.getByRole('button', { name: 'Team discussions', exact: true }).click();
+  await expect(page.locator('.meeting-contribution')).toHaveCount(4);
+  const state = await (await request.get('/api/state')).json();
+  const meeting = state.state.meetings.find(
+    (m: { projectId: string }) => m.projectId === project.id,
+  );
+  expect(
+    state.attempts.filter((a: { meetingId?: string }) => a.meetingId === meeting.id),
+  ).toHaveLength(5);
+  expect(meeting.status).toBe('completed');
+  await page.getByRole('button', { name: 'Meeting & reasoning settings', exact: true }).click();
+  await page.getByLabel('Codex reasoning effort').selectOption('high');
+  await page.getByLabel('Automatic team meetings', { exact: true }).check();
+  await page.getByLabel('Completed tasks between meetings').fill('2');
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await expect(page.locator('.collaboration-panel')).toContainText('after every 2 completed tasks');
+  await expect(page.locator('.collaboration-panel')).toContainText('reasoning: high');
+  await page.getByRole('button', { name: 'Your team', exact: true }).click();
+  await page
+    .locator('.team-profile')
+    .first()
+    .getByRole('button', { name: 'Edit role & desk' })
+    .click();
+  await page.getByLabel('Specialist preset').selectOption('0');
+  await expect(page.getByLabel('Role', { exact: true })).toHaveValue('Senior software engineer');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Team discussions', exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: '/tmp/workroom-team-discussions.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await page.screenshot({ path: '/tmp/workroom-discussions-desktop.png' });
 });

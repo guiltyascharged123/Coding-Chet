@@ -100,6 +100,10 @@ worktree is unnecessary. If npm’s default cache is unwritable, use
   pause/resume, failure reporting, and retry.
 - Live task states and handoffs via server-sent events; the office visualizes their activity.
 - Human approval gates, revision requests, and optional browser notifications.
+- Saved team discussions: specialist proposals, adversarial critique and chair decisions, optional kickoff/milestone meetings, usage receipts and retry of remaining contributions.
+- Purposeful office movement: focused desk work, reviews, handoffs and a meeting room tied to real meeting state.
+- Ten specialist presets, selectable Codex reasoning, venture validation and optional read-only Codex web research.
+- Autosaved browser drafts for review feedback, retry directions, memory, agendas and plan edits.
 - Project-specific team presets for office coordination, research, software delivery and custom work; editable plans with flexible task counts, owners, dependencies and approval gates. Legacy office packs and their exports remain supported.
 - Codex software assignments edit, review and test actual files in a shared managed project folder, with tool activity, blocked results, a source browser and ZIP downloads. Coding readiness is checked locally before execution.
 - Briefs are saved before AI planning, unfinished form drafts survive reloads, and failed plans offer retry or template fallback.
@@ -117,7 +121,7 @@ worktree is unnecessary. If npm’s default cache is unwritable, use
 - Responsive navigation, accessible dialogs, reduced-motion support, and a clickable
   2D fallback when WebGL is unavailable. Fonts and scene assets are bundled locally.
 
-**Demo mode is a simulation:** no AI or tools run. Normal new workspaces start empty. Editable templates create no model request; optional AI planning does. Office/research/custom model assignments generate text. **Software delivery uses Codex file and command tools** after its local sandbox readiness check passes. See the [easy guide](docs/EASY-GUIDE.md) for a first run, task retries, managed files and limitations.
+**Demo mode is a simulation:** no AI or tools run. Normal new workspaces start empty. Editable templates create no model request; optional AI planning does. Office/research/venture/custom model assignments generate text, with optional built-in Codex web research. **Software delivery uses Codex file and command tools** after its local sandbox readiness check passes. See the [easy guide](docs/EASY-GUIDE.md) for a first run, task retries, managed files and limitations.
 
 ## Connect a model
 

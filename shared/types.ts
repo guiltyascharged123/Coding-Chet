@@ -4,7 +4,23 @@ export type ProjectStatus = 'ready' | 'running' | 'paused' | 'needs_input' | 'co
 export type TaskStatus = 'queued' | 'working' | 'review' | 'done' | 'failed';
 export type AgentStatus = 'idle' | 'working' | 'waiting';
 export type DocumentPack = 'studio' | 'office';
-export type Workflow = 'office' | 'software' | 'research' | 'custom';
+export type Workflow = 'office' | 'software' | 'research' | 'venture' | 'custom';
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+export interface Meeting {
+  id: string;
+  projectId: string;
+  agenda: string;
+  trigger: 'manual' | 'kickoff' | 'checkpoint';
+  status: 'gathering' | 'running' | 'completed' | 'failed' | 'cancelled';
+  checkpoint: number;
+  participants: Agent[];
+  contributions: { agentId: string; role: string; content: string; createdAt: number }[];
+  summary: string;
+  speakerId?: string;
+  error?: string;
+  createdAt: number;
+  completedAt?: number;
+}
 export type DocumentKind =
   | 'brief'
   | 'project_plan'
@@ -60,6 +76,9 @@ export interface Project {
   team?: Agent[];
   workspaceFolder?: string;
   toolNetwork?: boolean;
+  reasoningEffort?: ReasoningEffort;
+  meetingPolicy?: { enabled: boolean; everyTasks: number };
+  researchEnabled?: boolean;
 }
 export interface MemoryItem {
   id: string;
@@ -95,7 +114,8 @@ export interface Attempt {
   provider: Provider;
   model?: string;
   billing?: 'api' | 'subscription' | 'local' | 'external' | 'none';
-  phase: 'plan' | 'task';
+  phase: 'plan' | 'task' | 'meeting';
+  meetingId?: string;
   status: 'running' | 'completed' | 'uncertain' | 'cached' | 'acknowledged';
   createdAt: number;
   reservedUsd: number;
@@ -132,6 +152,7 @@ export interface WorkspaceState {
   schemaVersion?: number;
   policy?: CostPolicy;
   memory?: MemoryItem[];
+  meetings?: Meeting[];
 }
 export interface RuntimeInfo {
   available: Record<Provider, boolean>;

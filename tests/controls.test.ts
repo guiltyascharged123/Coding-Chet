@@ -24,7 +24,7 @@ test('legacy databases retain outputs and create a validated recovery snapshot b
   database.close();
   const store = new Store(path);
   try {
-    assert.equal(store.state.schemaVersion, 3);
+    assert.equal(store.state.schemaVersion, 4);
     assert.equal(store.state.tasks[0].output, legacy.tasks[0].output);
     assert.equal(store.state.policy?.allowPaid, false);
     const folder = join(directory, 'backups'),

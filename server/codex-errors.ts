@@ -9,7 +9,7 @@ const messages = {
   CODEX_QUOTA:
     'Codex reported a usage or rate limit. Check your account allowance and wait before retrying.',
   CODEX_REASONING:
-    'The selected model rejected the reasoning setting. Choose a supported Codex model; the worker currently requests low reasoning effort.',
+    'The selected model rejected the reasoning setting. Select a supported effort in Edit plan, or choose a model supporting that setting.',
   CODEX_CONFIG:
     'Codex rejected the worker configuration. Update Workroom and restart. Restrictions remain enabled; do not bypass the sandbox.',
   CODEX_SANDBOX:

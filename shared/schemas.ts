@@ -44,6 +44,47 @@ export const policySchema = z.object({
 });
 const id = z.string().min(1).max(100),
   text = z.string();
+export const collaborationSchema = z.object({
+  reasoningEffort: z.enum(['low', 'medium', 'high']).default('medium'),
+  researchEnabled: z.boolean().default(false),
+  meetingPolicy: z.object({ enabled: z.boolean(), everyTasks: z.number().int().min(1).max(20) }),
+});
+export const meetingSchema = z.object({
+  id,
+  projectId: id,
+  agenda: text.min(1).max(3000),
+  trigger: z.enum(['manual', 'kickoff', 'checkpoint']),
+  status: z.enum(['gathering', 'running', 'completed', 'failed', 'cancelled']),
+  checkpoint: z.number().int().min(0),
+  participants: z
+    .array(
+      z.object({
+        id,
+        name: text.min(1).max(30),
+        role: text.min(2).max(50),
+        specialty: text.min(5).max(600),
+        color: text.regex(/^#[0-9a-fA-F]{6}$/),
+        desk: z.number().int().min(0).max(3),
+        goal: text.max(1000).optional(),
+      }),
+    )
+    .length(4),
+  contributions: z
+    .array(
+      z.object({
+        agentId: id,
+        role: text.max(50),
+        content: text.max(20000),
+        createdAt: z.number().finite(),
+      }),
+    )
+    .max(4),
+  summary: text.max(20000),
+  speakerId: id.optional(),
+  error: text.max(4000).optional(),
+  createdAt: z.number().finite(),
+  completedAt: z.number().finite().optional(),
+});
 export const memorySchema = z.object({
   id,
   projectId: id,
@@ -59,6 +100,7 @@ export const stateSchema = z
     provider: providerSchema,
     policy: policySchema.optional(),
     memory: z.array(memorySchema).max(1000).optional(),
+    meetings: z.array(meetingSchema).max(2000).optional(),
     agents: z
       .array(
         z.object({
@@ -86,7 +128,10 @@ export const stateSchema = z
           planning: z.enum(['template', 'ai']).optional(),
           planningStatus: z.enum(['planning', 'failed', 'ready']).optional(),
           planningError: text.max(4000).optional(),
-          workflow: z.enum(['office', 'software', 'research', 'custom']).optional(),
+          workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
+          reasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+          researchEnabled: z.boolean().optional(),
+          meetingPolicy: collaborationSchema.shape.meetingPolicy.optional(),
           team: z
             .array(
               z.object({
@@ -183,13 +228,33 @@ export const stateSchema = z
     const fail = (message: string) => ctx.addIssue({ code: 'custom', message });
     const unique = (rows: { id: string }[]) => new Set(rows.map((r) => r.id)).size === rows.length;
     if (
-      ![s.agents, s.projects, s.tasks, s.approvals, s.activities, s.memory || []].every(unique) ||
+      ![
+        s.agents,
+        s.projects,
+        s.tasks,
+        s.approvals,
+        s.activities,
+        s.memory || [],
+        s.meetings || [],
+      ].every(unique) ||
       new Set(s.agents.map((a) => a.desk)).size !== 4
     )
       fail('Duplicate IDs or desk assignments.');
     const projects = new Set(s.projects.map((p) => p.id)),
       agents = new Set<string>(s.agents.map((a) => a.id)),
       tasks = new Map(s.tasks.map((t) => [t.id, t]));
+    for (const m of s.meetings || []) {
+      const participants = new Set(m.participants.map((a) => a.id));
+      if (
+        !projects.has(m.projectId) ||
+        participants.size !== 4 ||
+        m.participants.some((a) => !agents.has(a.id)) ||
+        m.contributions.some((c) => !participants.has(c.agentId)) ||
+        new Set(m.contributions.map((c) => c.agentId)).size !== m.contributions.length ||
+        (m.speakerId && !participants.has(m.speakerId))
+      )
+        fail('Invalid meeting references.');
+    }
     for (const p of s.projects)
       if (
         p.team &&
@@ -232,7 +297,8 @@ export const attemptSchema = z.object({
   provider: providerSchema,
   model: text.max(150).optional(),
   billing: z.enum(['api', 'subscription', 'local', 'external', 'none']).optional(),
-  phase: z.enum(['plan', 'task']),
+  phase: z.enum(['plan', 'task', 'meeting']),
+  meetingId: id.optional(),
   status: z.enum(['running', 'completed', 'uncertain', 'cached', 'acknowledged']),
   createdAt: z.number().finite(),
   reservedUsd: z.number().finite().min(0),
