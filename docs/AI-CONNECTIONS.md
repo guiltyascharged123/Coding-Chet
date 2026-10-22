@@ -77,16 +77,50 @@ standard credential location.
 The document worker requests a temporary read-only directory, denies other
 filesystem access and tool network access in a named permissions profile, disables
 shell/patch features and configured MCP servers/hooks, and stops on tool events.
+Its supported `never` approval policy prevents approval escalation while retaining
+the named permissions profile. Local AGENTS.md and skill instructions are not
+loaded: the worker receives its document context explicitly from Workroom.
 Unsupported restrictions fail the assignment, with no unrestricted retry. This is
 a document adapter, not an autonomous coding worker. Authentication and model
-traffic to OpenAI still occur. Mocked tests verify the bridge contract, not native
-sandbox enforcement or your live account; check those on your own machine. Windows
+traffic to OpenAI still occur. Tests check the bridge contract and run the native
+CLI's offline prompt/configuration check with private, empty CLI state and no model
+generation. Those checks do not verify native sandbox enforcement or your live
+account; check those on your own machine. Windows
 users can use WSL2 if their native Codex CLI setup fails.
 
 One job can include multiple internal model turns. The ledger records jobs and
 reported tokens, not remaining subscription allowance. The API/local output-token
 setting does not control Codex. Keep a single worker, low request limit and short
 assignments while learning your account's usage.
+
+### Troubleshoot Codex jobs
+
+Older Workroom builds collapsed different failures into “Codex could not finish.”
+One confirmed startup defect was `approval_policy="untrusted"`, which the bundled
+CLI rejects. Update the `workroom-starter` source and restart to get the supported
+policy and specific, sanitized error codes. File, tool, and network restrictions
+remain in place; there is no unrestricted or paid-API fallback.
+
+| Error code                                             | Next step                                                                                                                                                              |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CODEX_AUTH`                                           | Sign in through `npx --no-install codex login`, restart, and check connections.                                                                                        |
+| `CODEX_MODEL`                                          | Choose an exact model ID offered by your ChatGPT Codex account. Update `.env`, restart, then explicitly reset the existing project's connection in Workspace controls. |
+| `CODEX_QUOTA`                                          | Check account allowance/rate limits and wait before retrying.                                                                                                          |
+| `CODEX_REASONING`                                      | The model rejected the worker's low reasoning setting; choose a model that supports it.                                                                                |
+| `CODEX_CONFIG`                                         | Update/restart Workroom. If it persists, report the code and app/CLI versions.                                                                                         |
+| `CODEX_SANDBOX`                                        | Check local directory permissions and native sandbox support. Keep restrictions enabled.                                                                               |
+| `CODEX_NETWORK`                                        | Check network/proxy/certificate configuration.                                                                                                                         |
+| `CODEX_INSTALL`                                        | Run `npm run local` to prepare dependencies and check any custom CLI executable override.                                                                              |
+| `CODEX_TIMEOUT`, `CODEX_CANCELLED`, `CODEX_NO_RECEIPT` | Review Usage before explicitly retrying; allowance may already have been consumed.                                                                                     |
+| `CODEX_TOOL_BLOCKED`                                   | Keep the assignment to document work; tools require a separately controlled external worker.                                                                           |
+| `CODEX_UNKNOWN`                                        | Report the code, selected model ID, and whether failure was immediate or delayed.                                                                                      |
+
+Error messages never copy raw CLI response bodies, prompts, paths, or credentials.
+Do not send `.env`, auth files, or login tokens when asking for help. After reviewing
+an uncertain attempt, acknowledge it in **Workspace controls → Usage**, then open
+the failed task and choose **Retry task**. If planning failed before project creation,
+create the project again after correcting the cause. Historical attempt counts and
+reservations remain; no work is automatically repeated.
 
 ## Ollama and other local servers
 

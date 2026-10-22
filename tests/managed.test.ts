@@ -1,10 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Codex, ThreadEvent } from '@openai/codex-sdk';
 import {
   codexEnvironment,
   codexWorkerOptions,
+  codexThreadOptions,
   codexGenerate,
   localGenerate,
   refreshManagedInfo,
@@ -12,6 +17,104 @@ import {
   apiDiagnostics,
   serviceUrl,
 } from '../server/managed.js';
+import { codexFailure, CodexWorkerError } from '../server/codex-errors.js';
+
+test('the bundled native CLI accepts the complete document worker configuration without inference', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'workroom-native-config-'));
+  const testCodexHome = join(directory, 'cli-state');
+  mkdirSync(testCodexHome, { mode: 0o700 });
+  try {
+    const worker = codexWorkerOptions(directory),
+      thread = codexThreadOptions(directory, 'gpt-6.1-sol');
+    assert.equal(thread.approvalPolicy, 'never');
+    assert.equal(worker.config?.project_doc_max_bytes, 0);
+    assert.equal(worker.config?.include_skill_instructions, false);
+    assert.match(worker.configOverrides![0], /":root" = "deny"/);
+    const config = {
+      ...worker.config,
+      approval_policy: thread.approvalPolicy,
+      model: thread.model,
+      web_search: thread.webSearchMode,
+      model_reasoning_effort: thread.modelReasoningEffort,
+      cli_auth_credentials_store: 'ephemeral',
+    };
+    function flatten(value: Record<string, unknown>, prefix = ''): string[] {
+      return Object.entries(value).flatMap(([key, item]) => {
+        if (item === undefined) return [];
+        const path = prefix ? `${prefix}.${key}` : key;
+        if (item && typeof item === 'object' && !Array.isArray(item))
+          return Object.keys(item).length
+            ? flatten(item as Record<string, unknown>, path)
+            : [`${path}={}`];
+        return [`${path}=${JSON.stringify(item)}`];
+      });
+    }
+    const entry = createRequire(import.meta.resolve('@openai/codex-sdk')).resolve(
+      '@openai/codex/bin/codex.js',
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        entry,
+        'debug',
+        'prompt-input',
+        'Workroom offline configuration regression.',
+        ...flatten(config)
+          .concat(worker.configOverrides || [])
+          .flatMap((c) => ['--config', c]),
+      ],
+      {
+        cwd: directory,
+        // Private CLI state for this child only. No existing login is read or used.
+        env: { ...codexEnvironment(), CODEX_HOME: testCodexHome },
+        encoding: 'utf8',
+        timeout: 30000,
+        maxBuffer: 2 * 1024 * 1024,
+      },
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(
+      result.status,
+      0,
+      'The native CLI must accept the restricted configuration without requiring login or generation.',
+    );
+    assert.ok(
+      JSON.stringify(JSON.parse(result.stdout)).includes(
+        'Workroom offline configuration regression.',
+      ),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Codex failures expose actionable categories without raw responses, credentials, or project text', () => {
+  const cases: [string, string][] = [
+    [
+      'Error: approval_policy = "untrusted" is no longer supported; remove this setting',
+      'CODEX_CONFIG',
+    ],
+    ["The 'example' model is not supported when using Codex with a ChatGPT account", 'CODEX_MODEL'],
+    ['Unsupported value for reasoning effort: low is not supported', 'CODEX_REASONING'],
+    ['HTTP 401 refresh_token_expired', 'CODEX_AUTH'],
+    ['You have hit your usage limit. HTTP 429', 'CODEX_QUOTA'],
+    [
+      'error building bubblewrap command: app-server socket directory must be user-owned',
+      'CODEX_SANDBOX',
+    ],
+    ['error sending request: certificate verification failed', 'CODEX_NETWORK'],
+    ['spawn codex ENOENT', 'CODEX_INSTALL'],
+    ['Codex could not finish. Unrecognized provider response', 'CODEX_UNKNOWN'],
+  ];
+  for (const [message, code] of cases) {
+    const failure = codexFailure(new Error(message + ' sk-test-not-real private-project-brief'));
+    assert.equal(failure.code, code);
+    assert.doesNotMatch(failure.message, /sk-test-not-real|private-project-brief/);
+    assert.match(failure.message, /No API fallback/);
+  }
+  const known = new CodexWorkerError('CODEX_TOOL_BLOCKED');
+  assert.equal(codexFailure(known), known);
+});
 
 test('service URLs restrict local billing to loopback and reject insecure remote credentials', () => {
   assert.equal(serviceUrl('http://127.0.0.1:11434', true).protocol, 'http:');
@@ -97,7 +200,7 @@ test('Codex uses isolated document instructions, excludes API secrets, and requi
       startThread(options) {
         directory = options!.workingDirectory!;
         assert.ok(existsSync(directory));
-        assert.equal(options?.approvalPolicy, 'untrusted');
+        assert.equal(options?.approvalPolicy, 'never');
         assert.equal(options?.networkAccessEnabled, undefined);
         return {
           async runStreamed(prompt: string) {
@@ -138,6 +241,34 @@ test('Codex uses isolated document instructions, excludes API secrets, and requi
     assert.equal(result.text, '# Actual result');
     assert.equal(result.inputTokens, 50);
     assert.equal(existsSync(directory), false);
+    await assert.rejects(
+      () =>
+        codexGenerate('system', 'assignment', 'gpt-6.1-sol', undefined, false, () =>
+          factory([
+            {
+              type: 'turn.failed',
+              error: {
+                message:
+                  'The selected model is not supported when using Codex with a ChatGPT account. sk-test-not-real',
+              },
+            },
+          ]),
+        ),
+      (error: unknown) =>
+        error instanceof CodexWorkerError &&
+        error.code === 'CODEX_MODEL' &&
+        !error.message.includes('sk-test-not-real'),
+    );
+    await assert.rejects(
+      () =>
+        codexGenerate('system', 'assignment', 'gpt-6.1-sol', undefined, false, () =>
+          factory([{ type: 'error', message: 'HTTP 401 invalid_grant sk-test-not-real' }]),
+        ),
+      (error: unknown) =>
+        error instanceof CodexWorkerError &&
+        error.code === 'CODEX_AUTH' &&
+        !error.message.includes('sk-test-not-real'),
+    );
     await assert.rejects(
       () =>
         codexGenerate('system', 'assignment', 'Codex account default', undefined, false, () =>

@@ -118,6 +118,15 @@ npx --no-install codex
 Enter `/model`, choose a model your account offers, and note its **exact model ID**.
 Then enter `/quit`. Do not send a task yet if you only want to configure the connection.
 
+On Ubuntu, you can print the selected model setting with:
+
+```bash
+grep -m1 '^model[[:space:]]*=' "$HOME/.codex/config.toml"
+```
+
+Use the value between the quotes. On Windows, you can open
+`%USERPROFILE%\.codex\config.toml` in your text editor and find the `model` setting.
+
 ### Tell Workroom to use it
 
 Open the `.env` file in the project folder. If it does not exist, make a copy of
@@ -217,12 +226,24 @@ browser after restarting. For an existing Codespace's background demo, use
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Page will not load or Codespaces returns 502    | Keep the server running and use its printed port. In Codespaces, forward that actual port.                                                                                                  |
 | `Missing script: local`                         | Check that you are in the Coding-Chet folder and have the current `workroom-starter` source.                                                                                                |
+| `Unexpected token {` at the launcher's `import` | This terminal may be using old Node.js. Check `node --version`; Workroom requires 24+. If you use nvm, run `nvm install 24`, `nvm use 24`, and `nvm alias default 24`.                      |
 | Projects seem to have disappeared               | Check whether you switched between `local` and `demo`; they use separate databases. Use backup/restore to move work.                                                                        |
 | Codex option is unavailable                     | Run `npx --no-install codex login status`, check the two active `.env` settings and exact model ID, restart, then check connections again.                                                  |
 | Existing project still says Demo                | Change that project's connection in Workspace controls, or create a new project after selecting Codex.                                                                                      |
 | No model activity after creating a starter plan | Click **Run team**. Creating the starter plan does not request AI generation.                                                                                                               |
 | Team stops at a review                          | Open **Review work** and approve or revise the proposal.                                                                                                                                    |
 | A job fails or usage is uncertain               | Read its error and **Workspace controls → Usage** before retrying. Acknowledging uncertain usage permits retry but retains the recorded usage; the earlier job may have consumed allowance. |
+
+If you see the older message **“Codex could not finish. Check its sign-in, allowance,
+and restricted worker configuration”**, update and restart Workroom first. An older
+worker used an approval setting the bundled CLI rejects. The corrected worker keeps
+its restrictions and displays specific error codes; see
+[Codex job troubleshooting](AI-CONNECTIONS.md#troubleshoot-codex-jobs).
+
+To retry an existing failed task, first acknowledge its uncertain attempt in
+**Workspace controls → Usage**, then open the failed task and click **Retry task**.
+If AI planning failed before a project was created, create the project again after
+updating. Successful sign-in alone does not confirm model access or available quota.
 
 For local models, API providers, or external workers, see the
 [AI connection reference](AI-CONNECTIONS.md). For installation, backups, and moving
