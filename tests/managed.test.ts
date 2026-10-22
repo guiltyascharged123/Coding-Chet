@@ -11,6 +11,10 @@ import {
   codexWorkerOptions,
   codexThreadOptions,
   codexGenerate,
+  codexWork,
+  codexCodingOptions,
+  codexConfigArgs,
+  checkCodingSandbox,
   localGenerate,
   refreshManagedInfo,
   managedInfo,
@@ -84,6 +88,180 @@ test('the bundled native CLI accepts the complete document worker configuration 
       ),
     );
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('the native CLI accepts writable and inspection coding profiles without inference', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'workroom-coding-config-'));
+  const testCodexHome = join(directory, 'cli-state');
+  mkdirSync(testCodexHome, { mode: 0o700 });
+  try {
+    const entry = createRequire(import.meta.resolve('@openai/codex-sdk')).resolve(
+      '@openai/codex/bin/codex.js',
+    );
+    for (const readOnly of [false, true]) {
+      const options = codexCodingOptions(directory, false, readOnly);
+      assert.equal(
+        options.config?.features && (options.config.features as Record<string, boolean>).shell_tool,
+        true,
+      );
+      assert.match(options.configOverrides![0], /":root" = "deny"/);
+      assert.ok(!options.configOverrides![0].includes('"/proc" = "read"'));
+      assert.ok(
+        options.configOverrides![0].includes(
+          `${JSON.stringify(directory)} = "${readOnly ? 'read' : 'write'}"`,
+        ),
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          entry,
+          'debug',
+          'prompt-input',
+          'Offline coding profile check.',
+          ...codexConfigArgs(options),
+          '--config',
+          'cli_auth_credentials_store="ephemeral"',
+        ],
+        {
+          cwd: directory,
+          env: { ...options.env, CODEX_HOME: testCodexHome },
+          encoding: 'utf8',
+          timeout: 30000,
+          maxBuffer: 2 * 1024 * 1024,
+        },
+      );
+      assert.equal(result.status, 0, 'Native CLI must accept the complete coding profile.');
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('native coding sandbox enforces project writes and a denied sibling file when supported by the host', async (t) => {
+  const result = await checkCodingSandbox();
+  if (!result.ready) {
+    t.skip(result.message);
+    return;
+  }
+  assert.match(result.message, /Offline coding check passed/);
+});
+
+test('coding workers preserve their shared folder, stream tool evidence, reject text-only success and retain blocked reports', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'workroom-coding-contract-')),
+    before = managedInfo.codexReady;
+  managedInfo.codexReady = true;
+  const entries: { type: string; detail: string }[] = [];
+  const receipt: ThreadEvent = {
+    type: 'turn.completed',
+    usage: {
+      input_tokens: 80,
+      output_tokens: 20,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      reasoning_output_tokens: 0,
+    },
+  };
+  function factory(events: ThreadEvent[]): Pick<Codex, 'startThread'> {
+    return {
+      startThread(options) {
+        assert.equal(options?.workingDirectory, directory);
+        assert.equal(options?.approvalPolicy, 'never');
+        return {
+          async runStreamed(prompt: string, runOptions: { outputSchema?: unknown }) {
+            assert.match(prompt, /current project folder/);
+            assert.ok(runOptions.outputSchema);
+            return {
+              events: (async function* () {
+                for (const e of events) yield e;
+              })(),
+            };
+          },
+        } as ReturnType<Codex['startThread']>;
+      },
+    };
+  }
+  const message = (outcome: string): ThreadEvent => ({
+    type: 'item.completed',
+    item: {
+      id: 'result',
+      type: 'agent_message',
+      text: JSON.stringify({ outcome, summary: '# Actual task report' }),
+    },
+  });
+  const command: ThreadEvent = {
+    type: 'item.completed',
+    item: {
+      id: 'cmd',
+      type: 'command_execution',
+      command: 'node --test',
+      aggregated_output: 'not copied into tool log',
+      exit_code: 0,
+      status: 'completed',
+    },
+  };
+  try {
+    const output = await codexWork(
+      'Role: engineer',
+      'Implement this project',
+      'gpt-6.1-sol',
+      directory,
+      undefined,
+      (e) => entries.push(e),
+      false,
+      false,
+      () => factory([command, message('complete'), receipt]),
+    );
+    assert.equal(JSON.parse(output.text).outcome, 'complete');
+    assert.equal(output.inputTokens, 80);
+    assert.equal(existsSync(directory), true);
+    assert.deepEqual(entries, [
+      { id: 'cmd', type: 'command', detail: 'node --test\nExit code: 0', status: 'completed' },
+    ]);
+    const empty = await codexWork(
+      'Role: reviewer',
+      'Review the actual files',
+      'gpt-6.1-sol',
+      directory,
+      undefined,
+      undefined,
+      false,
+      true,
+      () => factory([message('complete'), receipt]),
+    );
+    assert.equal(JSON.parse(empty.text).outcome, 'blocked');
+    assert.match(JSON.parse(empty.text).summary, /has not been verified/);
+    const blocked = await codexWork(
+      'Role: tester',
+      'Run checks',
+      'gpt-6.1-sol',
+      directory,
+      undefined,
+      undefined,
+      false,
+      false,
+      () => factory([command, message('blocked'), receipt]),
+    );
+    assert.equal(JSON.parse(blocked.text).outcome, 'blocked');
+    assert.equal(JSON.parse(blocked.text).summary, '# Actual task report');
+    await assert.rejects(
+      () =>
+        codexWork(
+          'Role: reviewer',
+          'Review',
+          'gpt-6.1-sol',
+          directory,
+          undefined,
+          undefined,
+          false,
+          false,
+          () => factory([command]),
+        ),
+      /CODEX_NO_RECEIPT/,
+    );
+  } finally {
+    managedInfo.codexReady = before;
     rmSync(directory, { recursive: true, force: true });
   }
 });

@@ -16,9 +16,19 @@ export class Store {
     );
     const row = this.db.prepare('SELECT payload FROM workspace WHERE id=1').get() as
       { payload: string } | undefined;
-    this.state = row ? JSON.parse(row.payload) : initialState();
-    if (row && (this.state.schemaVersion || 1) < 2) this.snapshot('before-upgrade');
-    this.state.schemaVersion = 2;
+    this.state = row ? JSON.parse(row.payload) : initialState(process.env.WORKROOM_DEMO === '1');
+    if (row && (this.state.schemaVersion || 1) < 3) this.snapshot('before-upgrade');
+    this.state.schemaVersion = 3;
+    if (
+      this.state.policy?.maxTasks === 6 &&
+      Object.entries(defaultPolicy).every(
+        ([key, value]) =>
+          key === 'maxTasks' ||
+          JSON.stringify(this.state.policy![key as keyof typeof defaultPolicy]) ===
+            JSON.stringify(value),
+      )
+    )
+      this.state.policy.maxTasks = defaultPolicy.maxTasks;
     this.state.policy ||= structuredClone(defaultPolicy);
     this.state.memory ||= [];
     const palette: Record<string, string> = {
@@ -50,8 +60,7 @@ export class Store {
         delete task.leaseId;
         delete task.leaseExpiresAt;
       }
-    for (const project of this.state.projects)
-      if (project.status === 'running') project.status = 'paused';
+    this.recoverProjects(this.state);
     this.save();
   }
   attempts(): Attempt[] {
@@ -109,10 +118,10 @@ export class Store {
       if (!existing.has(a.id))
         existing.set(a.id, { ...a, status: a.status === 'running' ? 'uncertain' : a.status });
     const restored = structuredClone(parsed.state);
-    restored.schemaVersion = 2;
+    restored.schemaVersion = 3;
     restored.policy = { ...structuredClone(defaultPolicy), ...restored.policy, allowPaid: false };
     restored.memory ||= [];
-    for (const p of restored.projects) if (p.status === 'running') p.status = 'paused';
+    this.recoverProjects(restored);
     for (const t of restored.tasks)
       if (t.status === 'working') {
         t.status = 'failed';
@@ -137,6 +146,17 @@ export class Store {
         'INSERT INTO workspace(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
       )
       .run(JSON.stringify(this.state));
+  }
+  private recoverProjects(state: WorkspaceState) {
+    for (const p of state.projects) {
+      if (p.status === 'running') p.status = 'paused';
+      if (p.planningStatus === 'planning') {
+        p.planningStatus = 'failed';
+        p.planningError =
+          'Planning was interrupted. Your brief is saved. Review Usage before retrying.';
+        p.status = 'paused';
+      }
+    }
   }
   close() {
     this.db.close();

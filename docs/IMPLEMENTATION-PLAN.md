@@ -39,3 +39,9 @@ malformed backup rejection; restart/uncertain requests; budget reservations befo
 planning/execution/retries; no API calls in disabled mode; mocked Codex/local-model
 contracts; memory provenance; native-format exports. Native Windows CI is configured,
 but cannot be represented as locally tested on a Linux execution machine.
+
+## Productive workflows and durable planning (requested October 22)
+
+Preserve existing projects, exports, approval/revision behavior, cost controls, provider choices, memory, external leases, office movement and fallback. Add durable pre-planning project saves, browser brief drafts, idempotent creation, saved planning failures and explicit retry/template fallback. Replace normal sample projects and mandatory six-stage plans with empty normal workspaces, purposeful editable plans and project-specific team presets.
+
+Add a distinct Codex software worker with a per-project managed folder, scope inspection before approval, implementation, independent review/fixes, executed tests, live tool records, blocked-result handling and useful handoffs. Retain the restricted text worker for other workflows and planning. Software jobs share files and serialize per project. Provide source viewing/download, explicit per-project tool network, local sandbox readiness checks and fail-closed behavior, without API/unrestricted fallback. Keep limits and clarify their scope. Document source backups separately from record backups.

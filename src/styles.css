@@ -4437,3 +4437,225 @@ select:focus {
     padding-inline: 18px;
   }
 }
+
+.welcome-workspace {
+  max-width: 780px;
+  margin: 12vh auto;
+  padding: 28px;
+  display: grid;
+  gap: 24px;
+  line-height: 1.7;
+}
+.welcome-workspace h1 {
+  font-size: clamp(28px, 4vw, 42px);
+}
+.welcome-workspace p {
+  color: var(--muted);
+}
+button.connection {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+button.connection:hover {
+  color: var(--ink);
+}
+.team-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 14px;
+}
+.draft-actions,
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.project-tools {
+  margin: 16px 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.saved-brief {
+  min-width: 0;
+  flex: 1;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.saved-brief summary {
+  cursor: pointer;
+  color: #c8d4de;
+}
+.saved-brief p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 16px 0;
+  max-width: 900px;
+}
+.planning-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 20px;
+  background: #2d414c;
+  border: 1px solid #607f91;
+  border-radius: 12px;
+  margin: 16px 0;
+  line-height: 1.6;
+}
+.planning-banner > div:first-of-type {
+  flex: 1;
+  min-width: 220px;
+}
+.planning-banner p {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.plan-editor {
+  font-size: 16px;
+  line-height: 1.6;
+}
+.plan-row {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.plan-row legend {
+  padding: 0 8px;
+  font-weight: 700;
+}
+.plan-row:disabled {
+  opacity: 0.75;
+}
+.plan-row details {
+  font-size: 14px;
+}
+.dependency-options {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+}
+.modal-form label.checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.modal-form .checkbox-label input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-top: 4px;
+}
+.project-files {
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-width: 0;
+}
+.project-files p {
+  margin: 14px 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.project-files code {
+  font-size: 14px;
+}
+.file-browser {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.file-list {
+  max-height: 500px;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+}
+.file-list button {
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.file-list button:hover,
+.file-list button.selected {
+  background: #334b59;
+}
+.file-list small {
+  color: #aebecb;
+}
+.file-preview {
+  min-width: 0;
+  padding: 16px;
+}
+.file-preview pre,
+.tool-activity pre {
+  font: 14px/1.6 monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 500px;
+  overflow: auto;
+  padding: 12px;
+  background: #17252e;
+  border-radius: 6px;
+}
+.tool-activity {
+  margin: 18px 0;
+  line-height: 1.6;
+}
+.tool-activity > div {
+  margin: 16px 0;
+}
+.task-error label {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+.task-error textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+@media (max-width: 700px) {
+  .file-browser,
+  .team-preview {
+    grid-template-columns: 1fr;
+  }
+  .file-list {
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .project-tools {
+    flex-wrap: wrap;
+  }
+  .project-files .section-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}

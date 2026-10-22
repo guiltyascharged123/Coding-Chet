@@ -9,12 +9,14 @@ export default function WorkspaceControls({
   data,
   project,
   onClose,
+  initialTab = 'limits',
 }: {
   data: Bootstrap;
   project: Project;
   onClose: () => void;
+  initialTab?: string;
 }) {
-  const [tab, setTab] = useState('limits'),
+  const [tab, setTab] = useState(initialTab),
     [draft, setDraft] = useState<CostPolicy>(() =>
       structuredClone(data.state.policy || defaultPolicy),
     ),
@@ -49,7 +51,7 @@ export default function WorkspaceControls({
     recent = attempts.filter((a) => a.status !== 'cached' && a.createdAt >= Date.now() - 86400000);
   const fields: [keyof CostPolicy, string, number, number][] = [
     ['maxConcurrent', 'Active tasks across the workspace', 1, 4],
-    ['maxTasks', 'Tasks allowed per project', 3, 100],
+    ['maxTasks', 'Tasks allowed per project', 1, 100],
     ['maxRevisions', 'Revisions allowed per task', 0, 20],
     ['maxRequests24h', 'Requests in the last 24 hours', 1, 10000],
     ['maxInputBytes', 'Maximum input bytes', 2000, 200000],
@@ -412,10 +414,11 @@ export default function WorkspaceControls({
           <section className="control-section">
             <h3>Move your workspace between computers</h3>
             <p>
-              Export projects, documents, approvals, curated memory, limits, and request receipts.
-              Credentials and model weights are not included. Keep the file private: it contains
-              your project data. Demo and normal workspaces have separate databases; export from the
-              one you are using.
+              Export projects, task results, approvals, curated memory, limits, and request
+              receipts. Source files in managed coding folders are separate; copy those folders or
+              download their source ZIPs as well. Credentials and model weights are not included.
+              Keep the file private: it contains your project data. Demo and normal workspaces have
+              separate databases; export from the one you are using.
             </p>
             <button
               className="button primary"

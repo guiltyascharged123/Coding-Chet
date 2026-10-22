@@ -4,6 +4,7 @@ export type ProjectStatus = 'ready' | 'running' | 'paused' | 'needs_input' | 'co
 export type TaskStatus = 'queued' | 'working' | 'review' | 'done' | 'failed';
 export type AgentStatus = 'idle' | 'working' | 'waiting';
 export type DocumentPack = 'studio' | 'office';
+export type Workflow = 'office' | 'software' | 'research' | 'custom';
 export type DocumentKind =
   | 'brief'
   | 'project_plan'
@@ -40,6 +41,8 @@ export interface Task {
   completedAt?: number;
   leaseId?: string;
   leaseExpiresAt?: number;
+  toolLog?: { id: string; type: string; detail: string; status?: string }[];
+  readOnly?: boolean;
 }
 export interface Project {
   id: string;
@@ -51,6 +54,12 @@ export interface Project {
   documentPack?: DocumentPack;
   model?: string;
   planning?: 'template' | 'ai';
+  planningStatus?: 'planning' | 'failed' | 'ready';
+  planningError?: string;
+  workflow?: Workflow;
+  team?: Agent[];
+  workspaceFolder?: string;
+  toolNetwork?: boolean;
 }
 export interface MemoryItem {
   id: string;
@@ -128,6 +137,7 @@ export interface RuntimeInfo {
   available: Record<Provider, boolean>;
   models: { openai: string; gemini: string; codex: string; ollama: string; compatible: string };
   diagnostics?: Record<string, string>;
+  coding?: { ready: boolean; message: string };
 }
 export interface Bootstrap {
   state: WorkspaceState;

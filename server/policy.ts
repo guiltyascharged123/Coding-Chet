@@ -10,6 +10,12 @@ export type GenerationContext = {
   phase?: 'plan' | 'task';
   model?: string;
   onAttempt?: (id: string) => void;
+  signal?: AbortSignal;
+  workspace?: string;
+  toolNetwork?: boolean;
+  readOnly?: boolean;
+  onTool?: (entry: NonNullable<Task['toolLog']>[number]) => void;
+  cache?: boolean;
 };
 export type Generated = { text: string; inputTokens?: number; outputTokens?: number };
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -46,7 +52,10 @@ export function selectedMemory(store: Store | undefined, projectId: string) {
 }
 export function relevantContext(task: Task, context: Task[]) {
   const final =
-    task.documentKind === 'status_report' || /handoff|bring it all together/i.test(task.title);
+    task.documentKind === 'status_report' ||
+    /hand[\s-]?off|bring it all together|results and next decisions|recommend a decision/i.test(
+      task.title,
+    );
   return context
     .filter((t) => final || task.dependencies.includes(t.id))
     .map((t) => ({ title: t.title, output: t.output }));
@@ -146,7 +155,7 @@ export async function guarded(
       maxOutput: policy(store).maxOutputTokens,
     }),
   );
-  const cached = store?.cached(key);
+  const cached = ctx.cache === false ? undefined : store?.cached(key);
   if (cached !== undefined && project) {
     store!.putAttempt({
       id: randomUUID(),
@@ -204,7 +213,7 @@ export async function guarded(
         inputTokens: usageKnown ? result.inputTokens : undefined,
         outputTokens: usageKnown ? result.outputTokens : undefined,
       });
-      store.cache(key, result.text);
+      if (ctx.cache !== false) store.cache(key, result.text);
     }
     return result.text;
   } catch (error) {

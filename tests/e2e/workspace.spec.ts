@@ -30,13 +30,11 @@ test('workspace limits, verified memory, backup downloads and validated restore 
   const invalid = structuredClone(backup);
   invalid.state.agents[0].desk = invalid.state.agents[1].desk;
   expect((await request.post('/api/restore', { data: invalid })).status()).toBe(400);
-  await dialog
-    .getByLabel('Workspace backup file')
-    .setInputFiles({
-      name: 'backup.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify(backup)),
-    });
+  await dialog.getByLabel('Workspace backup file').setInputFiles({
+    name: 'backup.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(backup)),
+  });
   await dialog.getByLabel('I understand this replaces the current projects and documents.').check();
   await dialog.getByRole('button', { name: 'Restore workspace backup', exact: true }).click();
   await expect(dialog.getByRole('status')).toContainText('Workspace restored');
@@ -278,15 +276,18 @@ test('walking agents, readable surfaces, office documents, and native exports wo
   expect(await page.locator('html').evaluate((el) => getComputedStyle(el).colorScheme)).toBe(
     'dark',
   );
-  await page.getByRole('button', { name: 'New project', exact: true }).click();
-  await page.getByLabel('Project name').fill('Operations planning');
-  await page
-    .getByLabel('The brief')
-    .fill(
-      'Prepare a practical office planning pack for a small team moving into a shared workspace. Identify assumptions, budget needs, owners, and next steps.',
-    );
-  await page.getByLabel('Deliverables', { exact: true }).selectOption('office');
-  await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  // Legacy office packs remain exportable; new projects use purpose-driven plans.
+  const created = await request.post('/api/projects', {
+    data: {
+      title: 'Operations planning',
+      brief:
+        'Prepare a practical office planning pack for a small team moving into a shared workspace. Identify assumptions, budget needs, owners, and next steps.',
+      documentPack: 'office',
+    },
+  });
+  const { project: officeProject } = await created.json();
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), officeProject.id);
+  await page.reload();
   await page.getByRole('button', { name: 'Run team', exact: true }).click();
   await page.getByRole('button', { name: 'Review work', exact: true }).click({ timeout: 15000 });
   await expect(page.getByRole('dialog')).toContainText('Milestone schedule');
@@ -342,4 +343,179 @@ test('walking agents, readable surfaces, office documents, and native exports wo
   );
   await expect(page.getByRole('dialog')).toContainText('API key');
   expect(errors).toEqual([]);
+});
+
+test('brief drafts survive close and reload, and a lost create response cannot duplicate a project', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'demo' } });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
+  await page.getByLabel('Project name').fill('Durable user brief');
+  const brief =
+    'Create a useful action plan from supplied constraints; retain this complete brief if planning or the network fails.';
+  await page.getByLabel('The brief').fill(brief);
+  await page.getByLabel('Team & workflow').selectOption('custom');
+  await page.getByRole('button', { name: 'Save for later', exact: true }).click();
+  await page.reload();
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
+  await expect(page.getByLabel('The brief')).toHaveValue(brief);
+  let submissions = 0;
+  await page.route('**/api/projects', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    submissions++;
+    if (submissions === 1) {
+      await route.fetch();
+      await route.abort('failed');
+    } else await route.continue();
+  });
+  await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Your draft is retained');
+  await expect(page.getByLabel('The brief')).toHaveValue(brief);
+  await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Durable user brief', exact: true }),
+  ).toBeVisible();
+  const state = (await (await request.get('/api/state')).json()).state;
+  expect(
+    state.projects.filter((p: { title: string }) => p.title === 'Durable user brief'),
+  ).toHaveLength(1);
+  expect(await page.evaluate(() => localStorage.getItem('workroom-project-draft-v1'))).toBe(null);
+  await page.getByText('Saved project brief', { exact: true }).click();
+  await expect(page.locator('.saved-brief')).toContainText(brief);
+  await page.getByRole('button', { name: 'Edit plan · 1 tasks', exact: true }).click();
+  await page.getByLabel('Task 1 title').fill('A purposeful assignment');
+  for (let i = 0; i < 6; i++)
+    await page.getByRole('button', { name: 'Add task', exact: true }).click();
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Edit plan · 7 tasks', exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Task board', exact: true }).click();
+  await expect(page.locator('.task-card')).toHaveCount(7);
+  await expect(page.locator('.task-card').first()).toContainText('A purposeful assignment');
+});
+
+test('failed AI planning remains visible after reload and retries the saved project after usage review', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
+  await page.getByLabel('Project name').fill('Recover a failed plan');
+  const brief =
+    'E2E planning recovery: preserve this brief and prepare only the useful deliverable requested by the user.';
+  await page.getByLabel('The brief').fill(brief);
+  await page.getByLabel('Task planning').selectOption('ai');
+  await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry planning', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.planning-banner')).toContainText('Your project and brief are saved');
+  await expect(page.getByRole('button', { name: 'Resume team', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Review usage', exact: true }).click();
+  const usage = page.getByRole('dialog');
+  await expect(usage.getByRole('tab', { name: 'Usage', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await usage
+    .locator('.usage-list article')
+    .filter({ hasText: 'Recover a failed plan' })
+    .getByRole('button', { name: /Acknowledge/ })
+    .click();
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('button', { name: 'Retry planning', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Edit plan · 2 tasks', exact: true }),
+  ).toBeVisible();
+  const state = (await (await request.get('/api/state')).json()).state;
+  expect(
+    state.projects.filter((p: { title: string }) => p.title === 'Recover a failed plan'),
+  ).toHaveLength(1);
+  expect(
+    state.projects.find((p: { title: string }) => p.title === 'Recover a failed plan').brief,
+  ).toBe(brief);
+  await page.getByRole('button', { name: 'Server connected', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Coding tools');
+  await page.getByRole('button', { name: 'Check connections', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('No model was run');
+});
+
+test('software projects expose actual source files and ZIPs, project roles, and a saved network choice', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'demo' } });
+  const created = await request.post('/api/projects', {
+    data: {
+      title: 'Browser source workspace',
+      brief: 'Build a local utility and review and test its actual source files.',
+      workflow: 'software',
+    },
+  });
+  const { project } = await created.json();
+  const { folder } = await (await request.get(`/api/projects/${project.id}/files`)).json();
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(`${folder}/index.js`, 'export const actualSource = true;');
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  await page.getByRole('button', { name: 'Your team', exact: true }).click();
+  await expect(page.locator('.team-grid')).toContainText('Implementation engineer');
+  await expect(page.locator('.team-grid')).toContainText('Code reviewer');
+  await page.getByRole('button', { name: 'Edit plan · 5 tasks', exact: true }).click();
+  await page.getByLabel('Allow tool network for this project', { exact: false }).check();
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await page.getByRole('button', { name: /^Outputs/ }).click();
+  await page.getByRole('button', { name: /index.js/ }).click();
+  await expect(page.locator('.file-preview')).toContainText('export const actualSource = true;');
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download source ZIP', exact: true }).click();
+  const download = await pending;
+  expect(strFromU8(unzipSync(await readFile((await download.path())!))['index.js'])).toBe(
+    'export const actualSource = true;',
+  );
+  const state = (await (await request.get('/api/state')).json()).state;
+  expect(state.projects.find((p: { id: string }) => p.id === project.id).toolNetwork).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('an empty normal workspace welcomes the user and creates a real saved project', async ({
+  page,
+  request,
+}) => {
+  const backup = await (await request.get('/api/backup')).json();
+  const empty = structuredClone(backup);
+  empty.state.projects = [];
+  empty.state.tasks = [];
+  empty.state.activities = [];
+  empty.state.approvals = [];
+  empty.state.memory = [];
+  expect((await request.post('/api/restore', { data: empty })).ok()).toBe(true);
+  try {
+    await page.goto('/');
+    await expect(
+      page.getByRole('heading', { name: 'Your workspace is ready.', exact: true }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Project name').fill('First meaningful project');
+    await page
+      .getByLabel('The brief')
+      .fill(
+        'Coordinate an actual project from supplied constraints, with a useful result and user decisions.',
+      );
+    await page.getByRole('button', { name: 'Create project', exact: true }).click();
+    await expect(
+      page.getByRole('heading', { name: 'First meaningful project', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Edit plan · 4 tasks', exact: true }),
+    ).toBeVisible();
+  } finally {
+    await request.post('/api/restore', { data: backup });
+  }
 });

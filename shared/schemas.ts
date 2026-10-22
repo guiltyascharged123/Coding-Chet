@@ -12,7 +12,7 @@ export const providerSchema = z.enum(providers);
 export const defaultPolicy = {
   allowPaid: false,
   maxConcurrent: 1,
-  maxTasks: 6,
+  maxTasks: 30,
   maxRevisions: 1,
   maxRequests24h: 30,
   maxInputBytes: 24000,
@@ -29,7 +29,7 @@ const rate = z.object({
 export const policySchema = z.object({
   allowPaid: z.boolean(),
   maxConcurrent: z.number().int().min(1).max(4),
-  maxTasks: z.number().int().min(3).max(100),
+  maxTasks: z.number().int().min(1).max(100),
   maxRevisions: z.number().int().min(0).max(20),
   maxRequests24h: z.number().int().min(1).max(10000),
   maxInputBytes: z.number().int().min(2000).max(200000),
@@ -84,9 +84,27 @@ export const stateSchema = z
           documentPack: z.enum(['studio', 'office']).optional(),
           model: text.max(150).optional(),
           planning: z.enum(['template', 'ai']).optional(),
+          planningStatus: z.enum(['planning', 'failed', 'ready']).optional(),
+          planningError: text.max(4000).optional(),
+          workflow: z.enum(['office', 'software', 'research', 'custom']).optional(),
+          team: z
+            .array(
+              z.object({
+                id,
+                name: text.min(1).max(30),
+                role: text.min(2).max(50),
+                specialty: text.min(5).max(600),
+                color: text.regex(/^#[0-9a-fA-F]{6}$/),
+                desk: z.number().int().min(0).max(3),
+                goal: text.max(1000).optional(),
+              }),
+            )
+            .length(4)
+            .optional(),
+          workspaceFolder: text.regex(/^[a-z0-9-]{1,160}$/).optional(),
+          toolNetwork: z.boolean().optional(),
         }),
       )
-      .min(1)
       .max(1000),
     tasks: z
       .array(
@@ -119,6 +137,18 @@ export const stateSchema = z
           attemptId: id.optional(),
           leaseId: id.optional(),
           leaseExpiresAt: z.number().finite().optional(),
+          toolLog: z
+            .array(
+              z.object({
+                id,
+                type: text.max(50),
+                detail: text.max(2000),
+                status: text.max(50).optional(),
+              }),
+            )
+            .max(100)
+            .optional(),
+          readOnly: z.boolean().optional(),
         }),
       )
       .max(10000),
@@ -160,6 +190,14 @@ export const stateSchema = z
     const projects = new Set(s.projects.map((p) => p.id)),
       agents = new Set<string>(s.agents.map((a) => a.id)),
       tasks = new Map(s.tasks.map((t) => [t.id, t]));
+    for (const p of s.projects)
+      if (
+        p.team &&
+        (new Set(p.team.map((a) => a.id)).size !== 4 ||
+          p.team.some((a) => !agents.has(a.id)) ||
+          new Set(p.team.map((a) => a.desk)).size !== 4)
+      )
+        fail('Invalid project team.');
     for (const t of s.tasks)
       if (
         !projects.has(t.projectId) ||

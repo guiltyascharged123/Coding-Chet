@@ -1,14 +1,18 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
 import type { Generated } from './policy.js';
 import type { Codex, CodexOptions, ThreadOptions } from '@openai/codex-sdk';
 import { codexFailure, CodexWorkerError } from './codex-errors.js';
+import type { Task } from '../shared/types.js';
 
 export const managedInfo = {
   codexReady: false,
+  codingReady: false,
+  codingMessage:
+    'Coding sandbox has not been checked. Enable and sign in to Codex, then check connections.',
   codexMessage:
     'Disabled. Install Codex CLI, sign in with ChatGPT, and set WORKROOM_CODEX_ENABLED=1.',
   ollamaReady: false,
@@ -85,6 +89,9 @@ export function serviceUrl(value: string, localOnly = false) {
 }
 export async function refreshManagedInfo(checkApis = false) {
   managedInfo.codexReady = false;
+  managedInfo.codingReady = false;
+  managedInfo.codingMessage =
+    'Enable and sign in to Codex, then check connections to test coding tools without a model call.';
   if (process.env.WORKROOM_CODEX_ENABLED === '1') {
     let result = '';
     try {
@@ -104,6 +111,11 @@ export async function refreshManagedInfo(checkApis = false) {
     managedInfo.codexMessage = managedInfo.codexReady
       ? 'ChatGPT authentication detected. Subscription allowance is not known; one job can include several model turns.'
       : 'Install Codex CLI, sign in with ChatGPT, and set WORKROOM_CODEX_MODEL to an exact model ID available to that account. API-key authentication is intentionally rejected.';
+    if (managedInfo.codexReady) {
+      const probe = await checkCodingSandbox();
+      managedInfo.codingReady = probe.ready;
+      managedInfo.codingMessage = probe.message;
+    }
   }
   try {
     const url = serviceUrl(process.env.OLLAMA_URL || 'http://127.0.0.1:11434', true);
@@ -270,6 +282,310 @@ export function codexThreadOptions(directory: string, model: string): ThreadOpti
     ...(model !== 'Codex account default' ? { model } : {}),
     modelReasoningEffort: 'low',
   };
+}
+export function codexCodingOptions(
+  directory: string,
+  network = false,
+  readOnly = false,
+): CodexOptions {
+  const options = codexWorkerOptions(directory);
+  const scratch = join(directory, '.workroom-tmp');
+  mkdirSync(scratch, { recursive: true, mode: 0o700 });
+  const readable = new Set([
+    ...[
+      '/usr',
+      '/bin',
+      '/sbin',
+      '/lib',
+      '/lib64',
+      '/dev/null',
+      '/dev/urandom',
+      '/dev/random',
+      '/etc/alternatives',
+      '/etc/ld.so.cache',
+      '/etc/ssl',
+      '/etc/resolv.conf',
+      '/etc/hosts',
+      '/etc/nsswitch.conf',
+    ].filter((p) => existsSync(p)),
+    process.execPath,
+    ...(process.platform === 'win32' && process.env.SystemRoot ? [process.env.SystemRoot] : []),
+  ]);
+  for (const executable of ['npm', 'npx', 'npm.cmd', 'npx.cmd']) {
+    const path = join(dirname(process.execPath), executable);
+    if (existsSync(path)) readable.add(path);
+  }
+  // nvm installs npm's scripts beside Node's bin directory. Expose that package
+  // specifically, never the parent installation/home directory.
+  for (const path of [
+    resolve(dirname(process.execPath), '../lib/node_modules/npm'),
+    join(dirname(process.execPath), 'node_modules/npm'),
+  ])
+    if (existsSync(path)) readable.add(path);
+  // apply_patch is supplied by the native CLI. Expose only its installed package,
+  // rather than granting read access to Workroom's own folder (which may hold .env).
+  try {
+    const require = createRequire(import.meta.resolve('@openai/codex-sdk'));
+    const entry = require.resolve('@openai/codex/bin/codex.js');
+    readable.add(resolve(dirname(entry), '..'));
+    const platformRequire = createRequire(entry);
+    readable.add(
+      dirname(
+        platformRequire.resolve(`@openai/codex-${process.platform}-${process.arch}/package.json`),
+      ),
+    );
+  } catch {
+    /* Bundled vendor layout or unavailable optional native package. */
+  }
+  if (process.env.WORKROOM_CODEX_BIN && isAbsolute(process.env.WORKROOM_CODEX_BIN))
+    readable.add(process.env.WORKROOM_CODEX_BIN);
+  options.config = {
+    ...options.config,
+    default_permissions: 'workroom_coding',
+    permissions: { workroom_coding: { network: { enabled: network } } },
+    features: {
+      shell_tool: true,
+      apply_patch_freeform: true,
+      js_repl: false,
+      multi_agent: false,
+      apps: false,
+    },
+  };
+  options.configOverrides = [
+    `permissions.workroom_coding.filesystem={ ":root" = "deny", ${[...readable]
+      .filter((p) => p !== directory && p !== '/')
+      .map((p) => `${JSON.stringify(p)} = "read"`)
+      .join(
+        ', ',
+      )}, ${JSON.stringify(directory)} = "${readOnly ? 'read' : 'write'}"${readOnly ? `, ${JSON.stringify(scratch)} = "write"` : ''} }`,
+  ];
+  options.env = {
+    ...options.env,
+    TMPDIR: scratch,
+    TEMP: scratch,
+    TMP: scratch,
+    XDG_CACHE_HOME: join(scratch, 'cache'),
+    npm_config_cache: join(scratch, 'npm-cache'),
+    UV_CACHE_DIR: join(scratch, 'uv-cache'),
+  };
+  return options;
+}
+
+export function codexConfigArgs(options: CodexOptions): string[] {
+  function flatten(value: Record<string, unknown>, prefix = ''): string[] {
+    return Object.entries(value).flatMap(([key, item]) => {
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (item === undefined) return [];
+      if (item && typeof item === 'object' && !Array.isArray(item))
+        return Object.keys(item).length
+          ? flatten(item as Record<string, unknown>, path)
+          : [`${path}={}`];
+      return [`${path}=${JSON.stringify(item)}`];
+    });
+  }
+  return [...flatten(options.config || {}), ...(options.configOverrides || [])].flatMap((c) => [
+    '--config',
+    c,
+  ]);
+}
+
+// An offline probe, with private CLI state: verifies real command execution,
+// project writes and denial of a sibling file without reading any user data.
+export async function checkCodingSandbox() {
+  const root = mkdtempSync(join(tmpdir(), 'workroom-sandbox-check-'));
+  const directory = join(root, 'project'),
+    cliState = join(root, 'cli-state');
+  mkdirSync(directory, { mode: 0o700 });
+  mkdirSync(cliState, { mode: 0o700 });
+  const outside = join(root, 'outside-probe.txt');
+  writeFileSync(outside, 'workroom-isolation-probe');
+  try {
+    const options = codexCodingOptions(directory);
+    const entry = createRequire(import.meta.resolve('@openai/codex-sdk')).resolve(
+      '@openai/codex/bin/codex.js',
+    );
+    const command = process.env.WORKROOM_CODEX_BIN || process.execPath;
+    const script = `const fs = require('node:fs'); fs.writeFileSync('probe.txt', 'ok'); try { fs.readFileSync(${JSON.stringify(outside)}); process.exit(17); } catch(e) { if (!['EACCES','EPERM','ENOENT'].includes(e.code)) throw e; }`;
+    let socketPermissions = false;
+    const result = await new Promise<number | null>((resolveResult) => {
+      const child = spawn(
+        command,
+        [
+          ...(process.env.WORKROOM_CODEX_BIN ? [] : [entry]),
+          'sandbox',
+          '--permission-profile',
+          'workroom_coding',
+          '--cd',
+          directory,
+          ...codexConfigArgs(options),
+          '--',
+          process.execPath,
+          '-e',
+          script,
+        ],
+        {
+          cwd: directory,
+          env: { ...options.env, CODEX_HOME: cliState },
+          stdio: ['ignore', 'ignore', 'pipe'],
+          windowsHide: true,
+        },
+      );
+      child.stderr?.on('data', (data) => {
+        if (/socket directory must be a user-owned directory with mode 0700/.test(String(data)))
+          socketPermissions = true;
+      });
+      const timer = setTimeout(() => {
+        child.kill();
+        resolveResult(null);
+      }, 15000);
+      child.on('error', () => {
+        clearTimeout(timer);
+        resolveResult(null);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        resolveResult(code);
+      });
+    });
+    const ready =
+      result === 0 &&
+      existsSync(join(directory, 'probe.txt')) &&
+      readFileSync(join(directory, 'probe.txt'), 'utf8') === 'ok';
+    return {
+      ready,
+      message: ready
+        ? 'Offline coding check passed: commands can write the managed folder and cannot read a sibling probe file. No model was run.'
+        : socketPermissions
+          ? 'Codex refused to start its sandbox because its reserved socket directory has incompatible ownership or permissions on this host. Check the local Codex installation; text workflows remain available. No unrestricted fallback was attempted.'
+          : 'The offline coding sandbox check failed on this host. Text workflows remain available. On Windows, use Ubuntu in WSL2 for coding. On Linux, check Codex sandbox support and unprivileged user namespaces. No unrestricted fallback was attempted.',
+    };
+  } catch {
+    return {
+      ready: false,
+      message:
+        'The offline coding sandbox check could not start. Check the native Codex installation and sandbox support. No unrestricted fallback was attempted.',
+    };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+export async function codexWork(
+  system: string,
+  user: string,
+  model: string,
+  directory: string,
+  signal?: AbortSignal,
+  onTool?: (entry: NonNullable<Task['toolLog']>[number]) => void,
+  network = false,
+  readOnly = false,
+  factory?: (options: CodexOptions) => Pick<Codex, 'startThread'>,
+): Promise<Generated> {
+  if (!managedInfo.codexReady) throw new CodexWorkerError('CODEX_AUTH');
+  const controller = new AbortController();
+  const combined = AbortSignal.any([
+    controller.signal,
+    AbortSignal.timeout(15 * 60_000),
+    ...(signal ? [signal] : []),
+  ]);
+  try {
+    const options = codexCodingOptions(directory, network, readOnly);
+    const codex = factory
+      ? factory(options)
+      : new (await import('@openai/codex-sdk')).Codex(options);
+    const thread = codex.startThread(codexThreadOptions(directory, model));
+    const turn = await thread.runStreamed(
+      `${system}\n\nWork only on this assignment, in the current project folder. ${readOnly ? 'This is an inspection task: project source files are read-only; only the scratch folder is writable. Do not implement.' : 'Project files are writable for this assignment.'} Complete the work and report evidence. Return JSON with outcome (complete or blocked) and summary (a useful Markdown report). A scope/decision task can complete with an actionable plan; implementation, review and testing tasks require real file inspection and appropriate tools. Assignment data:\n${user}`,
+      {
+        signal: combined,
+        outputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            outcome: { type: 'string', enum: ['complete', 'blocked'] },
+            summary: { type: 'string' },
+          },
+          required: ['outcome', 'summary'],
+        },
+      },
+    );
+    let text = '',
+      completed = false,
+      toolsCompleted = false,
+      usage: Generated = { text: '' };
+    for await (const event of turn.events) {
+      if (
+        event.type === 'item.started' ||
+        event.type === 'item.updated' ||
+        event.type === 'item.completed'
+      ) {
+        const item = event.item;
+        if (
+          event.type === 'item.completed' &&
+          ((item.type === 'command_execution' &&
+            item.status === 'completed' &&
+            item.exit_code === 0) ||
+            (item.type === 'file_change' && item.status === 'completed'))
+        )
+          toolsCompleted = true;
+        if (['mcp_tool_call', 'web_search'].includes(item.type)) {
+          controller.abort();
+          throw new CodexWorkerError('CODEX_TOOL_BLOCKED');
+        }
+        if (item.type === 'command_execution')
+          onTool?.({
+            id: item.id,
+            type: 'command',
+            detail:
+              item.command.slice(0, 1500) +
+              (item.exit_code !== undefined ? `\nExit code: ${item.exit_code}` : ''),
+            status: item.status,
+          });
+        if (item.type === 'file_change')
+          onTool?.({
+            id: item.id,
+            type: 'files',
+            detail: item.changes
+              .map((c) => `${c.kind}: ${c.path}`)
+              .join('\n')
+              .slice(0, 2000),
+            status: item.status,
+          });
+        if (event.type === 'item.completed' && item.type === 'agent_message') text = item.text;
+      }
+      if (event.type === 'turn.completed') {
+        completed = true;
+        usage = {
+          text,
+          inputTokens: event.usage.input_tokens,
+          outputTokens: event.usage.output_tokens,
+        };
+      }
+      if (event.type === 'turn.failed') throw codexFailure(event.error);
+      if (event.type === 'error') throw codexFailure(event.message);
+    }
+    if (!completed) throw new CodexWorkerError('CODEX_NO_RECEIPT');
+    // Validate the structured result before recording a confirmed completion.
+    const result = JSON.parse(text) as { outcome: string; summary: string };
+    if (
+      !['complete', 'blocked'].includes(result.outcome) ||
+      typeof result.summary !== 'string' ||
+      !result.summary.trim()
+    )
+      throw new Error('Invalid coding result');
+    if (result.outcome === 'complete' && !toolsCompleted) {
+      result.outcome = 'blocked';
+      result.summary = `No successful file or command tool activity was reported. This software assignment has not been verified.\n\n${result.summary}`;
+    }
+    return { ...usage, text: JSON.stringify(result) };
+  } catch (error) {
+    if (error instanceof CodexWorkerError) throw error;
+    if (combined.aborted)
+      throw new CodexWorkerError(
+        combined.reason?.name === 'TimeoutError' ? 'CODEX_TIMEOUT' : 'CODEX_CANCELLED',
+      );
+    throw codexFailure(error);
+  }
 }
 export async function codexGenerate(
   system: string,

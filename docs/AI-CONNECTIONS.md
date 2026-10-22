@@ -34,11 +34,9 @@ controls → Limits & connections**, and explicitly set its project connection.
 Changing it preserves existing task plans and outputs. Changes to model settings
 in `.env` take effect for new projects, or when you explicitly reset a connection.
 
-New projects normally use a six-task starter plan and make **no model request**.
-Choose **Ask the selected model to plan** only when you want AI decomposition;
-planning consumes allowance/budget too. Select **Office document pack** for a brief,
-project plan, budget, risk register, meeting template and status report. Then
-**Run team**, review its proposal, and inspect/export the results.
+New projects use an editable workflow template and make **no model request**. Choose office coordination, software delivery, research/decision support, or a custom plan. Each project stores its own four-role team, so editing one team's roles does not change other projects. Add/remove tasks and change assignments, dependencies, approval gates and instructions through **Edit plan**. A 30-task default ceiling is configurable; six is not a workflow constraint.
+
+AI planning is optional and uses allowance/budget. The project and brief are saved before dispatch; the saved project reports planning state and offers retry or an explicit template fallback. Duplicate submissions reuse a project ID. Uncertain planning receipts require acknowledgment before retry. Invalid model plans are not replayed from the text cache. Stopped/restarted planning becomes a visible failed plan without losing the brief.
 
 Input limits are measured in UTF-8 bytes, not exact model tokens. Respect your model
 server's context window too; raising the app's byte limit does not enlarge it.
@@ -80,13 +78,21 @@ shell/patch features and configured MCP servers/hooks, and stops on tool events.
 Its supported `never` approval policy prevents approval escalation while retaining
 the named permissions profile. Local AGENTS.md and skill instructions are not
 loaded: the worker receives its document context explicitly from Workroom.
-Unsupported restrictions fail the assignment, with no unrestricted retry. This is
-a document adapter, not an autonomous coding worker. Authentication and model
-traffic to OpenAI still occur. Tests check the bridge contract and run the native
+Unsupported restrictions fail the assignment, with no unrestricted retry. This remains the text-mode worker for office/research/custom projects and AI planning. Authentication and model traffic to OpenAI still occur. Tests check the bridge contract and run the native
 CLI's offline prompt/configuration check with private, empty CLI state and no model
-generation. Those checks do not verify native sandbox enforcement or your live
-account; check those on your own machine. Windows
-users can use WSL2 if their native Codex CLI setup fails.
+generation. Your live account and generation quota must be checked on your computer.
+
+### Software delivery worker
+
+For **Software delivery**, each task starts a Codex assignment in the same managed folder, with that role's goals, approved handoffs and relevant memory. The native shell and patch tools are enabled. The default scope task is an inspection task with read-only source access; implementation/review/test tasks can change files. Inspection tasks have a writable private scratch folder. Project tools can read system runtime directories and the native CLI package, not Workroom's `.env` or arbitrary home files. Approval escalation, MCP servers, hooks, nested Codex agents and web search are disabled. `never` means deny escalation; it is not an unrestricted execution flag.
+
+Tool network defaults off. The project-specific **Edit plan → Allow tool network** setting permits internet requests, including dependency downloads, for later tasks. This grants network access to executed code and installation scripts too. Do not put secrets in these project folders. Workroom does not automatically deploy, publish or push; those actions are outside the task instructions. The sandbox restricts filesystem/network scope, not every possible semantic action inside the writable folder.
+
+Tasks stream actual command lines, exit codes and file-change events into their saved details. Reports use a structured `complete`/`blocked` outcome. No successful tool activity means the software task is blocked even if its text claims completion. A blocker pauses the project and retains files, report and tool history; the user can clarify and retry. Reports and a successful command are evidence, not proof that all requirements are met. Independent code review, testing and human scope approval remain useful.
+
+Coding assignments have a 15-minute timeout, use no text-result cache, and run one at a time within a project even if the global concurrency limit is higher. Native Codex can make multiple model turns during one assignment. Request limits count assignments, not internal turns; subscription allowance is not a hard dollar budget. Task and revision limits still apply, and there is no unbounded self-generated task loop. Add follow-up work explicitly in the plan editor.
+
+**Check connections** runs an offline coding probe with private empty CLI state. It checks actual command execution, a write in a temporary project folder, and denial of a sibling probe file. Coding is unavailable if that probe fails. This is a targeted readiness check, not a complete sandbox/security audit. The Linux cloud host used for development rejects native command startup because its reserved Codex socket directory has incompatible permissions; the runtime check reports that and does not bypass it. Native configurations and mocked SDK/tool contracts are tested; live ChatGPT generation and a full native coding run remain to be validated on the user's computer. Windows users should use Ubuntu in WSL2 if the native check fails.
 
 One job can include multiple internal model turns. The ledger records jobs and
 reported tokens, not remaining subscription allowance. The API/local output-token
@@ -112,15 +118,13 @@ remain in place; there is no unrestricted or paid-API fallback.
 | `CODEX_NETWORK`                                        | Check network/proxy/certificate configuration.                                                                                                                         |
 | `CODEX_INSTALL`                                        | Run `npm run local` to prepare dependencies and check any custom CLI executable override.                                                                              |
 | `CODEX_TIMEOUT`, `CODEX_CANCELLED`, `CODEX_NO_RECEIPT` | Review Usage before explicitly retrying; allowance may already have been consumed.                                                                                     |
-| `CODEX_TOOL_BLOCKED`                                   | Keep the assignment to document work; tools require a separately controlled external worker.                                                                           |
+| `CODEX_TOOL_BLOCKED`                                   | Text workflows disable tools. Use Software delivery for Codex file/command tools; MCP and web search remain disabled.                                                  |
 | `CODEX_UNKNOWN`                                        | Report the code, selected model ID, and whether failure was immediate or delayed.                                                                                      |
 
 Error messages never copy raw CLI response bodies, prompts, paths, or credentials.
 Do not send `.env`, auth files, or login tokens when asking for help. After reviewing
 an uncertain attempt, acknowledge it in **Workspace controls → Usage**, then open
-the failed task and choose **Retry task**. If planning failed before project creation,
-create the project again after correcting the cause. Historical attempt counts and
-reservations remain; no work is automatically repeated.
+the failed task and choose **Retry task**, or choose **Retry planning** on the saved project. **Use editable template** provides a no-model planning fallback. Older builds could lose a brief before saving the project; that unsaved content cannot be recovered by updating. Historical attempt counts and reservations remain; no work is automatically repeated.
 
 ## Ollama and other local servers
 
@@ -167,7 +171,7 @@ Paid requests start **disabled**. In **Workspace controls → Limits & connectio
 explicitly enable them and enter current USD prices per million input/output tokens
 for the exact project model. Enter zero only for a verified free quota/rate.
 
-Defaults: one active task globally, six tasks per project, one revision per task,
+Defaults: one active task globally, 30 tasks per project, one revision per task,
 30 requests per rolling 24 hours, 24,000 input bytes, 2,000 output tokens, estimated
 API budgets $2 per rolling day / $1 per project. These are editable. Large existing
 plans are preserved and blocked until you raise their task limit. Changing a limit
@@ -206,7 +210,7 @@ self-starting agent loop; goal prompts guide the tasks you authorize.
 
 Normal tasks receive dependency documents; final status/handoff tasks receive
 completed project documents. A useful first benchmark: supply real constraints,
-produce six office documents, check assumptions/totals, and compare editing time
+request a useful deliverable, check assumptions/totals, and compare editing time
 with your usual process. Track accepted documents, unresolved claims, human editing
 time and usage. The documents and review process must earn their place in your work.
 
@@ -234,3 +238,9 @@ platform authentication for remote workers; runner tokens don't bypass it. Add
 dashboard authentication, worker isolation, distributed ownership and permissions
 before public/multi-user deployment. The human gate holds dependent tasks; it cannot
 undo a worker's earlier file changes or actions.
+
+### Managed source files and backups
+
+Software folders are named with a readable title and a stable project-ID hash under `projects/` beside the database (normally `.data/projects/`). Roles share files; project titles may repeat without sharing folders. Files are retained on failures, retries, restarts and record restores. Outputs includes a source browser and a real ZIP download. Hidden files, symlinks, dependency folders and private-key extensions are omitted from browser exports. File previews are limited to 256 KB, ZIPs to 25 MB and 2,000 files. Use the local folder directly for larger projects.
+
+Portable JSON backups contain records, not source. Copy managed folders separately with workers stopped, or download source ZIPs. Record restores never revert file edits. Existing legacy projects, six-document packs, exports and external leases remain supported. Normal new workspaces start empty; the explicit demo launcher retains a sample fixture.

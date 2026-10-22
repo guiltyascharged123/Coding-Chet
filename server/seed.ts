@@ -98,7 +98,7 @@ export function demoPlan(project: Project, team: Agent[]): Task[] {
   }));
 }
 
-export function initialState(): WorkspaceState {
+export function initialState(demo = true): WorkspaceState {
   const project: Project = {
     id: randomUUID(),
     title: 'Sunday Coffee',
@@ -110,27 +110,29 @@ export function initialState(): WorkspaceState {
   };
   return {
     agents: structuredClone(agents),
-    projects: [project],
-    tasks: demoPlan(project, agents),
+    projects: demo ? [project] : [],
+    tasks: demo ? demoPlan(project, agents) : [],
     provider: 'demo',
     approvals: [],
-    activities: [
-      {
-        id: randomUUID(),
-        projectId: project.id,
-        agentId: 'mira',
-        type: 'system',
-        message: 'Your brief is mapped into six tasks. We’re ready when you are.',
-        createdAt: Date.now(),
-      },
-      {
-        id: randomUUID(),
-        projectId: project.id,
-        type: 'system',
-        message:
-          'Four specialists have joined the studio. Start the team to watch the workflow unfold.',
-        createdAt: Date.now() - 1000,
-      },
-    ],
+    activities: demo
+      ? [
+          {
+            id: randomUUID(),
+            projectId: project.id,
+            agentId: 'mira',
+            type: 'system',
+            message: 'Your brief is mapped into six tasks. We’re ready when you are.',
+            createdAt: Date.now(),
+          },
+          {
+            id: randomUUID(),
+            projectId: project.id,
+            type: 'system',
+            message:
+              'Four specialists have joined the studio. Start the team to watch the workflow unfold.',
+            createdAt: Date.now() - 1000,
+          },
+        ]
+      : [],
   };
 }

@@ -4,7 +4,7 @@
 
 An open-source browser workspace for collaborating AI agents. Give the team a
 brief, follow their handoffs in a 3D studio, review decisions, and download the
-deliverables. Built in Coding-Chet for office documents, planning, and project coordination.
+deliverables. Built in Coding-Chet for office coordination, planning, research and Codex software delivery.
 
 **Start here:** [Easy guide: run Workroom, connect ChatGPT/Codex, and understand account safety](docs/EASY-GUIDE.md).
 It covers the first project, everyday startup, costs, disconnecting, and common problems.
@@ -70,8 +70,7 @@ npm run codespace:restart
 ```
 
 Refresh the app's browser tab after restarting. Saved projects and documents stay
-in the database. Create a new project and select **Office document pack** to try
-the new business documents; existing projects keep their original task plan.
+in the database. Create a new project, choose a team and workflow, then use **Edit plan** to customize its assignments; existing projects keep their original tasks and results.
 
 ## Development
 
@@ -101,8 +100,9 @@ worktree is unnecessary. If npm’s default cache is unwritable, use
   pause/resume, failure reporting, and retry.
 - Live task states and handoffs via server-sent events; the office visualizes their activity.
 - Human approval gates, revision requests, and optional browser notifications.
-- Office document packs: executive brief, project plan/action register, budget estimate,
-  risk/decision register, meeting template, and status report. Select a pack in New project.
+- Project-specific team presets for office coordination, research, software delivery and custom work; editable plans with flexible task counts, owners, dependencies and approval gates. Legacy office packs and their exports remain supported.
+- Codex software assignments edit, review and test actual files in a shared managed project folder, with tool activity, blocked results, a source browser and ZIP downloads. Coding readiness is checked locally before execution.
+- Briefs are saved before AI planning, unfinished form drafts survive reloads, and failed plans offer retry or template fallback.
 - Editable Word (`.docx`) documents, Excel (`.xlsx`) workbooks with separate table sheets
   and calculated budget totals, Markdown, and Print / PDF exports. Individual and combined
   downloads preserve draft/review status. Excel notes retain the narrative context.
@@ -117,16 +117,12 @@ worktree is unnecessary. If npm’s default cache is unwritable, use
 - Responsive navigation, accessible dialogs, reduced-motion support, and a clickable
   2D fallback when WebGL is unavailable. Fonts and scene assets are bundled locally.
 
-**Demo mode is a simulation:** it creates labeled template documents without model
-calls. Built-in model connections generate text deliverables and optionally task plans.
-Normal project creation uses a free six-task starter plan. The document workers do not
-provide autonomous coding or browsing. Tool execution belongs in your external worker; the browser is the
-visual interface, not an arbitrary-code sandbox.
+**Demo mode is a simulation:** no AI or tools run. Normal new workspaces start empty. Editable templates create no model request; optional AI planning does. Office/research/custom model assignments generate text. **Software delivery uses Codex file and command tools** after its local sandbox readiness check passes. See the [easy guide](docs/EASY-GUIDE.md) for a first run, task retries, managed files and limitations.
 
 ## Connect a model
 
 See the [AI connection guide](docs/AI-CONNECTIONS.md) for a plain-language comparison,
-step-by-step provider setup, framework choices, and what is still needed for tool-using agents.
+step-by-step provider setup, built-in Codex coding tools, and custom worker options.
 
 Copy `.env.example` to `.env` (ignored by Git), configure the connection and restart.
 Select the default for new projects in Runtime settings. To switch an existing
@@ -146,7 +142,7 @@ active task. Model weights are not bundled or automatically downloaded. A ChatGP
 subscription can supply Codex allowance when the account includes access; it does
 not supply paid API credits. There is no automatic paid API fallback.
 
-Economy defaults: one active task, six tasks/project, one revision/task, 30 requests
+Economy defaults: one active task, 30 tasks/project, one revision/task, 30 requests
 per rolling day. Paid API estimates default to $2/day and $1/project, with paid
 requests disabled until explicitly enabled and exact-model prices supplied.
 Application estimates do not cap unrelated account spending or external workers.
@@ -251,3 +247,5 @@ OpenAI/Gemini access requires your credentials and is not verified by those test
 ## Contributing and license
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [MIT](LICENSE).
+
+Managed source folders live beside the database under `.data/projects/` by default. Workspace JSON backups contain records and reports, **not source files**; copy managed folders separately or use Outputs → Download source ZIP. The coding worker is bounded to project files plus read access for system tooling; tool network starts disabled and can be enabled per project for dependency downloads. Native execution must pass the local readiness check. Development verified native configuration and mocked worker contracts; the cloud host cannot start the native coding sandbox because of its reserved socket-directory permissions. No live account generation or unrestricted fallback was used.

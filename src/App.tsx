@@ -53,6 +53,9 @@ import Modal from './components/Modal';
 import Avatar from './components/Avatar';
 import DocumentActions from './components/DocumentActions';
 import WorkspaceControls from './components/WorkspaceControls';
+import ProjectModal from './components/ProjectModal';
+import PlanEditor from './components/PlanEditor';
+import ProjectFiles from './components/ProjectFiles';
 
 const Office = lazy(() => import('./components/Office'));
 type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs';
@@ -76,9 +79,19 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [initialError, setInitialError] = useState('');
   const [view, setView] = useState<View>('workspace');
-  const [projectId, setProjectId] = useState(localStorage.getItem('workroom-project') || '');
+  const [projectId, setProjectId] = useState(() => {
+    try {
+      return localStorage.getItem('workroom-project') || '';
+    } catch {
+      return '';
+    }
+  });
   const [projectMenu, setProjectMenu] = useState(false);
-  const [modal, setModal] = useState<'project' | 'runtime' | 'help' | 'controls' | null>(null);
+  const [modal, setModal] = useState<'project' | 'runtime' | 'help' | 'controls' | 'plan' | null>(
+    null,
+  );
+  const [controlsTab, setControlsTab] = useState('limits');
+  const [retryFeedback, setRetryFeedback] = useState('');
   const [agentId, setAgentId] = useState<string>();
   const [taskId, setTaskId] = useState<string>();
   const [reviewId, setReviewId] = useState<string>();
@@ -92,8 +105,9 @@ export default function App() {
   const [resetCamera, setResetCamera] = useState(0);
   const [activityFilter, setActivityFilter] = useState('all');
   const seenApprovals = useRef<Set<string> | null>(null);
-  const state = data?.state;
-  const project = state?.projects.find((p) => p.id === projectId) || state?.projects[0];
+  const rawState = data?.state;
+  const project = rawState?.projects.find((p) => p.id === projectId) || rawState?.projects[0];
+  const state = rawState ? { ...rawState, agents: project?.team || rawState.agents } : undefined;
   const tasks = state?.tasks.filter((t) => t.projectId === project?.id) || [];
   const activities = state?.activities.filter((a) => a.projectId === project?.id) || [];
   const pending = state?.approvals.filter((a) => a.status === 'pending') || [];
@@ -137,8 +151,16 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
-    if (project) localStorage.setItem('workroom-project', project.id);
+    if (project)
+      try {
+        localStorage.setItem('workroom-project', project.id);
+      } catch {
+        /* Project remains saved on the server. */
+      }
   }, [project?.id]);
+  useEffect(() => {
+    setRetryFeedback('');
+  }, [taskId]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 5500);
@@ -205,7 +227,7 @@ export default function App() {
     );
   }
 
-  if (!data || !project || !state)
+  if (!data || !state)
     return (
       <div className="loading-screen">
         <span className="brand-mark">w</span>
@@ -223,6 +245,53 @@ export default function App() {
             <p>Connecting to your workspace…</p>
           </>
         )}
+      </div>
+    );
+
+  if (!project)
+    return (
+      <div className="welcome-workspace">
+        <span className="brand-mark">w</span>
+        <h1>Your workspace is ready.</h1>
+        <p>
+          Create a project with your own goal. Choose a team, edit its task plan, and connect a
+          model when you are ready.
+        </p>
+        <p>
+          Current connection: {PROVIDER_LABELS[state.provider]}.{' '}
+          {state.provider === 'demo'
+            ? 'Demo previews do not run AI or tools.'
+            : 'Model work starts only when you request planning or run a team.'}
+        </p>
+        <div className="file-actions">
+          <button className="button primary" onClick={() => setModal('project')}>
+            New project
+          </button>
+          <button className="button secondary" onClick={() => setModal('runtime')}>
+            Model connections
+          </button>
+        </div>
+        {modal === 'project' && (
+          <ProjectModal
+            provider={state.provider}
+            onClose={() => setModal(null)}
+            onCreated={(id) => {
+              setProjectId(id);
+              setModal(null);
+              void getState().then(setData);
+            }}
+          />
+        )}
+        {modal === 'runtime' && (
+          <RuntimeModal
+            data={data}
+            onClose={() => setModal(null)}
+            onChange={(p) =>
+              act(() => api('/runtime', { provider: p }), 'Default connection updated.')
+            }
+          />
+        )}
+        {toast && <p role="status">{toast}</p>}
       </div>
     );
 
@@ -248,7 +317,6 @@ export default function App() {
             <strong>Personal studio</strong>
             <span>Your space to make things</span>
           </div>
-          <ChevronDown size={14} />
         </div>
         <span className="nav-label">YOUR STUDIO</span>
         <nav aria-label="Main navigation">
@@ -364,10 +432,14 @@ export default function App() {
             </div>
           </div>
           <div className="topbar-right">
-            <span className={`connection ${connected ? '' : 'connection-off'}`}>
+            <button
+              className={`connection ${connected ? '' : 'connection-off'}`}
+              title="Browser connection to the Workroom server. Click for model connection status; this indicator does not mean agents are running."
+              onClick={() => setModal('runtime')}
+            >
               {connected ? <Wifi size={13} /> : <WifiOff size={13} />}
-              {connected ? 'Live connection' : 'Reconnecting'}
-            </span>
+              {connected ? 'Server connected' : 'Reconnecting'}
+            </button>
             <span className="topbar-divider" />
             <button
               className="icon-button notification-button"
@@ -435,10 +507,7 @@ export default function App() {
                   ? 'DEMO SESSION'
                   : PROVIDER_LABELS[project.provider].toUpperCase()}
               </div>
-              <h2>
-                {project.title}
-                <ArrowUpRight size={18} />
-              </h2>
+              <h2>{project.title}</h2>
               <p title={project.brief}>{project.brief}</p>
             </div>
             <div className="project-progress">
@@ -454,7 +523,14 @@ export default function App() {
               </small>
             </div>
             <button
-              disabled={busy || project.status === 'completed' || !connected}
+              disabled={
+                busy ||
+                project.status === 'completed' ||
+                !connected ||
+                !tasks.length ||
+                project.planningStatus === 'planning' ||
+                project.planningStatus === 'failed'
+              }
               className={`button ${project.status === 'running' ? 'secondary' : 'primary'}`}
               onClick={() =>
                 project.status === 'needs_input' && projectApprovals[0]
@@ -488,6 +564,81 @@ export default function App() {
                       : 'Run team'}
             </button>
           </section>
+
+          <section className="project-tools" aria-label="Project brief and plan">
+            <details className="saved-brief">
+              <summary>Saved project brief</summary>
+              <p>{project.brief}</p>
+              <button
+                className="text-button"
+                onClick={() =>
+                  download(`${project.title}-brief.md`, `# ${project.title}\n\n${project.brief}`)
+                }
+              >
+                Download brief
+              </button>
+            </details>
+            <button
+              className="button secondary small"
+              disabled={
+                busy ||
+                project.planningStatus === 'planning' ||
+                project.status === 'running' ||
+                working > 0
+              }
+              onClick={() => setModal('plan')}
+            >
+              Edit plan · {tasks.length} tasks
+            </button>
+          </section>
+          {project.planningStatus === 'planning' && (
+            <div className="planning-banner" role="status">
+              <Loader2 size={18} className="spin" />
+              <div>
+                <strong>Project saved. Planning is running.</strong>
+                <p>Your original brief is safe. You can close this page and return.</p>
+              </div>
+              <button
+                className="button secondary small"
+                onClick={() => act(() => api(`/projects/${project.id}/pause`))}
+              >
+                Stop planning
+              </button>
+            </div>
+          )}
+          {project.planningStatus === 'failed' && (
+            <div className="planning-banner error-banner" role="alert">
+              <div>
+                <strong>Planning needs attention. Your project and brief are saved.</strong>
+                <p>{project.planningError}</p>
+              </div>
+              <div className="file-actions">
+                <button
+                  className="button secondary small"
+                  disabled={busy}
+                  onClick={() => act(() => api(`/projects/${project.id}/retry-planning`))}
+                >
+                  Retry planning
+                </button>
+                <button
+                  className="button secondary small"
+                  disabled={busy}
+                  onClick={() => act(() => api(`/projects/${project.id}/starter-plan`))}
+                >
+                  Use editable template
+                </button>
+                <button
+                  className="button secondary small"
+                  onClick={() => {
+                    setControlsTab('usage');
+                    setModal('controls');
+                  }}
+                >
+                  Review usage
+                </button>
+              </div>
+            </div>
+          )}
 
           {projectApprovals.length > 0 && (
             <button className="approval-banner" onClick={() => openReview(projectApprovals[0])}>
@@ -697,8 +848,10 @@ export default function App() {
                 <Sparkles size={14} />
                 <span>
                   {project.provider === 'demo'
-                    ? 'Demo: scripted tasks, template documents, and simulated office movement. No AI model is running.'
-                    : 'Credentials stay on the server. Your agents share context through task handoffs.'}
+                    ? 'Demo preview: no AI or tools run. Connect a model for real work.'
+                    : project.workflow === 'software'
+                      ? 'Each role uses Codex tools in the shared project folder. Task details show actual tool activity.'
+                      : 'Each role receives its assignment and relevant handoffs. This connection produces text; it does not execute code.'}
                 </span>
                 <button onClick={() => setModal('runtime')}>
                   {project.provider === 'demo' ? 'Connect a runtime' : 'Runtime settings'}
@@ -900,10 +1053,18 @@ export default function App() {
                 )}
               </div>
               <p className="outputs-help">
-                Open a document to download an editable Word file, turn its tables into Excel
-                sheets, or print to PDF. New projects can produce an office document pack with
-                briefs, schedules, budgets, risks, meeting templates, and status reports.
+                Open a task result to review its work, download useful reports as Word or Markdown,
+                export tables to Excel, or print to PDF.
               </p>
+              {project.workflow === 'software' && (
+                <ProjectFiles
+                  key={project.id}
+                  project={project}
+                  revision={tasks
+                    .map((t) => `${t.status}:${t.completedAt || 0}:${t.toolLog?.length || 0}`)
+                    .join('|')}
+                />
+              )}
               {tasks.some((t) => t.output) ? (
                 <div className="output-grid">
                   {tasks
@@ -1003,12 +1164,29 @@ export default function App() {
             setProjectId(id);
             setView('workspace');
             setModal(null);
-            setToast('Your project is ready. Start the team when you’re ready.');
+            void getState().then(setData);
+            setToast('Project saved. Review its plan before starting the team.');
           }}
         />
       )}
+      {modal === 'plan' && (
+        <PlanEditor
+          project={project}
+          tasks={tasks}
+          team={state.agents}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal === 'controls' && (
-        <WorkspaceControls data={data} project={project} onClose={() => setModal(null)} />
+        <WorkspaceControls
+          data={data}
+          project={project}
+          initialTab={controlsTab}
+          onClose={() => {
+            setModal(null);
+            setControlsTab('limits');
+          }}
+        />
       )}
       {modal === 'runtime' && (
         <RuntimeModal
@@ -1068,6 +1246,7 @@ export default function App() {
       {selectedAgent && (
         <AgentModal
           agent={selectedAgent}
+          projectId={project.id}
           onClose={() => setAgentId(undefined)}
           onSaved={() => {
             setAgentId(undefined);
@@ -1084,16 +1263,39 @@ export default function App() {
         >
           <div className="task-detail">
             <p className="task-description">{selectedTask.description}</p>
+            {!!selectedTask.toolLog?.length && (
+              <details className="tool-activity" open>
+                <summary>Actual tool activity ({selectedTask.toolLog.length})</summary>
+                {selectedTask.toolLog.map((e) => (
+                  <div key={e.id}>
+                    <strong>
+                      {e.type} · {e.status || 'started'}
+                    </strong>
+                    <pre>{e.detail}</pre>
+                  </div>
+                ))}
+              </details>
+            )}
             {selectedTask.error && (
               <div className="task-error">
                 <strong>The task couldn’t finish</strong>
                 <p>{selectedTask.error}</p>
+                <label>
+                  Additional direction for retry
+                  <textarea
+                    key={selectedTask.id}
+                    maxLength={4000}
+                    rows={3}
+                    onChange={(e) => setRetryFeedback(e.target.value)}
+                    placeholder="Clarify the assignment or explain what changed."
+                  />
+                </label>
                 <button
                   className="button secondary"
                   disabled={busy}
                   onClick={() =>
                     act(
-                      () => api(`/tasks/${selectedTask.id}/retry`),
+                      () => api(`/tasks/${selectedTask.id}/retry`, { feedback: retryFeedback }),
                       'The task is queued for another attempt.',
                     )
                   }
@@ -1221,169 +1423,14 @@ function AgentCard({ agent, task, onClick }: { agent: Agent; task?: Task; onClic
   );
 }
 
-function ProjectModal({
-  onClose,
-  onCreated,
-  provider,
-}: {
-  onClose: () => void;
-  onCreated: (id: string) => void;
-  provider: Provider;
-}) {
-  const [title, setTitle] = useState('');
-  const [brief, setBrief] = useState('');
-  const [planning, setPlanning] = useState<'template' | 'ai'>('template');
-  const [documentPack, setDocumentPack] = useState<'studio' | 'office'>('office');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setError('');
-    try {
-      const result = await api<{ project: Project }>('/projects', {
-        title,
-        brief,
-        documentPack,
-        planning,
-      });
-      onCreated(result.project.id);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-  return (
-    <Modal
-      title="What are we making?"
-      subtitle="A clear brief is the beginning of something good."
-      onClose={submitting ? () => {} : onClose}
-    >
-      <form onSubmit={submit} className="modal-form">
-        <label>
-          Project name
-          <input
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="A good idea needs a name"
-            minLength={2}
-            maxLength={80}
-            required
-          />
-        </label>
-        <label>
-          The brief
-          <span className="field-hint">What’s the goal? Who is it for? What matters most?</span>
-          <textarea
-            value={brief}
-            onChange={(e) => setBrief(e.target.value)}
-            placeholder="We’re building…"
-            rows={6}
-            minLength={20}
-            maxLength={6000}
-            required
-          />
-        </label>
-        <label>
-          Deliverables
-          <select
-            aria-label="Deliverables"
-            value={documentPack}
-            onChange={(e) => setDocumentPack(e.target.value as 'studio' | 'office')}
-          >
-            <option value="office">Office document pack</option>
-            <option value="studio">Creative & technical planning</option>
-          </select>
-          <span className="field-hint">
-            {documentPack === 'office'
-              ? 'Brief, project plan, budget, risk register, meeting template, and status report.'
-              : 'Brief, creative direction, experience map, implementation plan, review, and handoff.'}
-          </span>
-        </label>
-        <label>
-          Task planning
-          <select
-            aria-label="Task planning"
-            value={planning}
-            onChange={(e) => setPlanning(e.target.value as 'template' | 'ai')}
-          >
-            <option value="template">Use the six-task starter plan · no model call</option>
-            <option value="ai" disabled={provider === 'demo' || provider === 'external'}>
-              Ask the selected model to plan · uses allowance or API budget
-            </option>
-          </select>
-        </label>
-        <div className="brief-ideas">
-          <span>A starting point?</span>
-          {[
-            {
-              title: 'A thoughtful product launch',
-              brief:
-                'Plan a focused launch for a new personal productivity app. Define the audience, messaging, landing page experience, implementation approach, and quality checklist. Keep it accessible and honest.',
-            },
-            {
-              title: 'A neighborhood bookstore',
-              brief:
-                'Design a welcoming online presence for an independent neighborhood bookstore. Include a brand direction, event discovery, a simple shopping journey, and an actionable implementation plan.',
-            },
-          ].map((idea) => (
-            <button
-              type="button"
-              key={idea.title}
-              onClick={() => {
-                setTitle(idea.title);
-                setBrief(idea.brief);
-              }}
-            >
-              {idea.title}
-              <ArrowUpRight size={12} />
-            </button>
-          ))}
-        </div>
-        <div className="planning-note">
-          <Sparkles size={17} />
-          <p>
-            {provider === 'demo'
-              ? 'Demo mode creates a six-task plan using local templates. No model calls or API costs.'
-              : provider === 'external'
-                ? 'A starter plan will be queued for your connected external workers.'
-                : planning === 'ai'
-                  ? 'Creating this project will request an AI plan, subject to workspace limits.'
-                  : 'Creating this project makes no model call. Run team uses the connection selected for this project.'}
-          </p>
-        </div>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="button secondary"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Maybe later
-          </button>
-          <button className="button primary" disabled={submitting}>
-            {submitting ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
-            {submitting ? 'Planning the project…' : 'Create project'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
 function AgentModal({
   agent,
+  projectId,
   onClose,
   onSaved,
 }: {
   agent: Agent;
+  projectId?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -1398,7 +1445,7 @@ function AgentModal({
     e.preventDefault();
     setSaving(true);
     try {
-      await api(`/agents/${agent.id}`, { name, role, specialty, desk, goal }, 'PATCH');
+      await api(`/agents/${agent.id}`, { name, role, specialty, desk, goal, projectId }, 'PATCH');
       onSaved();
     } catch (err) {
       setError((err as Error).message);
@@ -1588,7 +1635,7 @@ function RuntimeModal({
   const [checkMessage, setCheckMessage] = useState('');
   const descriptions: Record<Provider, string> = {
     codex:
-      'Managed document worker using Codex CLI signed in with ChatGPT. Uses your included allowance, not the paid API. Requires explicit setup; no fallback.',
+      'Uses your ChatGPT Codex sign-in. Software teams can edit files and run commands in their managed folder; other workflows generate text. Subscription allowance applies, with no API-key fallback.',
     ollama:
       'A model running on your computer through Ollama. Uses local RAM and CPU/GPU. No automatic model download.',
     compatible:
@@ -1624,6 +1671,13 @@ function RuntimeModal({
           Check connections
         </button>
         <p role="status">{checkMessage}</p>
+        {data.runtime.coding && (
+          <p>
+            <strong>Coding tools: {data.runtime.coding.ready ? 'Ready' : 'Not ready'}</strong>
+            <br />
+            {data.runtime.coding.message}
+          </p>
+        )}
         <p>
           This chooses the default for new projects. Use Workspace controls to explicitly change an
           existing project’s connection.
@@ -1676,9 +1730,9 @@ function RuntimeModal({
       <div className="runtime-instructions">
         <strong>These are implemented connection options</strong>
         <p>
-          Start with Codex through your ChatGPT account or a local model to explore document work.
-          All four characters can share one model; their roles and task context make each assignment
-          different. You do not need to build four separate AIs.
+          Use Codex through your ChatGPT account for software delivery or text work, or use a local
+          model for text work. All four characters can share one model; their roles and task context
+          make each assignment different. You do not need to build four separate AIs.
         </p>
         <p>
           Codex uses your account’s Codex allowance. Local models use your hardware. Paid API access
@@ -1692,12 +1746,12 @@ function RuntimeModal({
           and installed model. Restart after configuration, then check connections.
         </p>
         <p>
-          For coding, browsing, file editing, or specialist tools, connect an external worker built
-          with an agent framework such as OpenAI Agents SDK, LangGraph, CrewAI, or Google ADK. These
-          need a custom bridge using the documented runner API; they are not preinstalled
-          integrations. A local model server can also be used inside that worker. Pause running
-          projects before switching. This single-user app should stay on a trusted local network
-          until authentication is added.{' '}
+          Software delivery uses the built-in Codex file and command worker. For additional browsing
+          or specialist tools, connect an external worker built with an agent framework such as
+          OpenAI Agents SDK, LangGraph, CrewAI, or Google ADK. These need a custom bridge using the
+          documented runner API; they are not preinstalled integrations. A local model server can
+          also be used inside that worker. Pause running projects before switching. This single-user
+          app should stay on a trusted local network until authentication is added.{' '}
           <a
             href="https://github.com/guiltyascharged123/Coding-Chet/blob/workroom-starter/docs/AI-CONNECTIONS.md"
             target="_blank"

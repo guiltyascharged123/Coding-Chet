@@ -9,7 +9,7 @@ const messages = {
   CODEX_QUOTA:
     'Codex reported a usage or rate limit. Check your account allowance and wait before retrying.',
   CODEX_REASONING:
-    'The selected model rejected the reasoning setting. Choose a supported Codex model; the document worker currently requests low reasoning effort.',
+    'The selected model rejected the reasoning setting. Choose a supported Codex model; the worker currently requests low reasoning effort.',
   CODEX_CONFIG:
     'Codex rejected the worker configuration. Update Workroom and restart. Restrictions remain enabled; do not bypass the sandbox.',
   CODEX_SANDBOX:
@@ -19,11 +19,11 @@ const messages = {
   CODEX_INSTALL:
     'The Codex executable could not start. Run npm run local to prepare dependencies and check any WORKROOM_CODEX_BIN override.',
   CODEX_TIMEOUT:
-    'The Codex document job timed out after five minutes. Review Usage before retrying; allowance may already have been consumed.',
+    'The Codex job reached its time limit (text: five minutes; software: 15 minutes). Review Usage before retrying; allowance may already have been consumed.',
   CODEX_CANCELLED:
-    'The Codex document job was cancelled. Review Usage before retrying; allowance may already have been consumed.',
+    'The Codex job was cancelled. Review Usage before retrying; allowance may already have been consumed.',
   CODEX_TOOL_BLOCKED:
-    'The document worker requested a tool. Workroom stopped it; tool execution is not enabled.',
+    'The worker requested a tool that is disabled for this assignment. Workroom stopped it.',
   CODEX_NO_RECEIPT: 'Codex ended without a completion receipt. Review Usage before retrying.',
   CODEX_UNKNOWN:
     'Codex failed without a recognized cause. Confirm CLI sign-in and the selected model. Review Usage before retrying; do not share credential files.',

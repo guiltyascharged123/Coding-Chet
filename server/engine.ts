@@ -9,10 +9,14 @@ import type {
   Project,
   Provider,
   Task,
+  Workflow,
 } from '../shared/types.js';
 import { Store } from './store.js';
 import { planProject, runTask, runtimeInfo } from './providers.js';
-import { demoPlan } from './seed.js';
+import { templatePlan } from './plans.js';
+import { projectTeam } from '../shared/workflows.js';
+import { stateSchema } from '../shared/schemas.js';
+import { projectWorkspace, workspaceFolder } from './workspaces.js';
 import { hash, memoryCurrent, policy, reserve, selectedMemory, relevantContext } from './policy.js';
 import { policySchema } from '../shared/schemas.js';
 import type { CostPolicy } from '../shared/types.js';
@@ -28,10 +32,12 @@ export class AppError extends Error {
 
 export class Engine extends EventEmitter {
   private active = new Map<string, AbortController>();
+  private planners = new Map<string, AbortController>();
   private timer?: ReturnType<typeof setInterval>;
   constructor(
     public store: Store,
     private stepMs = Number(process.env.DEMO_STEP_MS || 8000),
+    private worker: typeof runTask = runTask,
   ) {
     super();
     const configured = process.env.AGENT_PROVIDER as Provider | undefined;
@@ -90,6 +96,7 @@ export class Engine extends EventEmitter {
   }
   stop() {
     clearInterval(this.timer);
+    for (const id of [...this.planners.keys()]) this.pauseProject(id);
     for (const controller of this.active.values()) controller.abort();
   }
   project(id: string) {
@@ -107,9 +114,26 @@ export class Engine extends EventEmitter {
     brief: string,
     documentPack: DocumentPack = 'studio',
     planning: 'template' | 'ai' = 'template',
+    requestId?: string,
+    workflow?: Workflow,
   ) {
+    const existing = requestId && this.state.projects.find((p) => p.id === requestId);
+    if (existing) {
+      if (
+        existing.title !== title ||
+        existing.brief !== brief ||
+        existing.workflow !== workflow ||
+        existing.documentPack !== documentPack ||
+        existing.planning !== planning
+      )
+        throw new AppError(
+          'This submission ID already belongs to a different brief. Your draft has been retained.',
+          409,
+        );
+      return existing;
+    }
     const project: Project = {
-      id: randomUUID(),
+      id: requestId || randomUUID(),
       title,
       brief,
       createdAt: Date.now(),
@@ -117,32 +141,168 @@ export class Engine extends EventEmitter {
       provider: this.state.provider,
       documentPack,
       planning,
+      workflow,
+      team: workflow ? projectTeam(workflow, this.state.agents) : undefined,
       model:
         this.state.provider === 'demo' || this.state.provider === 'external'
           ? undefined
           : runtimeInfo().models[this.state.provider],
     };
-    const tasks =
-      planning === 'ai'
-        ? await planProject(project, this.state.agents, { store: this.store, project })
-        : demoPlan(project, this.state.agents);
+    if (workflow === 'software') {
+      project.workspaceFolder = workspaceFolder(project);
+      projectWorkspace(this.store.path, project);
+    }
+    // Durability comes before any model request. A failed plan is a saved project.
     this.state.projects.unshift(project);
+    this.event(project.id, 'system', 'Project and original brief saved.');
+    this.commit();
+    if (planning === 'ai') this.startPlanning(project);
+    else this.finishPlan(project, templatePlan(project, project.team || this.state.agents));
+    return project;
+  }
+  private finishPlan(project: Project, tasks: Task[]) {
     this.state.tasks.push(...tasks);
+    project.planningStatus = 'ready';
+    delete project.planningError;
+    project.status = 'ready';
     this.event(
       project.id,
       'system',
-      `The brief is mapped into ${tasks.length} tasks, with a human review before implementation.`,
-      this.state.agents[0].id,
+      `${tasks.length} tasks are ready. Edit the plan before running; tasks are not limited to six.`,
     );
     this.commit();
-    return project;
+  }
+  private startPlanning(project: Project) {
+    if (this.planners.has(project.id)) throw new AppError('Planning is already active.', 409);
+    if (this.state.tasks.some((t) => t.projectId === project.id))
+      throw new AppError('Edit the existing plan instead of replacing it.');
+    const controller = new AbortController();
+    this.planners.set(project.id, controller);
+    project.planningStatus = 'planning';
+    project.status = 'paused';
+    delete project.planningError;
+    this.commit();
+    void planProject(project, project.team || this.state.agents, {
+      store: this.store,
+      project,
+      signal: controller.signal,
+      onAttempt: () => this.commit(),
+    })
+      .then((tasks) => {
+        if (!controller.signal.aborted) this.finishPlan(project, tasks);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          project.planningStatus = 'failed';
+          project.planningError =
+            error instanceof Error ? error.message : 'Planning failed. Your brief is saved.';
+          project.status = 'paused';
+          this.event(project.id, 'error', project.planningError);
+          this.commit();
+        }
+      })
+      .finally(() => this.planners.delete(project.id));
+  }
+  retryPlanning(id: string) {
+    const project = this.project(id);
+    if (
+      this.store
+        .attempts()
+        .some((a) => a.projectId === id && a.phase === 'plan' && a.status === 'uncertain')
+    )
+      throw new AppError(
+        'Review and acknowledge uncertain planning usage in Workspace controls before retrying.',
+      );
+    this.startPlanning(project);
+  }
+  starterPlan(id: string) {
+    const project = this.project(id);
+    if (this.planners.has(id) || this.state.tasks.some((t) => t.projectId === id))
+      throw new AppError('Stop planning first, or edit the existing plan.');
+    project.planning = 'template';
+    this.finishPlan(project, templatePlan(project, project.team || this.state.agents));
+  }
+  editPlan(id: string, rows: Task[], toolNetwork?: boolean) {
+    const project = this.project(id);
+    if (
+      this.planners.has(id) ||
+      project.status === 'running' ||
+      this.active.size ||
+      this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
+    )
+      throw new AppError('Pause the team before editing its plan.');
+    if (!rows.length || rows.length > policy(this.store).maxTasks)
+      throw new AppError(
+        'Keep at least one task and stay within the task limit in Workspace controls.',
+      );
+    const old = this.state.tasks.filter((t) => t.projectId === id);
+    const merged = rows.map((row) => {
+      const original = old.find((t) => t.id === row.id);
+      if (original && original.status !== 'queued' && original.status !== 'failed') {
+        if (
+          original.title !== row.title ||
+          original.description !== row.description ||
+          original.agentId !== row.agentId ||
+          original.requiresApproval !== row.requiresApproval ||
+          !!original.readOnly !== !!row.readOnly ||
+          JSON.stringify(original.dependencies) !== JSON.stringify(row.dependencies)
+        )
+          throw new AppError(
+            'Completed, working and review tasks retain their assignments. Add a follow-up task instead.',
+          );
+        return original;
+      }
+      if (
+        original &&
+        this.store.attempts().some((a) => a.taskId === original.id && a.status === 'running')
+      )
+        throw new AppError('Wait for the cancelled worker to stop before editing.');
+      return {
+        ...original,
+        id: row.id,
+        projectId: id,
+        title: row.title,
+        description: row.description,
+        agentId: row.agentId,
+        dependencies: row.dependencies,
+        requiresApproval: row.requiresApproval,
+        readOnly: row.readOnly,
+        status: original?.status || 'queued',
+        output: original?.output || '',
+        feedback: original?.feedback || '',
+      } as Task;
+    });
+    if (old.some((t) => t.status !== 'queued' && !merged.some((m) => m.id === t.id)))
+      throw new AppError(
+        'Retain tasks that have already started; their outputs and failures are part of the project record.',
+      );
+    const next = stateSchema.parse({
+      ...this.state,
+      tasks: [...this.state.tasks.filter((t) => t.projectId !== id), ...merged],
+    });
+    this.state.tasks = next.tasks;
+    if (project.workflow === 'software' && toolNetwork !== undefined)
+      project.toolNetwork = toolNetwork;
+    project.planningStatus = 'ready';
+    delete project.planningError;
+    project.status = 'paused';
+    this.event(
+      id,
+      'system',
+      `Plan saved with ${merged.length} tasks. Existing results were retained.`,
+    );
+    this.commit();
   }
   setProvider(provider: Provider) {
     if (!runtimeInfo().available[provider])
       throw new AppError(
         'This runtime is not configured. Configure it on the server, restart, and check connections.',
       );
-    if (this.active.size || this.state.projects.some((p) => p.status === 'running'))
+    if (
+      this.planners.size ||
+      this.active.size ||
+      this.state.projects.some((p) => p.status === 'running')
+    )
       throw new AppError('Pause running projects before changing the runtime.', 409);
     this.state.provider = provider;
 
@@ -152,6 +312,7 @@ export class Engine extends EventEmitter {
   setProjectProvider(id: string, provider: Provider) {
     const p = this.project(id);
     if (
+      this.planners.has(id) ||
       p.status === 'running' ||
       this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
     )
@@ -180,7 +341,11 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   restore(value: unknown) {
-    if (this.active.size || this.state.tasks.some((t) => t.status === 'working'))
+    if (
+      this.planners.size ||
+      this.active.size ||
+      this.state.tasks.some((t) => t.status === 'working')
+    )
       throw new AppError('Pause all work before restoring a backup.');
     this.store.restore(value);
     this.commit();
@@ -218,16 +383,36 @@ export class Engine extends EventEmitter {
   updateAgent(
     id: string,
     values: Pick<Agent, 'name' | 'role' | 'specialty' | 'desk'> & { goal?: string },
+    projectId?: string,
   ) {
-    const agent = this.state.agents.find((a) => a.id === id);
+    const team = projectId
+      ? (this.project(projectId).team ||= structuredClone(this.state.agents))
+      : this.state.agents;
+    if (projectId && (this.project(projectId).status === 'running' || this.planners.has(projectId)))
+      throw new AppError('Pause the project before editing its team.');
+    const agent = team.find((a) => a.id === id);
     if (!agent) throw new AppError('Agent not found.', 404);
-    const other = this.state.agents.find((a) => a.desk === values.desk && a.id !== id);
+    const other = team.find((a) => a.desk === values.desk && a.id !== id);
     if (other) other.desk = agent.desk;
     Object.assign(agent, values);
     this.commit();
   }
   runProject(id: string) {
     const project = this.project(id);
+    if (
+      !this.state.tasks.some((t) => t.projectId === id) ||
+      project.planningStatus === 'planning' ||
+      project.planningStatus === 'failed'
+    )
+      throw new AppError('Finish or retry planning before running the team. Your brief is saved.');
+    if (project.workflow === 'software' && project.provider !== 'codex')
+      throw new AppError(
+        'Software delivery requires the Codex connection for real file and command tools. Select it in Workspace controls.',
+      );
+    if (project.workflow === 'software' && !runtimeInfo().coding?.ready)
+      throw new AppError(
+        runtimeInfo().coding?.message || 'Check coding sandbox readiness in Model connections.',
+      );
     if (project.status === 'completed')
       throw new AppError('This project is complete. Create a new project to run another brief.');
     if (this.state.tasks.filter((t) => t.projectId === id).length > policy(this.store).maxTasks)
@@ -255,6 +440,16 @@ export class Engine extends EventEmitter {
     const project = this.project(id);
     if (project.status === 'completed') throw new AppError('This project is already complete.');
     project.status = 'paused';
+    const planner = this.planners.get(id);
+    if (planner) {
+      planner.abort();
+      project.planningStatus = 'failed';
+      project.planningError =
+        'Planning stopped. Your brief is saved; review Usage before retrying.';
+      for (const a of this.store.attempts())
+        if (a.projectId === id && a.phase === 'plan' && a.status === 'running')
+          this.store.putAttempt({ ...a, status: 'uncertain' });
+    }
     for (const task of this.state.tasks.filter(
       (t) => t.projectId === id && t.status === 'working',
     )) {
@@ -276,12 +471,25 @@ export class Engine extends EventEmitter {
     this.event(id, 'system', 'Project paused. Work can resume from the saved task queue.');
     this.commit();
   }
-  retryTask(id: string) {
+  retryTask(id: string, feedback?: string) {
     const task = this.task(id);
     if (task.status !== 'failed') throw new AppError('Only failed tasks can be retried.');
     if (this.store.attempts().some((a) => a.taskId === id && a.status === 'uncertain'))
       throw new AppError('Acknowledge uncertain usage in Workspace controls before retrying.');
+    const target = this.project(task.projectId);
+    if (
+      target.workflow === 'software' &&
+      (target.provider !== 'codex' ||
+        !runtimeInfo().available.codex ||
+        !runtimeInfo().coding?.ready)
+    )
+      throw new AppError(
+        'Software delivery requires a ready Codex connection and coding sandbox. Check Model connections.',
+      );
+    if (!runtimeInfo().available[target.provider])
+      throw new AppError('The project connection is not configured. Check Model connections.');
     task.status = 'queued';
+    if (feedback?.trim()) task.feedback = feedback.trim();
     delete task.error;
     const project = this.project(task.projectId);
     project.status = this.state.approvals.some(
@@ -338,6 +546,10 @@ export class Engine extends EventEmitter {
   private runnable(task: Task) {
     return (
       task.status === 'queued' &&
+      !(
+        this.project(task.projectId).workflow === 'software' &&
+        this.state.tasks.some((t) => t.projectId === task.projectId && t.status === 'working')
+      ) &&
       this.project(task.projectId).status === 'running' &&
       task.dependencies.every((id) => this.task(id).status === 'done') &&
       !this.state.tasks.some((t) => t.agentId === task.agentId && t.status === 'working')
@@ -363,7 +575,7 @@ export class Engine extends EventEmitter {
     if (expired) this.commit();
     for (const task of this.state.tasks) {
       if (
-        this.state.tasks.filter((t) => t.status === 'working').length >=
+        this.planners.size + this.state.tasks.filter((t) => t.status === 'working').length >=
         policy(this.store).maxConcurrent
       )
         break;
@@ -389,7 +601,7 @@ export class Engine extends EventEmitter {
       this.event(
         task.projectId,
         'message',
-        `Picked up ${this.state.agents.find((a) => a.id === previous.agentId)?.name || 'the team'}’s handoff and the shared project context.`,
+        `Picked up ${(this.project(task.projectId).team || this.state.agents).find((a) => a.id === previous.agentId)?.name || 'the team'}’s handoff and the shared project context.`,
         task.agentId,
         previous.agentId,
       );
@@ -397,7 +609,7 @@ export class Engine extends EventEmitter {
   }
   private async execute(task: Task, controller: AbortController) {
     const project = this.project(task.projectId);
-    const agent = this.state.agents.find((a) => a.id === task.agentId)!;
+    const agent = (project.team || this.state.agents).find((a) => a.id === task.agentId)!;
     try {
       if (project.provider === 'demo') {
         await delay(this.stepMs / 2, undefined, { signal: controller.signal });
@@ -415,7 +627,7 @@ export class Engine extends EventEmitter {
       const context = this.state.tasks.filter(
         (t) => t.projectId === project.id && t.status === 'done',
       );
-      const output = await runTask(
+      const output = await this.worker(
         project.provider,
         project,
         task,
@@ -426,13 +638,40 @@ export class Engine extends EventEmitter {
           store: this.store,
           project,
           task,
+          toolNetwork: !!project.toolNetwork,
+          readOnly: !!task.readOnly,
+          workspace:
+            project.workflow === 'software'
+              ? projectWorkspace(this.store.path, project)
+              : undefined,
+          cache: project.workflow === 'software' ? false : undefined,
+          onTool: (raw) => {
+            const entry = { ...raw, id: `${task.attemptId || task.id}:${raw.id}` };
+            task.toolLog ||= [];
+            const existing = task.toolLog.findIndex((e) => e.id === entry.id);
+            if (existing >= 0) task.toolLog[existing] = entry;
+            else task.toolLog.push(entry);
+            task.toolLog = task.toolLog.slice(-100);
+            this.commit();
+          },
           onAttempt: (id) => {
             task.attemptId = id;
             this.commit();
           },
         },
       );
-      if (!controller.signal.aborted) this.complete(task, output);
+      if (!controller.signal.aborted) {
+        if (project.workflow === 'software') {
+          const result = JSON.parse(output) as { outcome: 'complete' | 'blocked'; summary: string };
+          task.output = result.summary;
+          if (result.outcome === 'blocked')
+            this.fail(
+              task,
+              'The worker reported a blocker. Open the task for its report and tool activity; add direction and retry when ready.',
+            );
+          else this.complete(task, result.summary);
+        } else this.complete(task, output);
+      }
     } catch (error) {
       if (!controller.signal.aborted)
         this.fail(task, error instanceof Error ? error.message : 'The task failed. Please retry.');
@@ -501,7 +740,7 @@ export class Engine extends EventEmitter {
   }
   claim(agentId?: string) {
     if (
-      this.state.tasks.filter((t) => t.status === 'working').length >=
+      this.planners.size + this.state.tasks.filter((t) => t.status === 'working').length >=
       policy(this.store).maxConcurrent
     )
       return null;
@@ -527,7 +766,9 @@ export class Engine extends EventEmitter {
     this.begin(task);
     return {
       task: structuredClone(task),
-      agent: this.state.agents.find((a) => a.id === task.agentId),
+      agent: (this.project(task.projectId).team || this.state.agents).find(
+        (a) => a.id === task.agentId,
+      ),
       project: this.project(task.projectId),
       context: relevantContext(
         task,

@@ -12,12 +12,10 @@ You have the **full current open-source version**, which is still an early
 prototype. Demo is a connection setting inside the app, not a separate edition.
 
 - **Demo runtime:** scripted tasks and labeled template documents; no AI model calls.
-- **Codex or another model connection:** real AI-generated documents and responses
-  based on each agent's role, assignment, project brief, and supplied context.
+- **Office/research/custom teams with a model:** real work from each role, using its assignment, the brief, handoffs and verified memory. These connections generate text.
+- **Software delivery with Codex:** real file editing, shell commands, code review and testing in a shared managed project folder. Check **Model connections → Coding tools** for readiness.
 
-The walking characters show activity in the office. Their movement does not itself
-perform work. Built-in model connections draft documents; independent coding,
-browsing, or other tools require a separately configured external worker.
+The walking characters visualize activity. Their movement does not itself perform work. Each role is a separate assignment to the selected model, with a shared project and distinct responsibilities. There are four desks; team presets change those roles. This is a bounded task workflow, not an indefinitely self-starting agent.
 
 ## 2. Start Workroom on your computer
 
@@ -57,7 +55,7 @@ for the Codex commands below if PowerShell blocks that script.
 | `npm run demo`  | 3000         | `.data/demo.sqlite`     |
 
 Both commands launch the same app, with **separate saved workspaces**. New installs
-start with Demo. The demo launcher selects Demo again on every restart; the local
+start with an empty workspace and Demo selected. The demo launcher includes an explicit sample project and selects Demo again on every restart; the local
 launcher retains a configured default connection. You can choose a real connection
 in either workspace. Always use the actual address printed in your terminal.
 
@@ -73,19 +71,23 @@ from Codespaces, see [backup and migration](LOCAL-SETUP.md#bring-existing-work-h
    > Identify missing quotes and approvals. Do not invent confirmed dates,
    > purchases, or completed work.
 
-2. Choose **Office document pack** and **Use the six-task starter plan**.
-   Creating this plan makes no model call, even with Codex selected.
-3. Click **Create project**, then **Run team**. With a model connection, this is
-   when the agents start sending their assignments to it.
-4. When **Review work** appears, read the proposal. Approve it or request a revision.
-   Dependent tasks wait for your decision.
-5. Open **Outputs** to read and download the brief, project plan, budget estimate,
-   risk register, meeting template, and status report. Available formats include
-   Word, Excel, Markdown, and the browser's Print / PDF option.
+2. Choose **Office & project coordination** and **Editable task template**. Creating a template makes no model call.
+3. Click **Create project**, then **Edit plan**. Adjust assignments and acceptance criteria, choose owners, add/remove tasks, and set dependencies and human approval gates. There is no fixed number of steps. The default task ceiling is 30, adjustable under Workspace controls; older custom limits are retained.
+4. Select a real model connection for this project under **Workspace controls → Limits & connections**. Click **Run team**. Demo only previews assignments; it does not do real work.
+5. When **Review work** appears, read the proposal. Approve it or request a revision. Dependent tasks wait for your decision.
+6. Open **Outputs** to inspect results and download useful reports as Word, Excel, Markdown, or Print / PDF. The team should create only material serving your goal, not a standard pile of unnecessary documents.
 
-In Demo these are labeled samples. With a model, check its assumptions, totals,
-and claims before using the documents. A meeting template does not mean a meeting
-happened. **Pause office movement** pauses the animation; **Pause team** pauses work.
+**Your writing is saved.** Unsubmitted briefs are retained in this browser when you close the dialog or reload. Once created, the project and original brief are saved on the server before AI planning begins. Expand **Saved project brief** to read or download it. AI planning runs in the background; a failure shows **Retry planning**, **Use editable template**, and **Review usage**. If usage is uncertain, review and acknowledge its receipt before another model attempt. No automatic paid fallback occurs. A same-submission retry does not create a duplicate project.
+
+For a failed task, click **See task** or its task-board card, read its report and actual tool activity, add direction if useful, then **Retry task**. A blocked software task retains its report and files. A retry resumes from those files; cancellation does not undo changes. Add follow-up tasks with **Edit plan**, even after a project finishes.
+
+**Software project:** choose **Software delivery** and connect Codex. The lead proposes scope using read-only source access, then waits for your approval. The engineer implements files, the code reviewer inspects/fixes them, and the test engineer runs checks. The team can iterate within an assignment for up to 15 minutes. A blocked result pauses the project. Open **Outputs → Project files** to inspect files, see the exact local folder, or download source ZIP.
+
+Folders live in `.data/projects/<readable-project-name>-<unique-id>/` beside the active database. Identically named projects get different folders. All roles on one software project share that folder; software tasks run serially to avoid simultaneous file edits. **Edit plan → Allow tool network** enables dependency downloads for that project; it starts off. Without it, missing dependencies may block work. Inspection tasks can execute read-only checks but cannot write project source files; their scratch folder is writable.
+
+The **Server connected** indicator reports the browser's connection to Workroom. Click it for model connection status. It does not mean an AI is running. **Pause office movement** pauses animation; **Pause team** stops work.
+
+Old demo projects and six-document packs remain available with their original outputs. They are not imposed on new projects. Briefs lost by the old failed-planning bug were never saved and cannot be recovered by updating.
 
 ## 4. Connect your ChatGPT account through Codex
 
@@ -186,10 +188,9 @@ small project while checking your account's usage. The paid-API checkbox is unde
 
 **Keep the dashboard private.** It has no dashboard login. `npm run local` binds
 to your computer; do not expose it through a public tunnel or public forwarded
-port. The document worker requests restricted permissions, but native sandbox
-enforcement has not been verified on your computer. Workroom has not had an
-independent security audit; use non-sensitive test projects first. A successful
-connection check verifies sign-in, not an actual generation or remaining quota.
+port. Text workflows disable tool execution. Software delivery allows file changes and commands in its managed folder, with read access to system tooling. Commands and dependency scripts can change or delete files inside that folder; keep copies of valuable work. Tool network is enabled only if you choose it in Edit plan. Keep credentials out of managed project folders.
+
+The coding readiness check executes a tiny offline command, verifies a project write and denial of a sibling probe file, and makes no model call. Coding stays unavailable if it fails; there is no unrestricted fallback. That check is not a security audit or proof of model quality. It also does not verify generation access or remaining quota. For software delivery on Windows, use Ubuntu in WSL2 if native sandbox checks fail.
 
 ### Disconnect Codex
 
@@ -240,11 +241,12 @@ worker used an approval setting the bundled CLI rejects. The corrected worker ke
 its restrictions and displays specific error codes; see
 [Codex job troubleshooting](AI-CONNECTIONS.md#troubleshoot-codex-jobs).
 
-To retry an existing failed task, first acknowledge its uncertain attempt in
-**Workspace controls → Usage**, then open the failed task and click **Retry task**.
-If AI planning failed before a project was created, create the project again after
-updating. Successful sign-in alone does not confirm model access or available quota.
+If a request is marked uncertain, review and acknowledge it in **Workspace controls → Usage** before another model attempt. Open a failed task and choose **Retry task**; for a saved planning failure choose **Retry planning** or **Use editable template**. Older builds could fail before saving any project; updating cannot recover a brief that was never saved. Successful sign-in alone does not confirm model access or available quota.
 
 For local models, API providers, or external workers, see the
 [AI connection reference](AI-CONNECTIONS.md). For installation, backups, and moving
 off Codespaces, see the [local setup reference](LOCAL-SETUP.md).
+
+## Back up both records and source
+
+**Workspace controls → Backup & restore** exports briefs, plans, roles, results, approvals, verified memory and usage receipts. That JSON does **not** contain managed source files. Copy `.data/projects/` separately (with the team stopped), or download each project's source ZIP. ZIP downloads omit hidden files, dependency folders, symlinks and private-key extensions; use a full local folder copy when you need everything. Browser exports are limited to 2,000 files and 25 MB. Restoring records never rolls back source-file changes.

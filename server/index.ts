@@ -9,6 +9,7 @@ import { Store } from './store.js';
 import { allowedOrigin } from './origin.js';
 import { providerSchema } from '../shared/schemas.js';
 import { refreshManagedInfo } from './managed.js';
+import { projectWorkspace, workspaceFiles, workspaceFile, workspaceZip } from './workspaces.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -68,6 +69,8 @@ app.post(
         brief: z.string().trim().min(20).max(6000),
         documentPack: z.enum(['studio', 'office']).default('office'),
         planning: z.enum(['template', 'ai']).default('template'),
+        requestId: z.string().uuid().optional(),
+        workflow: z.enum(['office', 'software', 'research', 'custom']).optional(),
       })
       .parse(req.body);
     const project = await engine.createProject(
@@ -75,8 +78,76 @@ app.post(
       body.brief,
       body.documentPack,
       body.planning,
+      body.requestId,
+      body.workflow || (Object.hasOwn(req.body, 'documentPack') ? undefined : 'office'),
     );
     res.status(201).json({ project });
+  }),
+);
+app.post(
+  '/api/projects/:id/retry-planning',
+  route((req, res) => {
+    engine.retryPlanning(param(req, 'id'));
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/projects/:id/starter-plan',
+  route((req, res) => {
+    engine.starterPlan(param(req, 'id'));
+    res.json({ ok: true });
+  }),
+);
+app.put(
+  '/api/projects/:id/plan',
+  route((req, res) => {
+    const rows = z
+      .array(
+        z.object({
+          id: z.string().uuid(),
+          title: z.string().trim().min(1).max(100),
+          description: z.string().trim().min(1).max(4000),
+          agentId: z.string(),
+          dependencies: z.array(z.string()).max(100),
+          requiresApproval: z.boolean(),
+          readOnly: z.boolean().optional(),
+        }),
+      )
+      .min(1)
+      .max(100)
+      .parse(req.body.tasks);
+    engine.editPlan(
+      param(req, 'id'),
+      rows as import('../shared/types.js').Task[],
+      z.boolean().optional().parse(req.body.toolNetwork),
+    );
+    res.json({ ok: true });
+  }),
+);
+function codingFolder(req: express.Request) {
+  const project = engine.project(param(req, 'id'));
+  if (project.workflow !== 'software') throw new AppError('This project has no coding workspace.');
+  return projectWorkspace(store.path, project);
+}
+app.get(
+  '/api/projects/:id/files',
+  route((req, res) => {
+    const folder = codingFolder(req);
+    res.json({ folder, files: workspaceFiles(folder) });
+  }),
+);
+app.get(
+  '/api/projects/:id/file',
+  route((req, res) => {
+    const bytes = workspaceFile(codingFolder(req), z.string().parse(req.query.path));
+    res.type('text/plain').send(bytes);
+  }),
+);
+app.get(
+  '/api/projects/:id/source.zip',
+  route((req, res) => {
+    const bytes = Buffer.from(workspaceZip(codingFolder(req)));
+    res.attachment('project-source.zip').type('application/zip').send(bytes);
   }),
 );
 app.post(
@@ -96,7 +167,7 @@ app.post(
 app.post(
   '/api/tasks/:id/retry',
   route((req, res) => {
-    engine.retryTask(param(req, 'id'));
+    engine.retryTask(param(req, 'id'), z.string().max(4000).optional().parse(req.body.feedback));
     res.json({ ok: true });
   }),
 );
@@ -123,9 +194,10 @@ app.patch(
         specialty: z.string().trim().min(5).max(600),
         desk: z.number().int().min(0).max(3),
         goal: z.string().trim().max(1000).optional(),
+        projectId: z.string().optional(),
       })
       .parse(req.body);
-    engine.updateAgent(param(req, 'id'), body);
+    engine.updateAgent(param(req, 'id'), body, body.projectId);
     res.json({ ok: true });
   }),
 );

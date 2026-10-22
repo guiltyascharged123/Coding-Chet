@@ -90,7 +90,7 @@ same role/goal workflow, so changing models doesn't require rebuilding the offic
 
 Try this brief: “Plan a small team's office move in six weeks. Budget ceiling
 $5,000 USD. Identify missing quotes and approvals; don't invent confirmed dates,
-purchases or completed work.” Select Office document pack, run, review, then check
+purchases or completed work.” Select Office & project coordination, edit the plan, run, review, then check
 the budget, risks, meeting template and report. Save verified constraints in Project
 memory. Its value depends on accuracy and time saved drafting/coordinating.
 
@@ -102,3 +102,9 @@ Windows; Windows execution isn't locally verified from this Linux environment.
 Native Codex account use/restrictions, local-model speed and live billing must be
 checked with your own account/hardware. WSL2 is an option if native Windows Codex
 CLI restrictions cause trouble.
+
+## Software delivery projects
+
+Choose Software delivery, connect Codex and use Check connections to verify Coding tools readiness. Use Ubuntu in WSL2 for software delivery if Windows native sandbox checks fail. All roles share a managed folder under `.data/projects/<title>-<id>/` by default. Outputs shows its exact local path and source files. Keep the server and generated project on the same filesystem; large/generated dependency folders are accessed locally, not through the browser file export.
+
+Copy managed source folders separately from JSON workspace backups, with workers stopped. JSON restores preserve records but never roll back source files. The source ZIP omits hidden/dependency files; a full local folder copy preserves those too.
