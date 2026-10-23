@@ -31,12 +31,81 @@ const modelServer = createServer(async (req, res) => {
           {
             message: {
               content: chair
-                ? '# Agreed next actions\n\nCompare buyer alternatives and test willingness to pay. Owner: coordinator. Record unverified demand and objections before any spending.'
-                : `# Specialist proposal ${input.contributions.length + 1}\n\nA specific buyer must have a costly problem. Challenge generic AI copy services: why pay instead of using ChatGPT? Compare a distinct alternative and define a cheap validation test.`,
+                ? JSON.stringify({
+                    decision:
+                      'Agreed next actions: compare buyer alternatives and test willingness to pay.',
+                    rationale:
+                      'A concrete test can falsify assumptions before spending or building.',
+                    dissent: 'Demand remains unverified and objections have not been resolved.',
+                    evidenceGaps: 'No customers or validated demand have been supplied.',
+                    actions: [
+                      {
+                        taskId: input.plannedWork[0]?.taskId || 'next-project',
+                        action:
+                          'Compare buyer alternatives and record the evidence needed before any spending.',
+                      },
+                    ],
+                  })
+                : JSON.stringify({
+                    proposal: `Specialist proposal ${input.contributions.length + 1}: a specific buyer must have a costly problem.`,
+                    rationale:
+                      'A useful comparison needs buyer alternatives and a cheap validation test.',
+                    objection: 'Generic AI copy services may have no advantage over ChatGPT.',
+                    alternative:
+                      'Compare workflow integration that saves measurable operating time.',
+                    evidenceGaps: 'Demand, customer access and conversion rates remain unverified.',
+                    nextAction:
+                      'Compare at least three distinct approaches and define a falsifiable test.',
+                  }),
             },
           },
         ],
         usage: { prompt_tokens: 100, completion_tokens: 50 },
+      }),
+    );
+    return;
+  }
+  if (input.task) {
+    const needsInput =
+      input.task.title.includes('Human decision fixture') && !input.humanDirection?.length;
+    const result = {
+      outcome: needsInput ? 'needs_input' : 'complete',
+      summary: 'Compared the supplied options and checked the arithmetic against the assignment.',
+      deliverable:
+        '# Cost comparison\n\nOption A costs $20 and option B costs $35. The difference is $15. Demand has not been validated; no external actions occurred.',
+      checks: [
+        {
+          criterion: 'Compare the supplied costs',
+          status: 'met',
+          evidence: '$35 minus $20 equals $15; the result is supplied text, not a transaction.',
+        },
+      ],
+      handoff: {
+        facts: ['Supplied costs are $20 and $35.'],
+        assumptions: ['Demand is unverified.'],
+        next: 'Review the evidence and proceed with the assigned task.',
+      },
+      decision: needsInput
+        ? {
+            question: 'Which spending ceiling should guide the experiment?',
+            why: 'Only the owner can authorize a budget; no spending will occur automatically.',
+            options: ['Use a zero-dollar experiment', 'Plan an experiment capped at $20'],
+            recommended: 'Use a zero-dollar experiment',
+          }
+        : null,
+      followUps: [],
+      improvements: [
+        {
+          problem: 'Earlier updates did not distinguish evidence from assumptions.',
+          change: 'Always label supplied facts separately from unverified demand assumptions.',
+          evidence: 'The cost comparison is supported; no customer evidence has been supplied.',
+        },
+      ],
+    };
+    res.end(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(result) } }],
+        usage: { prompt_tokens: 100, completion_tokens: 150 },
       }),
     );
     return;

@@ -414,6 +414,7 @@ test('software roles share real files through approval, blocked review, retry an
       randomUUID(),
       'software',
     );
+    store.state.tasks.find((t) => t.projectId === p.id)!.requiresApproval = true;
     engine.start();
     engine.runProject(p.id);
     await until(() =>

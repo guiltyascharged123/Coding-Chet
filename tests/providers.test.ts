@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { agents, initialState } from '../server/seed.js';
 import { planProject, runTask } from '../server/providers.js';
+import { result } from './work-fixtures.js';
 
 test('OpenAI planning validates assignments and enforces a downstream human gate', async () => {
   const originalFetch = globalThis.fetch;
@@ -75,7 +76,9 @@ test('Gemini uses a server-side key header and retains revision and teammate con
       assert.equal(content.task.revisionFeedback, task.feedback);
       assert.equal(content.teammateOutputs[0].output, previous.output);
       return new Response(
-        JSON.stringify({ candidates: [{ content: { parts: [{ text: '# Revised direction' }] } }] }),
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(result()) }] } }],
+        }),
         { status: 200 },
       );
     }) as typeof fetch;
@@ -88,7 +91,7 @@ test('Gemini uses a server-side key header and retains revision and teammate con
         [previous],
         new AbortController().signal,
       ),
-      '# Revised direction',
+      result().deliverable,
     );
   } finally {
     globalThis.fetch = originalFetch;

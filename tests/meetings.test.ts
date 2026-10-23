@@ -6,6 +6,7 @@ import { Engine } from '../server/engine.js';
 import { defaultPolicy, backupSchema } from '../shared/schemas.js';
 import { meetingTurn, runTask } from '../server/providers.js';
 import type { Meeting } from '../shared/types.js';
+import { meetingResult, result } from './work-fixtures.js';
 
 async function until(check: () => boolean) {
   for (let i = 0; i < 500; i++) {
@@ -48,7 +49,13 @@ test('meeting contributions survive failure and retry; usage is counted and comp
         choices: [
           {
             message: {
-              content: `## Public contribution ${calls}\n\nChallenge the buyer assumption. Compare alternatives and use a falsifiable test.`,
+              content: JSON.stringify(
+                meetingResult(
+                  JSON.parse(body.messages[1].content),
+                  body.messages[0].content.includes('Chair this team meeting'),
+                  `Public contribution ${calls}`,
+                ),
+              ),
             },
           },
         ],
@@ -98,7 +105,7 @@ test('meeting contributions survive failure and retry; usage is counted and comp
       assert.equal(input.teamDecisions[0].decisions, meeting.summary);
       assert.match(input.humanDirection[0].feedback, /undifferentiated copywriting/);
       return Response.json({
-        choices: [{ message: { content: '# Work using the saved meeting decisions' } }],
+        choices: [{ message: { content: JSON.stringify(result()) } }],
       });
     }) as typeof fetch;
     await runTask('openai', project, task, project.team![0], [], new AbortController().signal, {
@@ -229,7 +236,7 @@ test('meeting request limits stop a discussion without inventing missing contrib
     };
     globalThis.fetch = (async () =>
       Response.json({
-        choices: [{ message: { content: '# One real model response' } }],
+        choices: [{ message: { content: JSON.stringify(meetingResult({}, false)) } }],
         usage: { prompt_tokens: 10, completion_tokens: 10 },
       })) as typeof fetch;
     const p = await engine.createProject(

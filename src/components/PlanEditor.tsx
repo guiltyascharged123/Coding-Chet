@@ -3,6 +3,7 @@ import type { Agent, Project, Task, ReasoningEffort } from '../../shared/types';
 import { api } from '../api';
 import Modal from './Modal';
 import { useSavedDraft } from '../drafts';
+import { hasProjectTools } from '../../shared/capabilities';
 
 export default function PlanEditor({
   project,
@@ -99,7 +100,7 @@ export default function PlanEditor({
               checked={draft.researchEnabled}
               onChange={(e) => saveDraft({ ...draft, researchEnabled: e.target.checked })}
             />
-            Allow Codex web research for text assignments (read-only searches with cited sources)
+            Allow Codex web research (read-only searches with cited sources)
           </label>
           <label className="checkbox-label">
             <input
@@ -122,9 +123,9 @@ export default function PlanEditor({
             />
           </label>
           <p className="field-hint">
-            Kickoff, then progress checkpoints when more work is ready. Each meeting adds up to five
-            model requests. Existing limits apply; completed contributions survive retries. Settings
-            save with this plan.
+            Kickoff, then progress checkpoints when more work is ready. A normal meeting adds five
+            model requests; malformed replies can add one correction per turn. Existing limits
+            apply; completed contributions survive retries. Settings save with this plan.
           </p>
         </fieldset>
         {rows.map((t, i) => {
@@ -176,7 +177,7 @@ export default function PlanEditor({
                 />
                 Human approval before handoff
               </label>
-              {project.workflow === 'software' && (
+              {hasProjectTools(project) && (
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -254,7 +255,7 @@ export default function PlanEditor({
         >
           Add task
         </button>
-        {project.workflow === 'software' && (
+        {hasProjectTools(project) && (
           <label className="checkbox-label">
             <input
               type="checkbox"

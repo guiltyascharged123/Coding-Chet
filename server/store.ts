@@ -17,8 +17,8 @@ export class Store {
     const row = this.db.prepare('SELECT payload FROM workspace WHERE id=1').get() as
       { payload: string } | undefined;
     this.state = row ? JSON.parse(row.payload) : initialState(process.env.WORKROOM_DEMO === '1');
-    if (row && (this.state.schemaVersion || 1) < 4) this.snapshot('before-upgrade');
-    this.state.schemaVersion = 4;
+    if (row && (this.state.schemaVersion || 1) < 5) this.snapshot('before-upgrade');
+    this.state.schemaVersion = 5;
     if (
       this.state.policy?.maxTasks === 6 &&
       Object.entries(defaultPolicy).every(
@@ -119,7 +119,7 @@ export class Store {
       if (!existing.has(a.id))
         existing.set(a.id, { ...a, status: a.status === 'running' ? 'uncertain' : a.status });
     const restored = structuredClone(parsed.state);
-    restored.schemaVersion = 4;
+    restored.schemaVersion = 5;
     restored.policy = { ...structuredClone(defaultPolicy), ...restored.policy, allowPaid: false };
     restored.memory ||= [];
     this.recoverProjects(restored);

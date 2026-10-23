@@ -24,7 +24,7 @@ test('legacy databases retain outputs and create a validated recovery snapshot b
   database.close();
   const store = new Store(path);
   try {
-    assert.equal(store.state.schemaVersion, 4);
+    assert.equal(store.state.schemaVersion, 5);
     assert.equal(store.state.tasks[0].output, legacy.tasks[0].output);
     assert.equal(store.state.policy?.allowPaid, false);
     const folder = join(directory, 'backups'),
@@ -204,7 +204,7 @@ test('only human-verified, current, project-scoped memory reaches relevant task 
     assert.equal(selectedMemory(store, project.id).length, 1);
     assert.deepEqual(selectedMemory(store, 'another-project'), []);
     assert.deepEqual(relevantContext(task, [source, store.state.tasks[5]]), [
-      { title: source.title, output: source.output },
+      { sourceId: `task:${source.id}`, title: source.title, output: source.output },
     ]);
     source.output = '# Changed evidence';
     assert.equal(selectedMemory(store, project.id).length, 0);

@@ -34,6 +34,14 @@ export default function WorkspaceControls({
   const [restore, setRestore] = useState<unknown>(),
     [confirmed, setConfirmed] = useState(false);
   const [connection, setConnection] = useState(project.provider);
+  const [model, setModel] = useState(project.model || '');
+  const [projectTools, setProjectTools] = useState(
+    project.workflow === 'software' || project.workMode === 'workspace',
+  );
+  const [instructions, saveInstructions, clearInstructions, instructionError] = useSavedDraft(
+    `workroom-instructions-${project.id}`,
+    { text: project.instructionHistory?.at(-1)?.text || '', reason: '' },
+  );
   async function act(fn: () => Promise<unknown>, success: string) {
     setBusy(true);
     setMessage('');
@@ -79,6 +87,7 @@ export default function WorkspaceControls({
             ['limits', 'Limits & connections'],
             ['usage', 'Usage'],
             ['memory', 'Project memory'],
+            ['instructions', 'Team instructions'],
             ['backup', 'Backup & restore'],
           ].map(([id, label]) => (
             <button
@@ -106,7 +115,19 @@ export default function WorkspaceControls({
                 <select
                   aria-label="Project connection"
                   value={connection}
-                  onChange={(e) => setConnection(e.target.value as typeof connection)}
+                  onChange={(e) => {
+                    const provider = e.target.value as typeof connection;
+                    setConnection(provider);
+                    if (provider !== 'codex' && project.workflow !== 'software')
+                      setProjectTools(false);
+                    setModel(
+                      provider === project.provider
+                        ? project.model || ''
+                        : provider === 'demo' || provider === 'external'
+                          ? ''
+                          : data.runtime.models[provider],
+                    );
+                  }}
                 >
                   {Object.entries(PROVIDER_LABELS).map(([id, label]) => (
                     <option
@@ -123,14 +144,68 @@ export default function WorkspaceControls({
                   disabled={busy}
                   onClick={() =>
                     act(
-                      () => api(`/projects/${project.id}/runtime`, { provider: connection }),
-                      'Project connection updated; existing documents retained.',
+                      () =>
+                        api(`/projects/${project.id}/runtime`, {
+                          provider: connection,
+                          model,
+                          workMode: projectTools ? 'workspace' : 'text',
+                        }),
+                      'Project connection and model updated; saved work retained.',
                     )
                   }
                 >
                   Set project connection
                 </button>
               </div>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  aria-label="Enable managed project tools"
+                  checked={projectTools}
+                  disabled={project.workflow === 'software' || connection !== 'codex'}
+                  onChange={(e) => setProjectTools(e.target.checked)}
+                />
+                Enable managed project tools (Codex file editing and commands)
+              </label>
+              <p className="field-hint">
+                Available to any team using Codex. Files stay in this project’s managed folder; all
+                roles share it. Tool access requires the coding sandbox check to pass.
+                Dependency-download network access is a separate option in Edit plan. Text
+                connections cannot edit or test files.{' '}
+                {projectTools ? data.runtime.coding?.message : ''}
+              </p>
+              {connection !== 'demo' && connection !== 'external' && (
+                <label>
+                  Project model ID
+                  <input
+                    aria-label="Project model ID"
+                    value={model}
+                    maxLength={150}
+                    list="project-model-ids"
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder={data.runtime.models[connection]}
+                  />
+                  <datalist id="project-model-ids">
+                    {[
+                      ...new Set(
+                        [
+                          data.runtime.models[connection],
+                          ...data.state.projects
+                            .filter((p) => p.provider === connection)
+                            .map((p) => p.model),
+                        ].filter(Boolean),
+                      ),
+                    ].map((id) => (
+                      <option key={id} value={id} />
+                    ))}
+                  </datalist>
+                  <span className="field-hint">
+                    Use the exact ID available to your account or local server. For Codex, run the
+                    bundled Codex CLI and use /model to see your choices. Saving does not make a
+                    generation request or verify access. Paid API pricing must match this ID.
+                  </span>
+                </label>
+              )}
               <p>
                 Current project: {PROVIDER_LABELS[project.provider]}
                 {project.model ? ` · ${project.model}` : ''}. External workers have their own tools
@@ -191,7 +266,10 @@ export default function WorkspaceControls({
                         const rates = { ...draft.rates };
                         if (e.target.checked)
                           rates[provider] = {
-                            model: data.runtime.models[provider],
+                            model:
+                              project.provider === provider
+                                ? project.model || data.runtime.models[provider]
+                                : data.runtime.models[provider],
                             inputPerMillion: NaN,
                             outputPerMillion: NaN,
                           };
@@ -485,6 +563,104 @@ export default function WorkspaceControls({
             >
               Restore workspace backup
             </button>
+          </section>
+        )}
+        {tab === 'instructions' && (
+          <section className="control-section">
+            <h3>Versioned project instructions</h3>
+            <p>
+              These directions accompany planning, meetings and tasks. Review a proposed
+              improvement, edit it, then save while the project is paused. Previous versions remain
+              available. Instructions cannot grant tools, change spending limits or modify Workroom
+              itself.
+            </p>
+            <label>
+              Current team instructions
+              <textarea
+                rows={6}
+                maxLength={4000}
+                aria-label="Current team instructions"
+                value={instructions.text}
+                onChange={(e) => saveInstructions({ ...instructions, text: e.target.value })}
+              />
+            </label>
+            <label>
+              Reason for this change
+              <input
+                aria-label="Instruction change reason"
+                maxLength={1000}
+                value={instructions.reason}
+                onChange={(e) => saveInstructions({ ...instructions, reason: e.target.value })}
+              />
+            </label>
+            <p className="field-hint">
+              {instructionError || 'Edits are saved in this browser until submitted.'}
+            </p>
+            <button
+              className="button primary"
+              disabled={busy || instructions.reason.trim().length < 5}
+              onClick={() =>
+                act(async () => {
+                  await api(`/projects/${project.id}/instructions`, instructions, 'PUT');
+                  clearInstructions();
+                  saveInstructions({ text: instructions.text, reason: '' });
+                }, 'New team instruction version saved.')
+              }
+            >
+              Save instruction version
+            </button>
+            <h3>Agent improvement proposals</h3>
+            {data.state.tasks
+              .filter((t) => t.projectId === project.id)
+              .flatMap((t) =>
+                (t.result?.improvements || []).map((v, i) => (
+                  <article className="control-section" key={`${t.id}-${i}`}>
+                    <strong>{v.problem}</strong>
+                    <p>{v.change}</p>
+                    <p>
+                      Evidence from {t.title}: {v.evidence}
+                    </p>
+                    <button
+                      className="button secondary"
+                      onClick={() => {
+                        const combined = `${instructions.text}\n${v.change}`.trim();
+                        if (combined.length > 4000) {
+                          setMessage(
+                            'This proposal would exceed 4,000 instruction characters. Shorten the current text before loading it; nothing was removed.',
+                          );
+                          return;
+                        }
+                        saveInstructions({
+                          text: combined,
+                          reason: `Proposal from ${t.title}: ${v.problem}`.slice(0, 1000),
+                        });
+                      }}
+                    >
+                      Load proposal for editing
+                    </button>
+                  </article>
+                )),
+              )}
+            <h3>Saved versions</h3>
+            {[...(project.instructionHistory || [])].reverse().map((v, i) => (
+              <details key={v.id}>
+                <summary>
+                  Version {(project.instructionHistory?.length || 0) - i} · {v.reason}
+                </summary>
+                <pre className="instruction-text">{v.text || '(No additional instructions)'}</pre>
+                <button
+                  className="button secondary small"
+                  onClick={() =>
+                    saveInstructions({
+                      text: v.text,
+                      reason: `Restore instructions from ${new Date(v.createdAt).toLocaleString()}`,
+                    })
+                  }
+                >
+                  Load this version for review
+                </button>
+              </details>
+            ))}
           </section>
         )}
         {message && (

@@ -90,9 +90,7 @@ same role/goal workflow, so changing models doesn't require rebuilding the offic
 
 Try this brief: “Plan a small team's office move in six weeks. Budget ceiling
 $5,000 USD. Identify missing quotes and approvals; don't invent confirmed dates,
-purchases or completed work.” Select Office & project coordination, edit the plan, run, review, then check
-the budget, risks, meeting template and report. Save verified constraints in Project
-memory. Its value depends on accuracy and time saved drafting/coordinating.
+purchases or completed work.” Select Office & project coordination, choose a real model using the project’s Model → Change control, edit the plan, run, then inspect the requested results and their acceptance evidence. Routine work proceeds without a mandatory review; material choices and explicit approval gates wait for you. Save verified constraints in Project memory. Its value depends on accuracy and time saved drafting/coordinating.
 
 ## Verification boundaries
 

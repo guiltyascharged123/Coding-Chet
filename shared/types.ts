@@ -1,3 +1,4 @@
+import type { WorkResult } from './work.js';
 export type Provider =
   'demo' | 'openai' | 'gemini' | 'external' | 'codex' | 'ollama' | 'compatible';
 export type ProjectStatus = 'ready' | 'running' | 'paused' | 'needs_input' | 'completed';
@@ -59,6 +60,14 @@ export interface Task {
   leaseExpiresAt?: number;
   toolLog?: { id: string; type: string; detail: string; status?: string }[];
   readOnly?: boolean;
+  result?: WorkResult;
+  coordinationRounds?: number;
+  contextReport?: {
+    inputBytes: number;
+    originalBytes: number;
+    limit: number;
+    sources: { id: string; label: string; totalCharacters: number; includedCharacters: number }[];
+  };
 }
 export interface Project {
   id: string;
@@ -76,9 +85,11 @@ export interface Project {
   team?: Agent[];
   workspaceFolder?: string;
   toolNetwork?: boolean;
+  workMode?: 'text' | 'workspace';
   reasoningEffort?: ReasoningEffort;
   meetingPolicy?: { enabled: boolean; everyTasks: number };
   researchEnabled?: boolean;
+  instructionHistory?: { id: string; text: string; reason: string; createdAt: number }[];
 }
 export interface MemoryItem {
   id: string;
@@ -141,6 +152,8 @@ export interface Approval {
   status: 'pending' | 'approved' | 'revision';
   feedback?: string;
   createdAt: number;
+  decision?: NonNullable<WorkResult['decision']>;
+  resumeTask?: boolean;
 }
 export interface WorkspaceState {
   agents: Agent[];
@@ -179,5 +192,5 @@ export const STATUS_LABELS: Record<ProjectStatus, string> = {
   running: 'Team is working',
   paused: 'Paused',
   needs_input: 'Your input needed',
-  completed: 'Project complete',
+  completed: 'Plan finished',
 };

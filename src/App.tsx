@@ -56,6 +56,8 @@ import DocumentActions from './components/DocumentActions';
 import { useSavedDraft } from './drafts';
 import { SPECIALISTS } from '../shared/specialists';
 import WorkspaceControls from './components/WorkspaceControls';
+import WorkEvidence from './components/WorkEvidence';
+import { hasProjectTools } from '../shared/capabilities';
 import ProjectModal from './components/ProjectModal';
 import PlanEditor from './components/PlanEditor';
 import ProjectFiles from './components/ProjectFiles';
@@ -520,10 +522,25 @@ export default function App() {
               </div>
               <h2>{project.title}</h2>
               <p title={project.brief}>{project.brief}</p>
+              <button
+                className="project-model-control"
+                onClick={() => {
+                  setControlsTab('limits');
+                  setModal('controls');
+                }}
+                aria-label="Change project model"
+              >
+                Model:{' '}
+                {project.model ||
+                  (project.provider === 'demo'
+                    ? 'Demo · no AI connected'
+                    : PROVIDER_LABELS[project.provider])}{' '}
+                · Change
+              </button>
             </div>
             <div className="project-progress">
               <div>
-                <span>Overall progress</span>
+                <span>Plan progress</span>
                 <strong>{progress}%</strong>
               </div>
               <div className="progress-track">
@@ -567,7 +584,7 @@ export default function App() {
               {project.status === 'running'
                 ? 'Pause team'
                 : project.status === 'completed'
-                  ? 'All done'
+                  ? 'Plan finished'
                   : project.status === 'needs_input'
                     ? 'Review work'
                     : project.status === 'paused'
@@ -575,6 +592,13 @@ export default function App() {
                       : 'Run team'}
             </button>
           </section>
+          {project.provider === 'demo' && (
+            <div className="plan-notice" role="status">
+              <strong>Demo connection · no AI is doing project work.</strong> Choose a real model
+              with “Change project model” above. Demo runs only preview assignments and the office
+              flow.
+            </div>
+          )}
 
           <section className="project-tools" aria-label="Project brief and plan">
             <details className="saved-brief">
@@ -904,7 +928,7 @@ export default function App() {
                 <span>
                   {project.provider === 'demo'
                     ? 'Demo preview: no AI or tools run. Connect a model for real work.'
-                    : project.workflow === 'software'
+                    : hasProjectTools(project)
                       ? 'Each role uses Codex tools in the shared project folder. Task details show actual tool activity.'
                       : project.provider === 'codex' && project.researchEnabled
                         ? 'Codex can search public sources for project tasks. Search queries and results appear in task details; meeting notes guide handoffs.'
@@ -1113,7 +1137,7 @@ export default function App() {
                 Open a task result to review its work, download useful reports as Word or Markdown,
                 export tables to Excel, or print to PDF.
               </p>
-              {project.workflow === 'software' && (
+              {project.workspaceFolder && (
                 <ProjectFiles
                   key={project.id}
                   project={project}
@@ -1236,6 +1260,7 @@ export default function App() {
       )}
       {modal === 'controls' && (
         <WorkspaceControls
+          key={project.id}
           data={data}
           project={project}
           initialTab={controlsTab}
@@ -1320,9 +1345,10 @@ export default function App() {
         >
           <div className="task-detail">
             <p className="task-description">{selectedTask.description}</p>
+            <WorkEvidence task={selectedTask} />
             {!!selectedTask.toolLog?.length && (
               <details className="tool-activity" open>
-                <summary>Actual tool activity ({selectedTask.toolLog.length})</summary>
+                <summary>Work activity & tool receipts ({selectedTask.toolLog.length})</summary>
                 {selectedTask.toolLog.map((e) => (
                   <div key={e.id}>
                     <strong>
@@ -1387,8 +1413,8 @@ export default function App() {
                 <Clock3 size={28} />
                 <h3>
                   {selectedTask.status === 'working'
-                    ? 'A good idea is taking shape.'
-                    : 'Waiting for its moment.'}
+                    ? 'Model assignment in progress'
+                    : 'Queued assignment'}
                 </h3>
                 <p>
                   {selectedTask.status === 'working'
@@ -1666,13 +1692,22 @@ function ReviewModal({
     `workroom-review-${approval.id}`,
     '',
   );
+  const [choice, setChoice, clearChoice] = useSavedDraft(
+    `workroom-choice-${approval.id}`,
+    approval.decision?.recommended || '',
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   async function decide(decision: 'approve' | 'revise') {
     setSaving(true);
     try {
-      await api(`/approvals/${approval.id}`, { decision, feedback });
+      await api(`/approvals/${approval.id}`, {
+        decision,
+        feedback,
+        choice: approval.decision && decision === 'approve' ? choice : undefined,
+      });
       clearFeedback();
+      clearChoice();
       onDone(
         decision === 'approve'
           ? 'Direction approved. The next handoff is underway.'
@@ -1685,11 +1720,44 @@ function ReviewModal({
     }
   }
   return (
-    <Modal wide title="A little human perspective." subtitle={approval.question} onClose={onClose}>
+    <Modal
+      wide
+      title={approval.decision ? 'Decision needed' : 'Requested review'}
+      subtitle={approval.question}
+      onClose={onClose}
+    >
+      {approval.decision && (
+        <section className="control-section">
+          <h3>Why the team needs you</h3>
+          <p>{approval.decision.why}</p>
+          <fieldset>
+            <legend>Your choice</legend>
+            {approval.decision.options.map((option) => (
+              <label className="check-row" key={option}>
+                <input
+                  type="radio"
+                  name="human-decision"
+                  value={option}
+                  checked={choice === option}
+                  onChange={() => setChoice(option)}
+                />
+                {option}
+                {option === approval.decision?.recommended ? ' (recommended)' : ''}
+              </label>
+            ))}
+          </fieldset>
+          <p>
+            The agent will resume this assignment with your answer. Approval does not mark
+            unfinished work complete.
+          </p>
+        </section>
+      )}
       <div className="review-agent">
         <Avatar color={agent.color} size={37} />
         <div>
-          <strong>{agent.name} has a draft for you.</strong>
+          <strong>
+            {agent.name} · {approval.decision ? 'Waiting for your decision' : 'Requested approval'}
+          </strong>
           <span>{task.title}</span>
         </div>
         <span className="review-tag">Your decision matters</span>

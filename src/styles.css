@@ -4808,3 +4808,20 @@ button.connection:hover {
 .meeting-agenda-editor p {
   margin: 14px 0;
 }
+
+.project-model-control {
+  margin-top: 8px;
+  color: #d3e1ed;
+  background: #263d4b;
+  border: 1px solid #537080;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.instruction-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

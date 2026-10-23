@@ -121,7 +121,7 @@ worktree is unnecessary. If npm’s default cache is unwritable, use
 - Responsive navigation, accessible dialogs, reduced-motion support, and a clickable
   2D fallback when WebGL is unavailable. Fonts and scene assets are bundled locally.
 
-**Demo mode is a simulation:** no AI or tools run. Normal new workspaces start empty. Editable templates create no model request; optional AI planning does. Office/research/venture/custom model assignments generate text, with optional built-in Codex web research. **Software delivery uses Codex file and command tools** after its local sandbox readiness check passes. See the [easy guide](docs/EASY-GUIDE.md) for a first run, task retries, managed files and limitations.
+**Demo mode is a simulation:** no AI or tools run. Normal new workspaces start empty. Editable templates create no model request; optional AI planning does. Office/research/venture/custom model assignments generate text by default, with optional built-in Codex web research. **Software delivery uses Codex file and command tools**, and other Codex teams can explicitly enable them too, after the local sandbox readiness check passes. See the [easy guide](docs/EASY-GUIDE.md) for a first run, task retries, managed files and limitations.
 
 ## Connect a model
 
@@ -253,3 +253,7 @@ OpenAI/Gemini access requires your credentials and is not verified by those test
 See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [MIT](LICENSE).
 
 Managed source folders live beside the database under `.data/projects/` by default. Workspace JSON backups contain records and reports, **not source files**; copy managed folders separately or use Outputs → Download source ZIP. The coding worker is bounded to project files plus read access for system tooling; tool network starts disabled and can be enabled per project for dependency downloads. Native execution must pass the local readiness check. Development verified native configuration and mocked worker contracts; the cloud host cannot start the native coding sandbox because of its reserved socket-directory permissions. No live account generation or unrestricted fallback was used.
+
+### Evidence-based team work
+
+Each project has a visible **Model → Change** control for its connection and exact model ID. Direct model tasks report deliverables, acceptance evidence, assumptions, concrete human decisions and bounded internal follow-ups. Large handoffs use budgeted source excerpts and targeted retrieval rather than failing on accumulated prose. Any Codex team can explicitly enable managed file/command tools; sandbox and cost controls still apply. Project instruction improvements are reviewable and versioned. See the [easy guide](docs/EASY-GUIDE.md#useful-work-evidence-and-recovery) for usage and limits. Model-reported checks are not proof of correctness; actual receipts and independent review matter.

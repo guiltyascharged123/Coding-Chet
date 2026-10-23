@@ -50,7 +50,7 @@ export default function Collaboration({
       <p className="field-hint">
         {project.provider === 'demo'
           ? 'Demo meetings are labeled simulations; no AI is called.'
-          : 'A full meeting uses up to five model requests, subject to your existing limits. Contributions are generated one at a time.'}{' '}
+          : 'A normal meeting uses five model requests; malformed replies can add one correction per turn. Existing limits apply. Contributions are generated one at a time.'}{' '}
         Automatic meetings:{' '}
         {project.meetingPolicy?.enabled
           ? `kickoff and after every ${project.meetingPolicy.everyTasks} completed tasks`

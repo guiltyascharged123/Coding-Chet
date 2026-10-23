@@ -18,6 +18,8 @@ export type GenerationContext = {
   research?: boolean;
   onTool?: (entry: NonNullable<Task['toolLog']>[number]) => void;
   cache?: boolean;
+  cacheWhen?: (text: string) => boolean;
+  onContext?: () => void;
 };
 export type Generated = { text: string; inputTokens?: number; outputTokens?: number };
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -48,6 +50,7 @@ export function selectedMemory(store: Store | undefined, projectId: string) {
     )
     .map((m) => ({
       id: m.id,
+      sourceId: `memory:${m.id}`,
       content: m.content,
       sourceTaskId: m.sourceTaskId || 'Human supplied',
     }));
@@ -55,8 +58,13 @@ export function selectedMemory(store: Store | undefined, projectId: string) {
 export function humanDirection(store: Store | undefined, projectId: string) {
   return (store?.state.approvals || [])
     .filter((a) => a.projectId === projectId && a.status !== 'pending' && a.feedback?.trim())
-    .slice(-4)
-    .map((a) => ({ sourceTaskId: a.taskId, decision: a.status, feedback: a.feedback }));
+    .map((a) => ({
+      sourceId: `approval:${a.id}`,
+      sourceTaskId: a.taskId,
+      title: a.question,
+      decision: a.status,
+      feedback: a.feedback,
+    }));
 }
 export function relevantContext(task: Task, context: Task[]) {
   const final =
@@ -66,7 +74,13 @@ export function relevantContext(task: Task, context: Task[]) {
     );
   return context
     .filter((t) => final || task.dependencies.includes(t.id))
-    .map((t) => ({ title: t.title, output: t.output }));
+    .map((t) => ({
+      sourceId: `task:${t.id}`,
+      title: t.title,
+      output: t.result
+        ? `${JSON.stringify({ summary: t.result.summary, handoff: t.result.handoff, checks: t.result.checks })}\n\n${t.output}`
+        : t.output,
+    }));
 }
 export function policy(store?: Store): CostPolicy {
   return store?.state.policy || structuredClone(defaultPolicy);
@@ -158,7 +172,7 @@ export async function guarded(
     model = ctx.model || project?.model || '';
   const key = hash(
     JSON.stringify({
-      version: 2,
+      version: 3,
       project: project?.id,
       provider,
       model,
@@ -170,7 +184,7 @@ export async function guarded(
   );
   const cached = ctx.cache === false ? undefined : store?.cached(key);
   if (cached !== undefined && project) {
-    store!.putAttempt({
+    const receipt: Attempt = {
       id: randomUUID(),
       projectId: project.id,
       taskId: task?.id,
@@ -181,7 +195,9 @@ export async function guarded(
       reservedUsd: 0,
       model,
       billing: billingFor(provider),
-    });
+    };
+    store!.putAttempt(receipt);
+    ctx.onAttempt?.(receipt.id);
     return cached;
   }
   const attempt =
@@ -227,7 +243,8 @@ export async function guarded(
         inputTokens: usageKnown ? result.inputTokens : undefined,
         outputTokens: usageKnown ? result.outputTokens : undefined,
       });
-      if (ctx.cache !== false) store.cache(key, result.text);
+      if (ctx.cache !== false && (!ctx.cacheWhen || ctx.cacheWhen(result.text)))
+        store.cache(key, result.text);
     }
     return result.text;
   } catch (error) {

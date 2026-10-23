@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { decisionSchema, workResultSchema } from './work.js';
 export const providers = [
   'demo',
   'openai',
@@ -131,6 +132,17 @@ export const stateSchema = z
           workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
           reasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
           researchEnabled: z.boolean().optional(),
+          instructionHistory: z
+            .array(
+              z.object({
+                id,
+                text: text.max(4000),
+                reason: text.max(1000),
+                createdAt: z.number().finite(),
+              }),
+            )
+            .max(50)
+            .optional(),
           meetingPolicy: collaborationSchema.shape.meetingPolicy.optional(),
           team: z
             .array(
@@ -148,6 +160,7 @@ export const stateSchema = z
             .optional(),
           workspaceFolder: text.regex(/^[a-z0-9-]{1,160}$/).optional(),
           toolNetwork: z.boolean().optional(),
+          workMode: z.enum(['text', 'workspace']).optional(),
         }),
       )
       .max(1000),
@@ -194,6 +207,25 @@ export const stateSchema = z
             .max(100)
             .optional(),
           readOnly: z.boolean().optional(),
+          result: workResultSchema.optional(),
+          coordinationRounds: z.number().int().min(0).max(20).optional(),
+          contextReport: z
+            .object({
+              inputBytes: z.number().int().min(0),
+              originalBytes: z.number().int().min(0),
+              limit: z.number().int().min(0),
+              sources: z
+                .array(
+                  z.object({
+                    id: text.max(200),
+                    label: text.max(100),
+                    totalCharacters: z.number().int().min(0),
+                    includedCharacters: z.number().int().min(0),
+                  }),
+                )
+                .max(20000),
+            })
+            .optional(),
         }),
       )
       .max(10000),
@@ -217,8 +249,10 @@ export const stateSchema = z
           projectId: id,
           taskId: id,
           question: text.max(3000),
+          decision: decisionSchema.optional(),
+          resumeTask: z.boolean().optional(),
           status: z.enum(['pending', 'approved', 'revision']),
-          feedback: text.max(4000).optional(),
+          feedback: text.max(6000).optional(),
           createdAt: z.number().finite(),
         }),
       )

@@ -21,6 +21,8 @@ import { stateSchema } from '../shared/schemas.js';
 import { projectWorkspace, workspaceFolder } from './workspaces.js';
 import { hash, memoryCurrent, policy, reserve, selectedMemory, relevantContext } from './policy.js';
 import { collaborationSchema, policySchema } from '../shared/schemas.js';
+import type { FollowUp } from '../shared/work.js';
+import { hasProjectTools } from '../shared/capabilities.js';
 import type { CostPolicy } from '../shared/types.js';
 
 export class AppError extends Error {
@@ -299,8 +301,7 @@ export class Engine extends EventEmitter {
       collaboration === undefined ? undefined : collaborationSchema.parse(collaboration);
     this.state.tasks = next.tasks;
     if (settings) Object.assign(project, settings);
-    if (project.workflow === 'software' && toolNetwork !== undefined)
-      project.toolNetwork = toolNetwork;
+    if (hasProjectTools(project) && toolNetwork !== undefined) project.toolNetwork = toolNetwork;
     project.planningStatus = 'ready';
     delete project.planningError;
     project.status = 'paused';
@@ -328,7 +329,12 @@ export class Engine extends EventEmitter {
     this.commit();
   }
 
-  setProjectProvider(id: string, provider: Provider) {
+  setProjectProvider(
+    id: string,
+    provider: Provider,
+    model?: string,
+    workMode?: 'text' | 'workspace',
+  ) {
     const p = this.project(id);
     if (
       this.conferences.size ||
@@ -339,13 +345,54 @@ export class Engine extends EventEmitter {
       throw new AppError('Pause the project before changing its connection.');
     if (!runtimeInfo().available[provider])
       throw new AppError('The selected connection is not configured.');
+    const selected =
+      model?.trim() ||
+      (provider !== 'demo' && provider !== 'external' ? runtimeInfo().models[provider] : '');
+    if (
+      provider !== 'demo' &&
+      provider !== 'external' &&
+      !/^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,149}$/.test(selected)
+    )
+      throw new AppError(
+        'Enter an exact model ID (up to 150 characters, without spaces). Model access is checked by your provider when work runs.',
+      );
+    const tools = p.workflow === 'software' || (workMode || p.workMode) === 'workspace';
+    if (tools && provider !== 'codex')
+      throw new AppError(
+        'Managed project tools require Codex. Disable that option before choosing a text connection. Software delivery always requires Codex.',
+      );
+    const folder = tools ? p.workspaceFolder || workspaceFolder(p) : p.workspaceFolder;
+    if (tools) projectWorkspace(this.store.path, { ...p, workspaceFolder: folder });
+    p.workMode = p.workflow === 'software' ? 'workspace' : workMode || p.workMode;
+    p.workspaceFolder = folder;
     p.provider = provider;
-    p.model =
-      provider === 'demo' || provider === 'external' ? undefined : runtimeInfo().models[provider];
+    p.model = provider === 'demo' || provider === 'external' ? undefined : selected;
     this.event(
       id,
       'system',
-      `You explicitly selected ${provider} for this project. Existing outputs and tasks were retained.`,
+      `Project model set to ${provider}${p.model ? ` / ${p.model}` : ''}. Existing work and usage history retained.`,
+    );
+    this.commit();
+  }
+  updateInstructions(id: string, text: string, reason: string) {
+    const project = this.project(id);
+    if (
+      project.status === 'running' ||
+      this.planners.has(id) ||
+      this.conferences.size ||
+      this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
+    )
+      throw new AppError('Pause the project before changing team instructions.');
+    if ((project.instructionHistory?.length || 0) >= 50)
+      throw new AppError(
+        'This project has reached its 50 saved instruction versions. Export a backup before starting a new project.',
+      );
+    project.instructionHistory ||= [];
+    project.instructionHistory.push({ id: randomUUID(), text, reason, createdAt: Date.now() });
+    this.event(
+      id,
+      'system',
+      `Team instructions version ${project.instructionHistory.length} saved: ${reason}`,
     );
     this.commit();
   }
@@ -435,11 +482,11 @@ export class Engine extends EventEmitter {
       project.planningStatus === 'failed'
     )
       throw new AppError('Finish or retry planning before running the team. Your brief is saved.');
-    if (project.workflow === 'software' && project.provider !== 'codex')
+    if (hasProjectTools(project) && project.provider !== 'codex')
       throw new AppError(
         'Software delivery requires the Codex connection for real file and command tools. Select it in Workspace controls.',
       );
-    if (project.workflow === 'software' && !runtimeInfo().coding?.ready)
+    if (hasProjectTools(project) && !runtimeInfo().coding?.ready)
       throw new AppError(
         runtimeInfo().coding?.message || 'Check coding sandbox readiness in Model connections.',
       );
@@ -513,7 +560,7 @@ export class Engine extends EventEmitter {
     if ((this.state.meetings || []).some((m) => m.projectId === target.id && m.status === 'failed'))
       throw new AppError('Retry or skip the failed meeting before retrying work.');
     if (
-      target.workflow === 'software' &&
+      hasProjectTools(target) &&
       (target.provider !== 'codex' ||
         !runtimeInfo().available.codex ||
         !runtimeInfo().coding?.ready)
@@ -536,24 +583,36 @@ export class Engine extends EventEmitter {
     this.commit();
     this.tick();
   }
-  review(id: string, decision: 'approve' | 'revise', feedback: string) {
+  review(id: string, decision: 'approve' | 'revise', feedback: string, choice?: string) {
     const approval = this.state.approvals.find((a) => a.id === id);
     if (!approval) throw new AppError('Review not found.', 404);
     if (approval.status !== 'pending')
       throw new AppError('This review has already been resolved.', 409);
     if (decision === 'revise' && !feedback.trim())
       throw new AppError('Tell the agent what you would like changed.');
+    if (
+      decision === 'approve' &&
+      approval.decision &&
+      choice &&
+      !approval.decision.options.includes(choice)
+    )
+      throw new AppError('Choose one of the listed options; put a custom direction in feedback.');
     const task = this.task(approval.taskId);
     if (decision === 'revise' && (task.revisions || 0) >= policy(this.store).maxRevisions)
       throw new AppError(
         'The revision limit is reached. Increase it explicitly in Workspace controls before requesting another revision.',
       );
     approval.status = decision === 'approve' ? 'approved' : 'revision';
-    approval.feedback = feedback;
+    approval.feedback =
+      approval.decision && decision === 'approve'
+        ? `${approval.decision.question}\nUser choice: ${choice || approval.decision.recommended}${feedback.trim() ? `\nAdditional direction: ${feedback.trim()}` : ''}`
+        : feedback;
     if (decision === 'approve') {
-      task.status = 'done';
-      task.completedAt = Date.now();
-      this.handoff(task);
+      task.status = approval.resumeTask ? 'queued' : 'done';
+      if (!approval.resumeTask) {
+        task.completedAt = Date.now();
+        this.handoff(task);
+      }
     } else {
       task.status = 'queued';
       task.feedback = feedback;
@@ -805,7 +864,7 @@ export class Engine extends EventEmitter {
       ) &&
       task.status === 'queued' &&
       !(
-        this.project(task.projectId).workflow === 'software' &&
+        hasProjectTools(this.project(task.projectId)) &&
         this.state.tasks.some((t) => t.projectId === task.projectId && t.status === 'working')
       ) &&
       this.project(task.projectId).status === 'running' &&
@@ -901,11 +960,10 @@ export class Engine extends EventEmitter {
           task,
           toolNetwork: !!project.toolNetwork,
           readOnly: !!task.readOnly,
-          workspace:
-            project.workflow === 'software'
-              ? projectWorkspace(this.store.path, project)
-              : undefined,
-          cache: project.workflow === 'software' ? false : undefined,
+          workspace: hasProjectTools(project)
+            ? projectWorkspace(this.store.path, project)
+            : undefined,
+          cache: hasProjectTools(project) ? false : undefined,
           onTool: (raw) => {
             const entry = { ...raw, id: `${task.attemptId || task.id}:${raw.id}` };
             task.toolLog ||= [];
@@ -919,10 +977,12 @@ export class Engine extends EventEmitter {
             task.attemptId = id;
             this.commit();
           },
+          onContext: () => this.commit(),
         },
       );
       if (!controller.signal.aborted) {
-        if (project.workflow === 'software') {
+        if (hasProjectTools(project) && !task.result) {
+          // Keep compatibility for injected/older worker adapters; production Codex uses the work contract.
           const result = JSON.parse(output) as { outcome: 'complete' | 'blocked'; summary: string };
           task.output = result.summary;
           if (result.outcome === 'blocked')
@@ -931,6 +991,12 @@ export class Engine extends EventEmitter {
               'The worker reported a blocker. Open the task for its report and tool activity; add direction and retry when ready.',
             );
           else this.complete(task, result.summary);
+        } else if (task.result?.outcome === 'continue') {
+          task.output = output;
+          this.coordinate(task, task.result.followUps);
+        } else if (task.result?.outcome === 'blocked') {
+          task.output = output;
+          this.fail(task, task.result.summary);
         } else this.complete(task, output);
       }
     } catch (error) {
@@ -943,10 +1009,54 @@ export class Engine extends EventEmitter {
     this.event(
       task.projectId,
       'completed',
-      `Finished “${task.title}”. ${next ? 'The next teammate has the handoff.' : 'The deliverable is ready in Outputs.'}`,
+      task.result
+        ? `${task.title}: ${task.result.summary}`
+        : `Finished “${task.title}”. ${next ? 'The next teammate has the handoff.' : 'The deliverable is ready in Outputs.'}`,
       task.agentId,
       next?.agentId,
     );
+  }
+  private coordinate(task: Task, followUps: FollowUp[]) {
+    const limits = policy(this.store);
+    if ((task.coordinationRounds || 0) >= limits.maxRevisions)
+      throw new AppError(
+        'The internal follow-up limit was reached. The partial work is saved; inspect the outstanding checks before extending the plan or revision limit.',
+      );
+    if (
+      this.state.tasks.filter((t) => t.projectId === task.projectId).length + followUps.length >
+      limits.maxTasks
+    )
+      throw new AppError(
+        'Necessary teammate follow-ups exceed the project task limit. The proposed work is saved in this task; extend the plan or task limit before retrying.',
+      );
+    let dependencies = [...task.dependencies];
+    const created: Task[] = followUps.map((f) => {
+      const next: Task = {
+        ...f,
+        id: randomUUID(),
+        projectId: task.projectId,
+        dependencies,
+        status: 'queued',
+        requiresApproval: false,
+        output: '',
+        feedback: '',
+      };
+      dependencies = [next.id];
+      return next;
+    });
+    task.dependencies = [...new Set([...task.dependencies, ...dependencies])];
+    task.coordinationRounds = (task.coordinationRounds || 0) + 1;
+    task.status = 'queued';
+    const index = this.state.tasks.indexOf(task);
+    this.state.tasks.splice(index, 0, ...created);
+    this.event(
+      task.projectId,
+      'message',
+      `Requested ${created.length} internal follow-up${created.length === 1 ? '' : 's'} before completing “${task.title}”: ${created.map((t) => t.title).join('; ')}.`,
+      task.agentId,
+      created[0]?.agentId,
+    );
+    this.commit();
   }
   private complete(task: Task, output: string) {
     if (!output.trim()) throw new AppError('A completed task must include a deliverable.');
@@ -954,13 +1064,25 @@ export class Engine extends EventEmitter {
     delete task.leaseId;
     delete task.leaseExpiresAt;
     const project = this.project(task.projectId);
-    if (task.requiresApproval) {
+    const decision = task.result?.outcome === 'needs_input' ? task.result.decision : undefined;
+    if (
+      decision &&
+      this.state.approvals.some(
+        (a) => a.taskId === task.id && a.status === 'approved' && a.question === decision.question,
+      )
+    )
+      throw new AppError(
+        'The agent repeated a decision you already answered. Your answer and partial work are saved. Review the task or choose a stronger project model before retrying.',
+      );
+    if (task.requiresApproval || decision) {
       task.status = 'review';
       this.state.approvals.push({
         id: randomUUID(),
         projectId: project.id,
         taskId: task.id,
-        question: `Is this the right direction for ${project.title}?`,
+        question: decision?.question || `Review the requested approval: ${task.title}`,
+        decision: decision || undefined,
+        resumeTask: !!decision,
         status: 'pending',
         createdAt: Date.now(),
       });
@@ -995,7 +1117,7 @@ export class Engine extends EventEmitter {
       this.event(
         project.id,
         'system',
-        'That’s a wrap. All deliverables are ready to explore and download in Outputs.',
+        'All planned tasks finished. Outputs contain the results and reported checks. External outcomes such as customers, deployment or revenue are achieved only if separately evidenced.',
       );
     }
   }

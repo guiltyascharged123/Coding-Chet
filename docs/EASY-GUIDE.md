@@ -71,17 +71,17 @@ from Codespaces, see [backup and migration](LOCAL-SETUP.md#bring-existing-work-h
    > Identify missing quotes and approvals. Do not invent confirmed dates,
    > purchases, or completed work.
 
-2. Choose **Office & project coordination** and **Editable task template**. Creating a template makes no model call.
+2. Choose **Office & project coordination**. With a real connection, **AI plan tailored to the brief** is selected by default and uses one model request. Choose **Editable task template** for a no-model starter plan instead.
 3. Click **Create project**, then **Edit plan**. Adjust assignments and acceptance criteria, choose owners, add/remove tasks, and set dependencies and human approval gates. There is no fixed number of steps. The default task ceiling is 30, adjustable under Workspace controls; older custom limits are retained.
-4. Select a real model connection for this project under **Workspace controls → Limits & connections**. Click **Run team**. Demo only previews assignments; it does not do real work.
-5. When **Review work** appears, read the proposal. Approve it or request a revision. Dependent tasks wait for your decision.
+4. Click **Model: … · Change** under the project brief. Select its connection and exact **Project model ID**, then **Set project connection**. Pause first when changing an active project. Click **Run team**. Demo is visibly labeled and only previews assignments; it does not do real work.
+5. Let routine planning, internal checks and specialist follow-ups proceed. When **Review work** appears for a model decision, read its specific question, why your answer is necessary, and the options. Choose or add direction. The agent resumes the unfinished task with your answer. Explicit approval gates you put in the plan still pause for review.
 6. Open **Outputs** to inspect results and download useful reports as Word, Excel, Markdown, or Print / PDF. The team should create only material serving your goal, not a standard pile of unnecessary documents.
 
 **Your writing is saved.** Unsubmitted briefs are retained in this browser when you close the dialog or reload. Once created, the project and original brief are saved on the server before AI planning begins. Expand **Saved project brief** to read or download it. AI planning runs in the background; a failure shows **Retry planning**, **Use editable template**, and **Review usage**. If usage is uncertain, review and acknowledge its receipt before another model attempt. No automatic paid fallback occurs. A same-submission retry does not create a duplicate project.
 
 For a failed task, click **See task** or its task-board card, read its report and actual tool activity, add direction if useful, then **Retry task**. A blocked software task retains its report and files. A retry resumes from those files; cancellation does not undo changes. Add follow-up tasks with **Edit plan**, even after a project finishes.
 
-**Software project:** choose **Software delivery** and connect Codex. The lead proposes scope using read-only source access, then waits for your approval. The engineer implements files, the code reviewer inspects/fixes them, and the test engineer runs checks. The team can iterate within an assignment for up to 15 minutes. A blocked result pauses the project. Open **Outputs → Project files** to inspect files, see the exact local folder, or download source ZIP.
+**Software project:** choose **Software delivery** and connect Codex. The lead inspects scope using read-only source access, then implementation proceeds within the brief unless a real decision or an explicit approval gate requires you. The engineer implements files, the code reviewer inspects/fixes them, and the test engineer runs checks. The team can iterate within an assignment for up to 15 minutes. A blocked result pauses the project. Open **Outputs → Project files** to inspect files, see the exact local folder, or download source ZIP.
 
 Folders live in `.data/projects/<readable-project-name>-<unique-id>/` beside the active database. Identically named projects get different folders. All roles on one software project share that folder; software tasks run serially to avoid simultaneous file edits. **Edit plan → Allow tool network** enables dependency downloads for that project; it starts off. Without it, missing dependencies may block work. Inspection tasks can execute read-only checks but cannot write project source files; their scratch folder is writable.
 
@@ -89,13 +89,37 @@ The **Server connected** indicator reports the browser's connection to Workroom.
 
 Old demo projects and six-document packs remain available with their original outputs. They are not imposed on new projects. Briefs lost by the old failed-planning bug were never saved and cannot be recovered by updating.
 
+### Useful work, evidence and recovery
+
+Text responses and native Codex workers now return a checked work record: a plain-language result, the actual deliverable, acceptance checks with evidence, known facts, assumptions and a concrete next step. Open a task to see **Reported result**, outstanding checks and **Context used**. A schema check cannot certify that a model is right: read the evidence, independent reviews and actual tool receipts. **Plan finished** means the planned tasks finished, not that customers paid, a product deployed, or a real-world goal was achieved.
+
+Agents can request up to three focused internal specialist assignments before resuming their original task. These use the same project/model, permissions and cost controls; the parent waits for their results. Internal coordination rounds use the per-task revision limit (default one), and added assignments respect the project task ceiling. Failed checks or missing capabilities are saved as blockers rather than silently accepted as completed work.
+
+Workroom fits accumulated teammate outputs, meeting decisions and verified memory into the configured input byte budget. Full saved sources remain intact. Labeled excerpts carry source IDs; text workers can request missing passages in at most two additional model requests. Software workers can inspect temporary copies of full saved evidence in their managed folder. The brief, assignment, retry direction and approved team instructions are not silently shortened. If those required instructions alone cannot fit, the task reports the minimum needed input size.
+
+A malformed text response gets at most one automatic format correction. Corrections and retrieval requests count toward your request/usage limits. Network errors, unknown usage, exhausted budgets and unavailable tools are not automatically retried or switched to another paid connection.
+
+**For the old “Input exceeds the configured context limit” failure:** update Workroom, restart it, open the saved failed task and click **Retry task**. You should not need to rewrite the project or paste all previous work. Workroom now selects the supporting context. Only unusually long required instructions or a deliberately tiny input limit still need a settings change.
+
+### Let any Codex team build useful files
+
+A venture, research or office project can need implementation too. Pause it, click **Model: … · Change**, choose Codex, check **Enable managed project tools**, then **Set project connection**. All four roles share a managed project folder. Open **Outputs → Project files** for actual files and a source ZIP. Disabling tools retains those files. Software delivery uses these tools automatically.
+
+The native coding sandbox must pass its offline check; otherwise work stops with the readiness message. File/command tools remain limited to the managed project and allowed system tooling. **Edit plan → Allow tool network** controls dependency downloads and network access by executed code. **Allow Codex web research** independently permits built-in read-only searches with cited sources, including for tool-enabled projects. Meetings do not browse or edit files. OpenAI, Gemini, Ollama and compatible text adapters do not acquire file tools from a role name.
+
+### Improve project instructions with review
+
+Open **Workspace controls → Team instructions**. Write clear working rules and a reason, then **Save instruction version** while paused. Each later model assignment receives the latest version. Agents may propose improvements with the observed problem, evidence and suggested wording. **Load proposal for editing** lets you inspect it; it is applied only when you save a new version. Load an earlier version and save it to roll back.
+
+These are versioned project directions, not model training or unrestricted self-modifying software. They cannot grant tool permissions, authorize spending, change authentication or update Workroom code. Instructions, proposals and history travel with the JSON backup; source files still need a separate source ZIP or folder copy.
+
 ### Team discussions, specialists and reasoning
 
 Open **Team discussions** to start a meeting with your own agenda. Each of the four specialists makes a public proposal or critique, then the chair writes a decision record with objections, evidence gaps, owners and next actions. Contributions appear as they finish and remain saved after reload. Upcoming tasks receive recent completed meeting decisions as context. These are requested public contributions, not a display of private model reasoning.
 
 For automatic meetings, open **Edit plan**, enable **Automatic team meetings**, set the number of completed tasks between meetings, and **Save plan**. They run at kickoff and progress milestones when more work is ready. The queue waits during a meeting. A completed or paused project does not hold recurring meetings. New projects created in the dashboard offer this setting enabled; older projects retain their configuration until you change it. External workers do not use this built-in meeting protocol.
 
-Each meeting adds **up to five model requests** (four contributions and a chair summary). Your existing request, concurrency and API budget controls apply. A failed meeting keeps completed contributions; review uncertain Usage, then **Retry remaining contributions**, or explicitly **Skip meeting**. Stop a running meeting from its discussion card or pause the team. Closing the page does not stop the server's work.
+A normal meeting adds **five model requests** (four contributions and a chair summary). A malformed response can add one correction request for that turn, so the absolute maximum is ten; limits can stop it earlier. Your existing request, concurrency and API budget controls apply. A failed meeting keeps completed contributions; review uncertain Usage, then **Retry remaining contributions**, or explicitly **Skip meeting**. Stop a running meeting from its discussion card or pause the team. Closing the page does not stop the server's work.
 
 Characters now travel for assignments, reviews, handoffs and saved meetings. They stay at their desks during focused work and idle time. The glass meeting room shows the current speaker and listeners; the transcript carries the actual collaboration. Pausing office movement affects animation only.
 
@@ -103,7 +127,7 @@ Characters now travel for assignments, reviews, handoffs and saved meetings. The
 
 For broad money-making goals, choose **Venture & opportunity validation**. The team compares distinct approaches, identifies a buyer/problem and distribution route, challenges AI substitutes and weak differentiation, checks estimated economics, and proposes a low-cost test with go/stop criteria. Supply your budget, skills/assets, available time and success measures in the brief or verified project memory. Market demand and income cannot be assumed or guaranteed by stronger prompts.
 
-**Allow Codex web research** enables built-in, read-only search for text tasks. Searches appear in task details; reports should cite direct URLs and dates and identify uncertainty. It starts off. Meetings use supplied context; they do not browse independently. Software command-network access is a separate setting. Other providers remain text-only. Live research depends on the Codex account/model; failures retain reports/usage and do not switch to a paid API.
+**Allow Codex web research** enables built-in, read-only search for tasks, including tool-enabled projects. Searches appear in task details; reports should cite direct URLs and dates and identify uncertainty. It starts off. Meetings use supplied context; they do not browse independently. Command-network access is a separate setting. Other providers remain text-only. Live research depends on the Codex account/model; failures retain reports/usage and do not switch to a paid API.
 
 ### Feedback and memory drafts
 
@@ -152,6 +176,8 @@ Use the value between the quotes. On Windows, you can open
 `%USERPROFILE%\.codex\config.toml` in your text editor and find the `model` setting.
 
 ### Tell Workroom to use it
+
+For an already configured connection, pause the project and use **Model: … · Change → Project model ID**. You can select a different exact model for each project without editing `.env`. The environment setting below remains the default for new projects; saving a model ID does not verify account access.
 
 Open the `.env` file in the project folder. If it does not exist, make a copy of
 `.env.example` and name the copy `.env`. Keep any existing settings.

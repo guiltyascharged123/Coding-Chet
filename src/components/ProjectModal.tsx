@@ -25,7 +25,7 @@ const fresh = (): Draft => ({
   reasoningEffort: 'medium',
   meetings: true,
 });
-function readDraft(): Draft {
+function readDraft(provider: Provider): Draft {
   try {
     const d = JSON.parse(localStorage.getItem(PROJECT_DRAFT_KEY) || 'null');
     if (
@@ -40,7 +40,9 @@ function readDraft(): Draft {
   } catch {
     /* A storage warning is shown by the save effect. */
   }
-  return fresh();
+  const draft = fresh();
+  if (provider !== 'demo' && provider !== 'external') draft.planning = 'ai';
+  return draft;
 }
 export default function ProjectModal({
   onClose,
@@ -51,7 +53,7 @@ export default function ProjectModal({
   onCreated: (id: string) => void;
   provider: Provider;
 }) {
-  const [draft, setDraft] = useState(readDraft);
+  const [draft, setDraft] = useState(() => readDraft(provider));
   const [storage, setStorage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -204,8 +206,9 @@ export default function ProjectModal({
           Automatic kickoff and progress meetings
         </label>
         <p className="field-hint">
-          Each meeting uses up to five model requests and produces visible proposals, critique and
-          next actions. Change the cadence in Edit plan. Demo meetings make no model calls.
+          A normal meeting uses five model requests, plus bounded corrections for malformed replies.
+          It records proposals, critique and next actions. Change the cadence in Edit plan. Demo
+          meetings make no model calls.
         </p>
         {draft.workflow === 'software' && (
           <p className="planning-note">

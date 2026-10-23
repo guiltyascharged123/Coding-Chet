@@ -7,6 +7,7 @@ import type { Generated } from './policy.js';
 import type { Codex, CodexOptions, ThreadOptions } from '@openai/codex-sdk';
 import { codexFailure, CodexWorkerError } from './codex-errors.js';
 import type { Task, ReasoningEffort } from '../shared/types.js';
+import { WORK_RESULT_JSON_SCHEMA, workResultSchema } from '../shared/work.js';
 
 export const managedInfo = {
   codexReady: false,
@@ -485,6 +486,8 @@ export async function codexWork(
   readOnly = false,
   factory?: (options: CodexOptions) => Pick<Codex, 'startThread'>,
   effort: ReasoningEffort = 'medium',
+  structured = false,
+  research = false,
 ): Promise<Generated> {
   if (!managedInfo.codexReady) throw new CodexWorkerError('CODEX_AUTH');
   const controller = new AbortController();
@@ -495,23 +498,29 @@ export async function codexWork(
   ]);
   try {
     const options = codexCodingOptions(directory, network, readOnly);
+    if (research) options.config = { ...options.config, web_search: 'live' };
     const codex = factory
       ? factory(options)
       : new (await import('@openai/codex-sdk')).Codex(options);
-    const thread = codex.startThread(codexThreadOptions(directory, model, effort));
+    const thread = codex.startThread({
+      ...codexThreadOptions(directory, model, effort),
+      webSearchMode: research ? 'live' : 'disabled',
+    });
     const turn = await thread.runStreamed(
-      `${system}\n\nWork only on this assignment, in the current project folder. ${readOnly ? 'This is an inspection task: project source files are read-only; only the scratch folder is writable. Do not implement.' : 'Project files are writable for this assignment.'} Complete the work and report evidence. Return JSON with outcome (complete or blocked) and summary (a useful Markdown report). A scope/decision task can complete with an actionable plan; implementation, review and testing tasks require real file inspection and appropriate tools. Assignment data:\n${user}`,
+      `${system}\n\nWork only on this assignment, in the current project folder. ${readOnly ? 'This is an inspection task: project source files are read-only; only the scratch folder is writable. Do not implement.' : 'Project files are writable for this assignment.'} Complete the work and report evidence. ${structured ? 'Return the required structured work result, including the actual deliverable and acceptance evidence.' : 'Return JSON with outcome (complete or blocked) and summary (a useful Markdown report).'} A scope/decision task can complete with an actionable plan; implementation, review and testing tasks require real file inspection and appropriate tools. Assignment data:\n${user}`,
       {
         signal: combined,
-        outputSchema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            outcome: { type: 'string', enum: ['complete', 'blocked'] },
-            summary: { type: 'string' },
-          },
-          required: ['outcome', 'summary'],
-        },
+        outputSchema: structured
+          ? WORK_RESULT_JSON_SCHEMA
+          : {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                outcome: { type: 'string', enum: ['complete', 'blocked'] },
+                summary: { type: 'string' },
+              },
+              required: ['outcome', 'summary'],
+            },
       },
     );
     let text = '',
@@ -533,10 +542,17 @@ export async function codexWork(
             (item.type === 'file_change' && item.status === 'completed'))
         )
           toolsCompleted = true;
-        if (['mcp_tool_call', 'web_search'].includes(item.type)) {
+        if (item.type === 'mcp_tool_call' || (item.type === 'web_search' && !research)) {
           controller.abort();
           throw new CodexWorkerError('CODEX_TOOL_BLOCKED');
         }
+        if (item.type === 'web_search')
+          onTool?.({
+            id: item.id,
+            type: 'web search',
+            detail: item.query.slice(0, 1500),
+            status: event.type === 'item.completed' ? 'completed' : 'in_progress',
+          });
         if (item.type === 'command_execution')
           onTool?.({
             id: item.id,
@@ -570,6 +586,32 @@ export async function codexWork(
       if (event.type === 'error') throw codexFailure(event.message);
     }
     if (!completed) throw new CodexWorkerError('CODEX_NO_RECEIPT');
+    if (structured) {
+      // Keep the confirmed usage receipt even if the work record is inconsistent.
+      let value: unknown;
+      try {
+        value = JSON.parse(text);
+      } catch {
+        return { ...usage, text };
+      }
+      const parsed = workResultSchema.safeParse(value);
+      if (!parsed.success) return { ...usage, text };
+      const result = parsed.data;
+      if (result.outcome === 'complete' && !toolsCompleted) {
+        result.outcome = 'blocked';
+        result.summary =
+          'No successful file or command activity was reported. This project assignment has not been verified.';
+        result.checks = [
+          ...result.checks.slice(0, 11),
+          {
+            criterion: 'Real file inspection or command verification',
+            status: 'not_met',
+            evidence: 'No successful file or command event was received from the native worker.',
+          },
+        ];
+      }
+      return { ...usage, text: JSON.stringify(result) };
+    }
     // Validate the structured result before recording a confirmed completion.
     const result = JSON.parse(text) as { outcome: string; summary: string };
     if (

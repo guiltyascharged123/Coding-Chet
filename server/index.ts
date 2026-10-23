@@ -153,7 +153,7 @@ app.post(
 );
 function codingFolder(req: express.Request) {
   const project = engine.project(param(req, 'id'));
-  if (project.workflow !== 'software') throw new AppError('This project has no coding workspace.');
+  if (!project.workspaceFolder) throw new AppError('This project has no managed workspace.');
   return projectWorkspace(store.path, project);
 }
 app.get(
@@ -205,9 +205,10 @@ app.post(
       .object({
         decision: z.enum(['approve', 'revise']),
         feedback: z.string().trim().max(4000).default(''),
+        choice: z.string().trim().max(300).optional(),
       })
       .parse(req.body);
-    engine.review(param(req, 'id'), body.decision, body.feedback);
+    engine.review(param(req, 'id'), body.decision, body.feedback, body.choice);
     res.json({ ok: true });
   }),
 );
@@ -267,7 +268,24 @@ app.post(
 app.post(
   '/api/projects/:id/runtime',
   route((req, res) => {
-    engine.setProjectProvider(param(req, 'id'), providerSchema.parse(req.body.provider));
+    const value = z
+      .object({
+        provider: providerSchema,
+        model: z.string().trim().max(150).optional(),
+        workMode: z.enum(['text', 'workspace']).optional(),
+      })
+      .parse(req.body);
+    engine.setProjectProvider(param(req, 'id'), value.provider, value.model, value.workMode);
+    res.json({ ok: true });
+  }),
+);
+app.put(
+  '/api/projects/:id/instructions',
+  route((req, res) => {
+    const value = z
+      .object({ text: z.string().trim().max(4000), reason: z.string().trim().min(5).max(1000) })
+      .parse(req.body);
+    engine.updateInstructions(param(req, 'id'), value.text, value.reason);
     res.json({ ok: true });
   }),
 );

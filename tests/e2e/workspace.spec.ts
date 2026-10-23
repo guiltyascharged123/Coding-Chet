@@ -69,7 +69,7 @@ test('a project runs through revision, human approval, outputs, and persistent r
   await page.getByRole('button', { name: 'Review work', exact: true }).click({ timeout: 15000 });
   await expect(page.getByRole('dialog')).toContainText('Use a more playful accent color');
   await page.getByRole('button', { name: 'Approve & continue', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'All done', exact: true })).toBeVisible({
+  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible({
     timeout: 15000,
   });
   await page.getByRole('button', { name: /^Outputs/ }).click();
@@ -81,7 +81,7 @@ test('a project runs through revision, human approval, outputs, and persistent r
   const word = unzipSync(await readFile((await download.path())!));
   expect(strFromU8(word['word/document.xml'])).toContain('Set the direction');
   await page.reload();
-  await expect(page.getByRole('button', { name: 'All done', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -282,7 +282,7 @@ test('walking agents, readable surfaces, office documents, and native exports wo
   await page.getByRole('button', { name: 'Review work', exact: true }).click({ timeout: 15000 });
   await expect(page.getByRole('dialog')).toContainText('Milestone schedule');
   await page.getByRole('button', { name: 'Approve & continue', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'All done', exact: true })).toBeVisible({
+  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible({
     timeout: 20000,
   });
   await page.getByRole('button', { name: /^Outputs/ }).click();
@@ -629,4 +629,125 @@ test('team discussions record real model-protocol contributions and guide purpos
   await page.screenshot({ path: '/tmp/workroom-team-discussions.png', fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1050 });
   await page.screenshot({ path: '/tmp/workroom-discussions-desktop.png' });
+});
+
+test('project model choice, checked outputs and reviewed instruction versions are usable from the dashboard', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'A useful configured office',
+        brief:
+          'Compare supplied office costs: A is $20 and B is $35. Do not claim transactions or customer demand.',
+        workflow: 'custom',
+        planning: 'template',
+      },
+    })
+  ).json();
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  await page.getByRole('button', { name: 'Change project model', exact: true }).click();
+  await page.getByLabel('Project model ID', { exact: true }).fill('workroom-browser-model-variant');
+  await page.getByRole('button', { name: 'Set project connection', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('connection and model updated');
+  await page.getByRole('tab', { name: 'Team instructions', exact: true }).click();
+  await page
+    .getByLabel('Current team instructions', { exact: true })
+    .fill('Label supplied facts and unverified demand separately.');
+  await page.getByLabel('Instruction change reason').fill('Prevent unsupported business claims');
+  await page.getByRole('button', { name: 'Save instruction version', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('New team instruction version saved');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Change project model', exact: true }),
+  ).toContainText('workroom-browser-model-variant');
+  let state = await (await request.get('/api/state')).json();
+  expect(
+    state.attempts.filter((a: { projectId: string }) => a.projectId === project.id),
+  ).toHaveLength(0);
+  expect(
+    state.state.projects.find((p: { id: string }) => p.id === project.id).instructionHistory,
+  ).toHaveLength(1);
+  await page.getByRole('button', { name: 'Run team', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Task board', exact: true }).click();
+  await page.locator('.task-card').first().click();
+  await expect(page.getByRole('dialog')).toContainText('Reported result');
+  await expect(page.getByRole('dialog')).toContainText('$35 minus $20 equals $15');
+  await expect(page.getByRole('dialog')).toContainText('Context used');
+  await page.screenshot({ path: '/tmp/workroom-checked-result.png' });
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('button', { name: 'Change project model', exact: true }).click();
+  await page.getByRole('tab', { name: 'Team instructions', exact: true }).click();
+  await page.getByRole('button', { name: 'Load proposal for editing', exact: true }).click();
+  await expect(page.getByLabel('Current team instructions')).toHaveValue(
+    /Always label supplied facts/,
+  );
+  state = await (await request.get('/api/state')).json();
+  expect(
+    state.state.projects.find((p: { id: string }) => p.id === project.id).instructionHistory,
+  ).toHaveLength(1);
+  await page.getByRole('button', { name: 'Save instruction version', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Version 2');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('a specific human choice survives closing and resumes the unfinished model assignment', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'A necessary owner decision',
+        brief:
+          'Plan an experiment. Ask the owner for a real spending ceiling only if needed; never spend or contact anyone.',
+        workflow: 'custom',
+        planning: 'template',
+      },
+    })
+  ).json();
+  let state = await (await request.get('/api/state')).json();
+  const tasks = state.state.tasks.filter((t: { projectId: string }) => t.projectId === project.id);
+  tasks[0].title = 'Human decision fixture';
+  await request.put(`/api/projects/${project.id}/plan`, { data: { tasks } });
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume team', exact: true }).click();
+  await page.getByRole('button', { name: 'Review work', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Decision needed', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toContainText('Only the owner can authorize a budget');
+  await page.getByRole('radio', { name: 'Plan an experiment capped at $20', exact: true }).check();
+  await page
+    .getByLabel('Your feedback')
+    .fill('Prepare a plan only. No external spending is authorized.');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.reload();
+  await page.getByRole('button', { name: 'Review work', exact: true }).click();
+  await expect(
+    page.getByRole('radio', { name: 'Plan an experiment capped at $20', exact: true }),
+  ).toBeChecked();
+  await expect(page.getByLabel('Your feedback')).toHaveValue(
+    'Prepare a plan only. No external spending is authorized.',
+  );
+  await page.getByRole('button', { name: 'Approve & continue', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  state = await (await request.get('/api/state')).json();
+  expect(
+    state.attempts.filter((a: { projectId: string }) => a.projectId === project.id),
+  ).toHaveLength(2);
+  expect(
+    state.state.tasks.find((t: { projectId: string }) => t.projectId === project.id).result.outcome,
+  ).toBe('complete');
+  expect(
+    state.state.approvals.find((a: { projectId: string }) => a.projectId === project.id).feedback,
+  ).toContain('No external spending is authorized');
 });

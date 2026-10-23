@@ -22,6 +22,7 @@ import {
   serviceUrl,
 } from '../server/managed.js';
 import { codexFailure, CodexWorkerError } from '../server/codex-errors.js';
+import { result } from './work-fixtures.js';
 
 test('the bundled native CLI accepts the complete document worker configuration without inference', () => {
   const directory = mkdtempSync(join(tmpdir(), 'workroom-native-config-'));
@@ -146,6 +147,92 @@ test('native coding sandbox enforces project writes and a denied sibling file wh
     return;
   }
   assert.match(result.message, /Offline coding check passed/);
+});
+
+test('structured native work retains acceptance evidence, supports explicit search, and blocks tool-free completion', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'workroom-structured-code-')),
+    ready = managedInfo.codexReady;
+  managedInfo.codexReady = true;
+  try {
+    const entries: string[] = [];
+    for (const withCommand of [true, false]) {
+      const factory = (options: any): Pick<Codex, 'startThread'> => {
+        assert.equal(options.config.web_search, 'live');
+        return {
+          startThread(thread) {
+            assert.equal(thread?.webSearchMode, 'live');
+            assert.equal(thread?.approvalPolicy, 'never');
+            return {
+              async runStreamed(_prompt: string, runOptions: any) {
+                assert.ok(runOptions.outputSchema.required.includes('checks'));
+                assert.ok(runOptions.outputSchema.properties.outcome.enum.includes('needs_input'));
+                return {
+                  events: (async function* (): AsyncGenerator<ThreadEvent> {
+                    yield {
+                      type: 'item.completed',
+                      item: {
+                        id: 'search',
+                        type: 'web_search',
+                        query: 'official package documentation',
+                      },
+                    } as ThreadEvent;
+                    if (withCommand)
+                      yield {
+                        type: 'item.completed',
+                        item: {
+                          id: 'command',
+                          type: 'command_execution',
+                          command: 'node --test',
+                          aggregated_output: '',
+                          status: 'completed',
+                          exit_code: 0,
+                        },
+                      };
+                    yield {
+                      type: 'item.completed',
+                      item: { id: 'answer', type: 'agent_message', text: JSON.stringify(result()) },
+                    };
+                    yield {
+                      type: 'turn.completed',
+                      usage: {
+                        input_tokens: 50,
+                        output_tokens: 100,
+                        cached_input_tokens: 0,
+                        cache_write_input_tokens: 0,
+                        reasoning_output_tokens: 0,
+                      },
+                    };
+                  })(),
+                };
+              },
+            } as ReturnType<Codex['startThread']>;
+          },
+        };
+      };
+      const answer = await codexWork(
+        'A scoped engineering assignment',
+        '{}',
+        'fixture-model',
+        directory,
+        undefined,
+        (e) => entries.push(e.type),
+        false,
+        false,
+        factory,
+        'medium',
+        true,
+        true,
+      );
+      const value = JSON.parse(answer.text);
+      assert.equal(value.outcome, withCommand ? 'complete' : 'blocked');
+      if (!withCommand) assert.equal(value.checks.at(-1).status, 'not_met');
+    }
+    assert.ok(entries.includes('web search'));
+    assert.ok(entries.includes('command'));
+  } finally {
+    managedInfo.codexReady = ready;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('coding workers preserve their shared folder, stream tool evidence, reject text-only success and retain blocked reports', async () => {

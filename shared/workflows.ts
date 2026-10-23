@@ -13,7 +13,7 @@ export const WORKFLOWS: Record<
   office: {
     label: 'Office & project coordination',
     description:
-      'Produce the work the brief actually calls for, with a decision gate and quality review.',
+      'Produce the work the brief actually calls for, with autonomous planning and quality review.',
     roles: ['Project coordinator', 'Operations specialist', 'Analyst', 'Quality reviewer'],
     goals: [
       'Define scope, acceptance criteria, owners and decisions requiring human input.',
@@ -23,11 +23,11 @@ export const WORKFLOWS: Record<
     ],
     tasks: [
       {
-        title: 'Agree on scope and acceptance criteria',
+        title: 'Define scope and acceptance criteria',
         owner: 0,
         approval: true,
         description:
-          'Translate the brief into concrete deliverables, acceptance criteria, constraints, and essential choices. Propose reasonable assumptions; ask only decisions that materially affect the work. Present the approach for human approval.',
+          'Translate the brief into concrete deliverables, acceptance criteria, constraints, and essential choices. Proceed with explicit reversible assumptions; request human input only when a material choice or authority is missing. Give downstream specialists concrete direction.',
       },
       {
         title: 'Produce the requested work',
@@ -61,11 +61,11 @@ export const WORKFLOWS: Record<
     ],
     tasks: [
       {
-        title: 'Approve the implementation scope',
+        title: 'Inspect and define the implementation scope',
         owner: 0,
         approval: true,
         description:
-          'Inspect the project folder. Define a focused implementation, architecture, acceptance criteria, and test strategy. Identify essential choices for the user. Do not implement until this task is approved.',
+          'Inspect the project folder. Define a focused implementation, architecture, acceptance criteria, and test strategy within the brief. Record reasonable reversible assumptions and proceed. Report a blocker if a missing requirement materially prevents useful implementation. This first task inspects and plans; later tasks implement.',
       },
       {
         title: 'Implement and exercise the solution',
@@ -109,7 +109,7 @@ export const WORKFLOWS: Record<
         owner: 0,
         approval: true,
         description:
-          'Define the question, decision criteria, constraints, known evidence and important unknowns. Propose a practical approach for user approval. Identify the evidence needed and use only the tools enabled for this project. Do not claim research was performed when it was not.',
+          'Define the question, decision criteria, constraints, known evidence and important unknowns. Choose a practical approach within the brief. Ask only a material unresolved human choice; proceed with labeled reversible assumptions otherwise. Identify needed evidence and available tools. Do not claim research was performed when it was not.',
       },
       {
         title: 'Analyze and compare options',
@@ -149,7 +149,7 @@ export const WORKFLOWS: Record<
     ],
     tasks: [
       {
-        title: 'Approve constraints and opportunity criteria',
+        title: 'Define constraints and opportunity criteria',
         owner: 0,
         approval: true,
         description:

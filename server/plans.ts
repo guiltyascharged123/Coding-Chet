@@ -16,7 +16,8 @@ export function templatePlan(project: Project, team: Agent[]): Task[] {
       description: t.description,
       agentId: team[t.owner].id,
       dependencies: previous ? [previous] : [],
-      requiresApproval: !!t.approval,
+      // Real teams ask a specific question when needed; the demo retains its guided review.
+      requiresApproval: project.provider === 'demo' && !!t.approval,
       readOnly: project.workflow === 'software' && !!t.approval,
       status: 'queued',
       output: '',
