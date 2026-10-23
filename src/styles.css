@@ -2131,6 +2131,13 @@ textarea {
   border-radius: 8px;
   color: #d6b47d;
 }
+.rejected-response {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 28rem;
+  overflow: auto;
+  font: 0.95rem/1.6 monospace;
+}
 .task-error strong {
   font-size: 14px;
 }

@@ -208,6 +208,14 @@ export const stateSchema = z
             .optional(),
           readOnly: z.boolean().optional(),
           result: workResultSchema.optional(),
+          responseIssue: z
+            .object({
+              receivedAt: z.number().finite(),
+              issues: z.array(text.max(500)).max(8),
+              response: text.max(48000),
+              truncated: z.boolean(),
+            })
+            .optional(),
           coordinationRounds: z.number().int().min(0).max(20).optional(),
           contextReport: z
             .object({

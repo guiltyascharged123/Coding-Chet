@@ -99,6 +99,12 @@ Workroom fits accumulated teammate outputs, meeting decisions and verified memor
 
 A malformed text response gets at most one automatic format correction. Corrections and retrieval requests count toward your request/usage limits. Network errors, unknown usage, exhausted budgets and unavailable tools are not automatically retried or switched to another paid connection.
 
+**If you see “did not return a usable, checked work result”:** update and restart Workroom, then open the saved task and choose **Retry task**. You do not need to recreate the project. Codex document workers now use a structured response schema, and corrections receive the rejected reply along with the exact validation issues. Concise results and omitted empty optional lists are accepted; missing evidence, unresolved decisions and failed checks still prevent completion. If it happens again, open **Response needs correction · saved details**, then **Show rejected reply**, or the task's **Live console**. These show the specific problem instead of assuming your model is too weak. Previously failed replies can only be found in retained console history; the new task details apply to new attempts.
+
+If the error specifically says **output token limit**, use **Workspace controls → Maximum output tokens (API/local)** to allow a longer response within your budget, or ask for a smaller deliverable. Workroom saves the partial reply and confirmed usage; it does not automatically repeat or cache a truncated response. Codex subscription workers use their own native output limits, rather than this API/local setting.
+
+Agents sit in their assigned chairs when they are at their desks, type while a task is running, and stand to travel for real meetings, handoffs or review. An agent sitting quietly between tasks is not making model requests.
+
 **For the old “Input exceeds the configured context limit” failure:** update Workroom, restart it, open the saved failed task and click **Retry task**. You should not need to rewrite the project or paste all previous work. Workroom now selects the supporting context. Only unusually long required instructions or a deliberately tiny input limit still need a settings change.
 
 ### Let any Codex team build useful files

@@ -827,3 +827,70 @@ test('live console shows requests before replies, retains history, filters and e
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('agents sit at their chairs and rejected replies survive reload until a corrected retry succeeds', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60000);
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'Response recovery fixture office',
+        workflow: 'custom',
+        planning: 'template',
+        brief: 'Compare A at $20 and B at $35. Check the arithmetic, without external actions.',
+      },
+    })
+  ).json();
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  await expect(page.locator('.scene-agent-label[data-seated="true"]')).toHaveCount(4);
+  await expect
+    .poll(async () =>
+      page.locator('.scene-agent-label').evaluateAll((labels) =>
+        labels.every((label) => {
+          const data = (label as HTMLElement).dataset;
+          return (
+            Math.abs(Number(data.bodyX) - Number(data.x)) < 0.02 &&
+            Math.abs(Number(data.z) - Number(data.bodyZ) - 1.06) < 0.02
+          );
+        }),
+      ),
+    )
+    .toBe(true);
+  await page.getByRole('button', { name: 'Run team', exact: true }).click();
+  await expect(
+    page.locator('.scene-agent-label[data-seated="true"]').filter({ hasText: 'Working at desk' }),
+  ).toHaveCount(1);
+  await page.screenshot({ path: '/tmp/workroom-seated-agents.png' });
+  await page.getByRole('button', { name: 'Task board', exact: true }).click();
+  await page.locator('.task-card').first().click();
+  const details = page.getByLabel('Saved response details', { exact: true });
+  await expect(details).toContainText('checks.0.evidence', { timeout: 15000 });
+  await expect(page.getByRole('dialog')).toContainText('The task couldn’t finish');
+  await page.reload();
+  await page.getByRole('button', { name: 'Task board', exact: true }).click();
+  await page.locator('.task-card').first().click();
+  await expect(details).toContainText('checks.0.evidence');
+  await page.getByText('Show rejected reply', { exact: true }).click();
+  await expect(details.locator('pre')).toContainText('Cost comparison');
+  let state = await (await request.get('/api/state')).json();
+  expect(
+    state.attempts.filter((a: { projectId: string }) => a.projectId === project.id),
+  ).toHaveLength(2);
+  await page
+    .getByLabel('Additional direction for retry')
+    .fill('Return nonempty evidence: $35 minus $20 equals $15.');
+  await page.getByRole('button', { name: 'Retry task', exact: true }).click();
+  await expect(details).toHaveCount(0, { timeout: 15000 });
+  await expect(page.getByRole('dialog')).toContainText('Reported result');
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  state = await (await request.get('/api/state')).json();
+  const attempts = state.attempts.filter((a: { projectId: string }) => a.projectId === project.id);
+  expect(attempts).toHaveLength(3);
+  expect(attempts.every((a: { status: string }) => a.status === 'completed')).toBe(true);
+});

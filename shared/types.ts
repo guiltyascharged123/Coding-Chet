@@ -61,6 +61,12 @@ export interface Task {
   toolLog?: { id: string; type: string; detail: string; status?: string }[];
   readOnly?: boolean;
   result?: WorkResult;
+  responseIssue?: {
+    receivedAt: number;
+    issues: string[];
+    response: string;
+    truncated: boolean;
+  };
   coordinationRounds?: number;
   contextReport?: {
     inputBytes: number;

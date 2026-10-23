@@ -24,6 +24,7 @@ import {
 import { codexFailure, CodexWorkerError } from '../server/codex-errors.js';
 import { result } from './work-fixtures.js';
 import type { ConsoleEvent } from '../shared/console.js';
+import { TEXT_WORK_JSON_SCHEMA } from '../shared/work.js';
 
 test('the bundled native CLI accepts the complete document worker configuration without inference', () => {
   const directory = mkdtempSync(join(tmpdir(), 'workroom-native-config-'));
@@ -236,6 +237,61 @@ test('structured native work retains acceptance evidence, supports explicit sear
   } finally {
     managedInfo.codexReady = ready;
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('native document work passes a strict schema supporting both work results and evidence retrieval', async () => {
+  const before = managedInfo.codexReady;
+  managedInfo.codexReady = true;
+  let calls = 0;
+  const factory = (): Pick<Codex, 'startThread'> => ({
+    startThread() {
+      return {
+        async runStreamed(_prompt: string, options: any) {
+          calls++;
+          assert.deepEqual(options.outputSchema, TEXT_WORK_JSON_SCHEMA);
+          assert.equal(options.outputSchema.additionalProperties, false);
+          assert.ok(options.outputSchema.properties.outcome.enum.includes('retrieve'));
+          assert.ok(options.outputSchema.required.includes('requests'));
+          return {
+            events: (async function* (): AsyncGenerator<ThreadEvent> {
+              yield {
+                type: 'item.completed',
+                item: { id: 'answer', type: 'agent_message', text: JSON.stringify(result()) },
+              };
+              yield {
+                type: 'turn.completed',
+                usage: {
+                  input_tokens: 10,
+                  output_tokens: 20,
+                  cached_input_tokens: 0,
+                  cache_write_input_tokens: 0,
+                  reasoning_output_tokens: 0,
+                },
+              };
+            })(),
+          };
+        },
+      } as ReturnType<Codex['startThread']>;
+    },
+  });
+  try {
+    const answer = await codexGenerate(
+      'Scoped work',
+      '{}',
+      'fixture-model',
+      undefined,
+      true,
+      factory,
+      'medium',
+      undefined,
+      undefined,
+      TEXT_WORK_JSON_SCHEMA,
+    );
+    assert.equal(JSON.parse(answer.text).outcome, 'complete');
+    assert.equal(calls, 1);
+  } finally {
+    managedInfo.codexReady = before;
   }
 });
 

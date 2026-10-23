@@ -3,6 +3,25 @@ import type { Task } from '../../shared/types';
 export default function WorkEvidence({ task }: { task: Task }) {
   return (
     <>
+      {task.responseIssue && (
+        <details className="control-section" open aria-label="Saved response details">
+          <summary>Response needs correction · saved details</summary>
+          <p>
+            This reply has not been accepted as completed work. Your assignment and earlier outputs
+            are retained. Review the issues below before retrying; the Live console also shows the
+            request and response.
+          </p>
+          <ul>
+            {task.responseIssue.issues.map((issue, i) => (
+              <li key={i}>{issue}</li>
+            ))}
+          </ul>
+          <details>
+            <summary>Show rejected reply{task.responseIssue.truncated ? ' (excerpt)' : ''}</summary>
+            <pre className="rejected-response">{task.responseIssue.response}</pre>
+          </details>
+        </details>
+      )}
       {task.result && (
         <section className="control-section" aria-label="Work result and acceptance checks">
           <h3>

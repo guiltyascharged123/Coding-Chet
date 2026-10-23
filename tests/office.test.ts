@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { OfficeSimulation, walkable, DESKS, MEETING_SEATS } from '../src/office/simulation.js';
 import { agents, initialState } from '../server/seed.js';
 import { placeLabels } from '../src/office/labels.js';
+import { DESK_CHAIR, TORSO_BOTTOM, seatedPose } from '../src/office/pose.js';
 
 test('readable labels stay apart when four characters gather in one place', () => {
   for (const width of [300, 800]) {
@@ -48,6 +49,29 @@ test('idle agents remain at their desks rather than wandering without a work eve
   for (const p of office.people.values()) {
     assert.equal(p.distance, 0);
     assert.equal(p.goal.action, 'desk');
+  }
+});
+
+test('settled desk poses put idle and working bodies on the seat, facing the monitor; routes stay standing', () => {
+  const office = new OfficeSimulation();
+  office.update(agents, [], []);
+  for (const agent of agents) {
+    const person = office.people.get(agent.id)!;
+    for (const status of [undefined, 'working']) {
+      person.status = status;
+      const pose = seatedPose(person, agent.desk)!;
+      const [deskX, , deskZ] = DESKS[agent.desk];
+      assert.equal(person.x + pose.x, deskX);
+      assert.equal(person.z + pose.z, deskZ + DESK_CHAIR.z);
+      assert.equal(pose.facing, Math.PI);
+      assert.ok(Math.abs(pose.y + TORSO_BOTTOM - DESK_CHAIR.seatTop) < 1e-8);
+      assert.equal(walkable(person), true, 'navigation remains outside the chair footprint');
+    }
+    person.path = [{ x: person.x + 1, z: person.z }];
+    assert.equal(seatedPose(person, agent.desk), undefined, 'paused travel must not sit in midair');
+    person.path = [];
+    person.z += 1;
+    assert.equal(seatedPose(person, agent.desk), undefined, 'a blocked route is not arrival');
   }
 });
 

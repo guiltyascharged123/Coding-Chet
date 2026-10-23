@@ -19,6 +19,7 @@ import { agents } from '../server/seed.js';
 import { result } from './work-fixtures.js';
 import { managedInfo } from '../server/managed.js';
 import { projectWorkspace } from '../server/workspaces.js';
+import type { ConsoleEvent } from '../shared/console.js';
 
 async function until(check: () => boolean) {
   for (let i = 0; i < 500; i++) {
@@ -107,6 +108,149 @@ test('large final-review context fits the byte budget, preserves required direct
   );
 });
 
+test('concise evidence and omitted empty fields are accepted without inventing completion evidence', () => {
+  const concise = {
+    ...result(),
+    summary: 'Compared costs.',
+    deliverable: 'A saves $15.',
+    checks: [{ criterion: 'Cost', status: 'met', evidence: '35 - 20 = 15' }],
+    handoff: { next: 'Review.' },
+    decision: undefined,
+    followUps: undefined,
+  };
+  const parsed = workResultSchema.parse(concise);
+  assert.equal(parsed.decision, null);
+  assert.deepEqual(parsed.followUps, []);
+  assert.deepEqual(parsed.handoff.assumptions, []);
+  for (const invalid of [
+    { ...concise, deliverable: ' ' },
+    { ...concise, checks: [] },
+    { ...concise, checks: [{ criterion: 'Cost', status: 'unverified', evidence: 'No receipt' }] },
+    { ...concise, outcome: 'needs_input' },
+    { ...concise, outcome: 'continue' },
+  ])
+    assert.equal(workResultSchema.safeParse(invalid).success, false);
+});
+
+test('one correction receives the rejected work and precise issues while respecting the context budget', async () => {
+  const h = harness();
+  try {
+    const project = await h.engine.createProject(
+      'Repair the response',
+      brief,
+      'office',
+      'template',
+      randomUUID(),
+      'office',
+    );
+    const task = h.store.state.tasks.find((t) => t.projectId === project.id)!;
+    task.output = 'Earlier accepted work stays saved.';
+    const rejected = result({
+      deliverable: 'Useful supplied analysis. '.repeat(1800),
+      checks: [
+        {
+          criterion: 'Cost arithmetic',
+          status: 'unverified',
+          evidence: 'The arithmetic still needs review.',
+        },
+      ],
+    });
+    let calls = 0;
+    const trace: ConsoleEvent[] = [];
+    globalThis.fetch = (async (_url, options) => {
+      const request = JSON.parse(String(options?.body));
+      assert.ok(Buffer.byteLength(request.messages.map((m: any) => m.content).join('')) <= 24000);
+      if (++calls === 1) return response(rejected);
+      const input = JSON.parse(request.messages[1].content);
+      assert.match(input.validationIssues.join(' '), /Complete requires met acceptance checks/);
+      assert.equal(input.recentWork[0].sourceId, 'rejected-response');
+      assert.match(input.recentWork[0].output, /Useful supplied analysis/);
+      assert.equal(input.recentWork[0].excerpt, true);
+      assert.equal(task.output, 'Earlier accepted work stays saved.');
+      assert.match(task.responseIssue!.response, /Useful supplied analysis/);
+      return response(result());
+    }) as typeof fetch;
+    await runTask('openai', project, task, agents[0], [], new AbortController().signal, {
+      store: h.store,
+      project,
+      task,
+      onTrace: (e) => trace.push(e),
+    });
+    assert.equal(calls, 2);
+    assert.equal(task.result!.outcome, 'complete');
+    assert.equal(task.responseIssue, undefined);
+    assert.ok(
+      trace.some((e) => e.status === 'validation_failed' && e.text.includes('Complete requires')),
+    );
+    assert.ok(h.store.attempts().every((a) => a.status === 'completed'));
+  } finally {
+    h.close();
+  }
+});
+
+test('an output-limit response saves a redacted draft with confirmed usage and never retries or caches it', async () => {
+  const h = harness();
+  try {
+    const project = await h.engine.createProject(
+      'Output limit',
+      brief,
+      'office',
+      'template',
+      randomUUID(),
+      'office',
+    );
+    const task = h.store.state.tasks.find((t) => t.projectId === project.id)!;
+    task.output = 'Previous deliverable.';
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return Response.json({
+        choices: [
+          {
+            message: { content: calls === 1 ? '{"deliverable":"partial api_key=fixture-only' : '' },
+            finish_reason: 'length',
+          },
+        ],
+        usage: { prompt_tokens: 70, completion_tokens: 2000 },
+      });
+    }) as typeof fetch;
+    for (let retry = 0; retry < 2; retry++) {
+      await assert.rejects(
+        () =>
+          runTask('openai', project, task, agents[0], [], new AbortController().signal, {
+            store: h.store,
+            project,
+            task,
+          }),
+        /output token limit/,
+      );
+      if (retry === 0) {
+        assert.doesNotMatch(task.responseIssue!.response, /fixture-only/);
+        assert.match(task.responseIssue!.response, /REDACTED/);
+      }
+    }
+    assert.equal(
+      calls,
+      2,
+      'each explicit attempt makes one request; partial replies are not cached',
+    );
+    assert.equal(task.output, 'Previous deliverable.');
+    assert.equal(task.result, undefined);
+    assert.equal(
+      task.responseIssue!.response,
+      '',
+      'empty truncated output has the same actionable diagnosis',
+    );
+    assert.ok(h.store.attempts().every((a) => a.status === 'completed' && a.outputTokens === 2000));
+    const backup = h.store.backup();
+    assert.ok(backupSchema.safeParse(backup).success);
+    h.store.restore(backup);
+    assert.equal(h.store.state.tasks.find((t) => t.id === task.id)!.responseIssue!.response, '');
+  } finally {
+    h.close();
+  }
+});
+
 test('a review can request the missing saved passage and finish without a human context-limit notice', async () => {
   const h = harness();
   let calls = 0;
@@ -187,9 +331,19 @@ test('invalid prose is corrected once, never cached as a result, and provider fa
     );
     assert.equal(calls, 2);
     assert.equal(task.result, undefined);
+    assert.match(task.responseIssue!.issues.join(' '), /complete JSON object/);
+    assert.match(task.responseIssue!.response, /synergizing/);
+    h.store.save();
+    assert.ok(backupSchema.safeParse(h.store.backup()).success);
     assert.ok(h.store.attempts().every((a) => a.status === 'completed'));
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (_url, options) => {
       calls++;
+      if (calls === 3) {
+        const input = JSON.parse(JSON.parse(String(options?.body)).messages[1].content);
+        assert.match(input.task.previousValidationIssues.join(' '), /complete JSON object/);
+        assert.equal(input.recentWork[0].sourceId, 'previous-rejected-response');
+        assert.match(input.recentWork[0].output, /synergizing/);
+      }
       return response(result());
     }) as typeof fetch;
     assert.equal(
@@ -201,6 +355,7 @@ test('invalid prose is corrected once, never cached as a result, and provider fa
       result().deliverable,
     );
     assert.equal(calls, 3, 'invalid responses were not cached');
+    assert.equal(task.responseIssue, undefined, 'a successful result clears old failure details');
     await runTask('openai', project, task, agents[0], [], new AbortController().signal, {
       store: h.store,
       project,
@@ -208,9 +363,15 @@ test('invalid prose is corrected once, never cached as a result, and provider fa
     });
     assert.equal(
       calls,
-      3,
-      'confirmed complete text result can be reused without another model call',
+      4,
+      'clearing the rejected draft changes the context, requiring a new matching request',
     );
+    await runTask('openai', project, task, agents[0], [], new AbortController().signal, {
+      store: h.store,
+      project,
+      task,
+    });
+    assert.equal(calls, 4, 'an exact confirmed complete text result is cached');
     globalThis.fetch = (async () => {
       calls++;
       return new Response('private', { status: 503 });
@@ -225,7 +386,70 @@ test('invalid prose is corrected once, never cached as a result, and provider fa
         }),
       /HTTP 503/,
     );
-    assert.equal(calls, 4, 'uncertain generation was not replayed');
+    assert.equal(calls, 5, 'uncertain generation was not replayed');
+  } finally {
+    h.close();
+  }
+});
+
+test('both retrieved passages survive a format correction within the four-request bound', async () => {
+  const h = harness();
+  try {
+    const project = await h.engine.createProject(
+      'Preserve retrieved evidence',
+      brief,
+      'office',
+      'template',
+      randomUUID(),
+      'office',
+    );
+    const task = h.store.state.tasks.filter((t) => t.projectId === project.id).at(-1)!;
+    const source = h.store.state.tasks.find((t) => t.projectId === project.id)!;
+    source.output =
+      'Beginning evidence: A costs $20. ' +
+      'Supporting context. '.repeat(5000) +
+      'Ending evidence: B costs $35.';
+    source.status = 'done';
+    const end =
+      Array.from(source.output).length - Array.from('Ending evidence: B costs $35.').length;
+    let calls = 0;
+    globalThis.fetch = (async (_url, options) => {
+      const input = JSON.parse(JSON.parse(String(options?.body)).messages[1].content);
+      calls++;
+      if (calls <= 2) {
+        if (calls === 2) assert.match(input.requestedSources[0].text, /Beginning evidence/);
+        return response({
+          outcome: 'retrieve',
+          requests: [{ sourceId: `task:${source.id}`, offset: calls === 1 ? 0 : end }],
+        });
+      }
+      assert.equal(input.requestedSources.length, 2);
+      assert.match(input.requestedSources[0].text, /Beginning evidence/);
+      assert.match(input.requestedSources[1].text, /Ending evidence/);
+      if (calls === 3)
+        return response(
+          result({
+            checks: [
+              {
+                criterion: 'Compare costs',
+                status: 'unverified',
+                evidence: 'Still checking the arithmetic.',
+              },
+            ],
+          }),
+        );
+      assert.match(input.validationIssues.join(' '), /Complete requires met acceptance/);
+      assert.equal(input.recentWork[0].sourceId, 'rejected-response');
+      return response(result());
+    }) as typeof fetch;
+    await runTask('openai', project, task, agents[3], [source], new AbortController().signal, {
+      store: h.store,
+      project,
+      task,
+    });
+    assert.equal(calls, 4);
+    assert.equal(task.result!.outcome, 'complete');
+    assert.ok(h.store.attempts().every((a) => a.status === 'completed'));
   } finally {
     h.close();
   }

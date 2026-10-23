@@ -68,6 +68,8 @@ const modelServer = createServer(async (req, res) => {
   if (input.task) {
     if (input.project.title.includes('Live console fixture'))
       await new Promise((resolve) => setTimeout(resolve, 4000));
+    if (input.project.title.includes('Response recovery fixture'))
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     const needsInput =
       input.task.title.includes('Human decision fixture') && !input.humanDirection?.length;
     const result = {
@@ -104,6 +106,8 @@ const modelServer = createServer(async (req, res) => {
         },
       ],
     };
+    if (input.project.title.includes('Response recovery fixture') && !input.task.revisionFeedback)
+      result.checks[0].evidence = '';
     res.end(
       JSON.stringify({
         choices: [{ message: { content: JSON.stringify(result) } }],

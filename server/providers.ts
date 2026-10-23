@@ -4,7 +4,13 @@ import { templatePlan } from './plans.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { QUALITY_STANDARD } from '../shared/quality.js';
-import { WORK_CONTRACT, workResultSchema, retrievalSchema } from '../shared/work.js';
+import {
+  WORK_CONTRACT,
+  TEXT_WORK_JSON_SCHEMA,
+  workResultSchema,
+  retrievalSchema,
+} from '../shared/work.js';
+import { jsonValue, saveResponseIssue } from './work-results.js';
 import { assembleContext, contextSources, retrieveSources, writeSourceBundle } from './context.js';
 import { rmSync } from 'node:fs';
 import { hasProjectTools } from '../shared/capabilities.js';
@@ -123,6 +129,7 @@ async function generate(
                 ctx.project?.reasoningEffort || 'medium',
                 { enabled: !!ctx.research, onTool: ctx.onTool },
                 ctx.onTrace,
+                ctx.outputSchema,
               );
         let response: Response;
         const timeout = AbortSignal.timeout(90_000);
@@ -156,16 +163,18 @@ async function generate(
               `${provider === 'compatible' ? 'Compatible model server' : 'OpenAI'} returned HTTP ${response.status}. Check the server’s key, model access, and quota.`,
             );
           const data = (await response.json()) as {
-            choices?: { message?: { content?: string } }[];
+            choices?: { message?: { content?: string }; finish_reason?: string }[];
             usage?: { prompt_tokens: number; completion_tokens: number };
           };
           const output = data.choices?.[0]?.message?.content;
-          if (!output?.trim())
+          const outputLimitReached = data.choices?.[0]?.finish_reason === 'length';
+          if (!output?.trim() && !outputLimitReached)
             throw new Error('OpenAI returned no text. Retry or choose a compatible chat model.');
           return {
-            text: output,
+            text: output || '',
             inputTokens: data.usage?.prompt_tokens,
             outputTokens: data.usage?.completion_tokens,
+            ...(outputLimitReached ? { outputLimitReached: true } : {}),
           };
         }
         if (provider === 'gemini') {
@@ -193,7 +202,10 @@ async function generate(
               `Gemini returned HTTP ${response.status}. Check the server’s key, model access, and quota.`,
             );
           const data = (await response.json()) as {
-            candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
+            candidates?: {
+              content?: { parts?: { text?: string; thought?: boolean }[] };
+              finishReason?: string;
+            }[];
             usageMetadata?: {
               promptTokenCount: number;
               candidatesTokenCount: number;
@@ -204,17 +216,19 @@ async function generate(
             ?.filter((p) => !p.thought)
             .map((p) => p.text || '')
             .join('');
-          if (!output?.trim())
+          const outputLimitReached = data.candidates?.[0]?.finishReason === 'MAX_TOKENS';
+          if (!output?.trim() && !outputLimitReached)
             throw new Error(
               'Gemini returned no text. The request may have been blocked or the model may need a different configuration.',
             );
           return {
-            text: output,
+            text: output || '',
             inputTokens: data.usageMetadata?.promptTokenCount,
             outputTokens: data.usageMetadata
               ? data.usageMetadata.candidatesTokenCount +
                 (data.usageMetadata.thoughtsTokenCount || 0)
               : undefined,
+            ...(outputLimitReached ? { outputLimitReached: true } : {}),
           };
         }
         throw new Error('This runtime does not accept direct model requests.');
@@ -343,7 +357,18 @@ export async function runTask(
       documentKind: task.documentKind || 'notes',
       revisionFeedback: task.feedback,
       previousOutput: task.output,
+      previousValidationIssues: task.responseIssue?.issues,
     },
+    recentWork: task.responseIssue
+      ? [
+          {
+            sourceId: 'previous-rejected-response',
+            title:
+              'Unaccepted previous reply — correct its listed validation issues; do not treat it as verified work',
+            output: task.responseIssue.response,
+          },
+        ]
+      : [],
     teammateOutputs: ctx.store ? relevantContext(task, context) : relevantContext(task, context),
     teamDecisions: (ctx.store?.state.meetings || [])
       .filter((m) => m.projectId === project.id && m.status === 'completed')
@@ -374,22 +399,27 @@ export async function runTask(
       generationContext,
     );
     const result = workResultSchema.safeParse(jsonValue(output));
-    if (!result.success)
-      throw new Error(
-        'Codex returned an inconsistent work result or acceptance record. Files and confirmed usage were retained. Review the project model and task before retrying; code work was not automatically repeated.',
+    if (!result.success) {
+      const report = saveResponseIssue(
+        task,
+        output,
+        result.error.issues.map((i) => `${i.path.join('.') || 'response'}: ${i.message}`),
       );
+      ctx.onTrace?.({
+        type: 'error',
+        text: `Work-result validation failed:\n${report.issues.join('\n')}`,
+        status: 'validation_failed',
+      });
+      ctx.onContext?.();
+      throw new Error(
+        `Codex returned an inconsistent work result: ${report.issues.slice(0, 3).join('; ')}. Open the task's saved response details. Files and confirmed usage were retained; code work was not automatically repeated.`,
+      );
+    }
+    delete task.responseIssue;
     task.result = result.data;
     return result.data.deliverable;
   }
   return structuredTask(provider, `${system}\n${WORK_CONTRACT}`, data, signal, generationContext);
-}
-
-function jsonValue(output: string): unknown {
-  try {
-    return JSON.parse(output.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
-  } catch {
-    return undefined;
-  }
 }
 
 async function structuredTask(
@@ -406,6 +436,7 @@ async function structuredTask(
   for (let turn = 0; turn < 4; turn++) {
     const output = await generate(provider, system, JSON.stringify(input), signal, true, {
       ...ctx,
+      outputSchema: TEXT_WORK_JSON_SCHEMA,
       cacheWhen: (text) => {
         const parsed = workResultSchema.safeParse(jsonValue(text));
         return parsed.success && parsed.data.outcome === 'complete';
@@ -414,7 +445,10 @@ async function structuredTask(
     const value = jsonValue(output),
       result = workResultSchema.safeParse(value);
     if (result.success) {
-      if (ctx.task) ctx.task.result = result.data;
+      if (ctx.task) {
+        delete ctx.task.responseIssue;
+        ctx.task.result = result.data;
+      }
       return result.data.deliverable;
     }
     const retrieval = retrievalSchema.safeParse(value);
@@ -425,19 +459,22 @@ async function structuredTask(
         status: 'retrieval',
       });
       input = {
-        ...data,
+        ...input,
         teammateOutputs: [],
         teamDecisions: [],
         recentWork: [],
         contributions: [],
-        requestedSources: retrieveSources(
-          sources,
-          retrieval.data.requests,
-          Math.max(
-            300,
-            Math.floor((policy(ctx.store).maxInputBytes - Buffer.byteLength(system) - 8000) / 4),
+        requestedSources: [
+          ...(input.requestedSources || []),
+          ...retrieveSources(
+            sources,
+            retrieval.data.requests,
+            Math.max(
+              300,
+              Math.floor((policy(ctx.store).maxInputBytes - Buffer.byteLength(system) - 8000) / 4),
+            ),
           ),
-        ),
+        ],
       };
       if (ctx.task)
         ctx.task.toolLog = [
@@ -452,6 +489,20 @@ async function structuredTask(
       ctx.onContext?.();
       continue;
     }
+    const issues = retrieval.success
+      ? [
+          'The two allowed source retrieval rounds have been used. Return a work result using the evidence read so far; state any remaining gap honestly.',
+        ]
+      : value === undefined
+        ? ['response: Expected one complete JSON object; received malformed JSON or plain text.']
+        : result.error.issues.map((i) => `${i.path.join('.') || 'response'}: ${i.message}`);
+    const report = saveResponseIssue(ctx.task, output, issues);
+    ctx.onTrace?.({
+      type: 'error',
+      text: `Work-result validation failed:\n${report.issues.join('\n')}`,
+      status: 'validation_failed',
+    });
+    ctx.onContext?.();
     if (repairs++ < 1 && !retrieval.success) {
       ctx.onTrace?.({
         type: 'status',
@@ -459,17 +510,32 @@ async function structuredTask(
         status: 'correction',
       });
       input = {
-        ...data,
+        ...input,
         responseCorrection:
-          'Your last response did not satisfy the work-result schema. Return the actual deliverable and specific acceptance evidence in the required JSON object. Do not mark unresolved work complete.',
-        validationIssues: result.error.issues
-          .slice(0, 5)
-          .map((i) => `${i.path.join('.')}: ${i.message}`),
+          'Correct the rejected response saved as source rejected-response, preserving its useful work. Repair the listed format/consistency issues and return a complete JSON work result. Do not invent evidence or mark unresolved work complete. If the draft was excerpted, regenerate a concise complete record from the assignment and available evidence.',
+        validationIssues: report.issues,
+        // A labeled source is budgeted like other evidence, rather than making
+        // a large rejected reply a new, unshrinkable required instruction.
+        recentWork: [
+          ...(input.recentWork || []).filter(
+            (entry: any) => entry.sourceId !== 'rejected-response',
+          ),
+          {
+            sourceId: 'rejected-response',
+            title: 'Rejected response to correct (not accepted work)',
+            output,
+          },
+        ],
       };
+      sources.push({
+        id: 'rejected-response',
+        label: 'Rejected response to correct',
+        text: output,
+      });
       continue;
     }
     throw new Error(
-      'The model did not return a usable, checked work result after the bounded correction/retrieval attempts. The assignment and earlier outputs are saved. Choose a more capable model or clarify the task, then retry. No API fallback was attempted.',
+      `The model did not return a usable, checked work result: ${report.issues.slice(0, 3).join('; ')}. The task's saved response details show the rejected reply. The assignment and earlier outputs are saved. Review these details, adjust the task or model if needed, then retry. No API fallback was attempted.`,
     );
   }
   throw new Error(

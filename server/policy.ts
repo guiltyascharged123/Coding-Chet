@@ -3,6 +3,7 @@ import type { Attempt, CostPolicy, MemoryItem, Project, Provider, Task } from '.
 import type { Store } from './store.js';
 import { defaultPolicy } from '../shared/schemas.js';
 import type { ConsoleEvent } from '../shared/console.js';
+import { saveResponseIssue } from './work-results.js';
 
 export type GenerationContext = {
   store?: Store;
@@ -22,8 +23,14 @@ export type GenerationContext = {
   cacheWhen?: (text: string) => boolean;
   onContext?: () => void;
   onTrace?: (event: ConsoleEvent) => void;
+  outputSchema?: Record<string, unknown>;
 };
-export type Generated = { text: string; inputTokens?: number; outputTokens?: number };
+export type Generated = {
+  text: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  outputLimitReached?: boolean;
+};
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export function billingFor(provider: Provider): Attempt['billing'] {
   return provider === 'codex'
@@ -174,7 +181,7 @@ export async function guarded(
     model = ctx.model || project?.model || '';
   const key = hash(
     JSON.stringify({
-      version: 3,
+      version: 4,
       project: project?.id,
       provider,
       model,
@@ -182,6 +189,7 @@ export async function guarded(
       user,
       maxOutput: policy(store).maxOutputTokens,
       reasoningEffort: project?.reasoningEffort || 'medium',
+      outputSchema: ctx.outputSchema,
     }),
   );
   const cached = ctx.cache === false ? undefined : store?.cached(key);
@@ -233,13 +241,11 @@ export async function guarded(
     billingFor(provider) === 'api'
       ? structuredClone(policy(store).rates[provider as 'openai' | 'gemini' | 'compatible'])
       : undefined;
+  let completionConfirmed = false;
   try {
     const result = await generate();
     if (provider !== 'codex')
       ctx.onTrace?.({ id: 'result', type: 'response', text: result.text, status: 'completed' });
-    if (!result.text.trim()) throw new Error('The model returned no document.');
-    if (result.text.length > 200000)
-      throw new Error('The model response exceeds the document limit.');
     if (attempt && store) {
       const usageKnown =
         Number.isFinite(result.inputTokens) &&
@@ -259,9 +265,20 @@ export async function guarded(
         inputTokens: usageKnown ? result.inputTokens : undefined,
         outputTokens: usageKnown ? result.outputTokens : undefined,
       });
-      if (ctx.cache !== false && (!ctx.cacheWhen || ctx.cacheWhen(result.text)))
-        store.cache(key, result.text);
     }
+    completionConfirmed = true;
+    if (result.outputLimitReached) {
+      const message =
+        'The model reached the configured output token limit before finishing its response. Open Workspace controls → Maximum output tokens and raise it within your budget, or request a smaller deliverable, then retry. The partial reply is saved; no automatic retry or API fallback was attempted.';
+      saveResponseIssue(task, result.text, [message]);
+      ctx.onContext?.();
+      throw new Error(message);
+    }
+    if (!result.text.trim()) throw new Error('The model returned no document.');
+    if (result.text.length > 200000)
+      throw new Error('The model response exceeds the document limit.');
+    if (store && attempt && ctx.cache !== false && (!ctx.cacheWhen || ctx.cacheWhen(result.text)))
+      store.cache(key, result.text);
     ctx.onTrace?.({
       type: 'status',
       text: `Model request completed${result.inputTokens === undefined ? '' : ` · input tokens: ${result.inputTokens}`}${result.outputTokens === undefined ? '' : ` · output tokens: ${result.outputTokens}`}. Completion of a model request is separate from acceptance of the work.`,
@@ -274,7 +291,7 @@ export async function guarded(
       text: error instanceof Error ? error.message : 'The model request failed.',
       status: ctx.signal?.aborted ? 'cancelled' : 'failed',
     });
-    if (attempt && store)
+    if (attempt && store && !completionConfirmed)
       store.putAttempt({
         ...attempt,
         status: 'uncertain',

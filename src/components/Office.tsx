@@ -14,6 +14,7 @@ import type { Activity, Agent, Task, Meeting } from '../../shared/types';
 
 import { DESKS, MEETING_SEATS, OfficeSimulation } from '../office/simulation';
 import { placeLabels } from '../office/labels';
+import { DESK_CHAIR, seatedPose } from '../office/pose';
 type Props = {
   agents: Agent[];
   tasks: Task[];
@@ -291,7 +292,11 @@ function LabelLayout({
       const person = simulation.people.get(box.id),
         line = leaders.current?.querySelector(`[data-agent="${box.id}"]`);
       if (person && line) {
-        const head = new THREE.Vector3(person.x, 2.05, person.z).project(camera);
+        const head = new THREE.Vector3(
+          Number(element.dataset.bodyX ?? person.x),
+          2.05,
+          Number(element.dataset.bodyZ ?? person.z),
+        ).project(camera);
         line.setAttribute('x1', String(((head.x + 1) * size.width) / 2));
         line.setAttribute('y1', String(((1 - head.y) * size.height) / 2));
         line.setAttribute('x2', String(box.left + box.width / 2));
@@ -503,7 +508,7 @@ function Desk({ color, active }: { color: string; active: boolean }) {
           <meshStandardMaterial color="#b5b6ab" />
         </mesh>
       </group>
-      <group position={[0, 0, 1.1]}>
+      <group position={[0, 0, DESK_CHAIR.z]}>
         <mesh position={[0, 0.42, 0]}>
           <cylinderGeometry args={[0.045, 0.045, 0.6, 12]} />
           <meshStandardMaterial color="#5b6760" />
@@ -546,45 +551,59 @@ function AgentFigure({
     rightArm = useRef<THREE.Group>(null);
   const leftLeg = useRef<THREE.Group>(null),
     rightLeg = useRef<THREE.Group>(null);
+  const leftShin = useRef<THREE.Group>(null),
+    rightShin = useRef<THREE.Group>(null);
   const folder = useRef<THREE.Group>(null),
     cup = useRef<THREE.Group>(null);
   const label = useRef<HTMLButtonElement>(null),
     actionLabel = useRef<HTMLElement>(null);
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const person = simulation.people.get(agent.id);
     if (!person || !root.current || !body.current) return;
     root.current.position.set(person.x, 0, person.z);
-    body.current.rotation.y = person.heading;
     const walking = moving && person.walking;
     const stride = Math.sin(person.distance * 8);
 
     const action = person.goal.action;
-    const interacting = !walking && !person.path.length;
-    const seated =
-      interacting && ((action === 'desk' && status === 'working') || action === 'meeting');
-    body.current.position.y = walking ? Math.abs(stride) * 0.065 : seated ? -0.08 : 0;
-    body.current.position.z = THREE.MathUtils.lerp(
-      body.current.position.z,
-      seated ? (action === 'meeting' ? -0.15 : -1.06) : 0,
-      0.15,
-    );
-    if (leftLeg.current) leftLeg.current.rotation.x = walking ? stride * 0.58 : seated ? -1.3 : 0;
+    const interacting =
+      !walking &&
+      !person.path.length &&
+      Math.hypot(person.x - person.goal.x, person.z - person.goal.z) < 0.12;
+    const pose = seatedPose(person, agent.desk);
+    const seated = !!pose;
+    const blend = 1 - Math.exp(-Math.min(delta, 0.1) * 12);
+    body.current.rotation.y = pose?.facing ?? person.heading;
+    body.current.position.y = walking ? Math.abs(stride) * 0.065 : (pose?.y ?? 0);
+    body.current.position.x = THREE.MathUtils.lerp(body.current.position.x, pose?.x ?? 0, blend);
+    body.current.position.z = THREE.MathUtils.lerp(body.current.position.z, pose?.z ?? 0, blend);
+    if (leftLeg.current)
+      leftLeg.current.rotation.x = walking ? stride * 0.58 : seated ? -Math.PI / 2 : 0;
     if (rightLeg.current)
-      rightLeg.current.rotation.x = walking ? -stride * 0.58 : seated ? -1.3 : 0;
+      rightLeg.current.rotation.x = walking ? -stride * 0.58 : seated ? -Math.PI / 2 : 0;
+    for (const shin of [leftShin.current, rightShin.current]) {
+      if (!shin) continue;
+      shin.rotation.x = seated ? Math.PI / 2 : 0;
+      shin.scale.y = pose?.shinScale ?? 1;
+    }
     if (leftArm.current)
       leftArm.current.rotation.x = walking
         ? -stride * 0.5
         : interacting && (action === 'whiteboard' || action === 'handoff' || status === 'speaking')
           ? -1.1 + (moving ? Math.sin(clock.elapsedTime * 2.5) * 0.15 : 0)
-          : 0;
+          : seated && action === 'desk' && status === 'working'
+            ? -1.35 + (moving ? Math.sin(clock.elapsedTime * 7 + 1) * 0.06 : 0)
+            : 0;
     if (rightArm.current)
       rightArm.current.rotation.x = walking
         ? stride * 0.5
         : interacting && action === 'coffee'
           ? -1.8
           : interacting && action === 'desk' && status === 'working'
-            ? -0.7 + (moving ? Math.sin(clock.elapsedTime * 7) * 0.13 : 0)
+            ? -1.35 + (moving ? Math.sin(clock.elapsedTime * 7) * 0.06 : 0)
             : 0;
+    for (const arm of [leftArm.current, rightArm.current]) {
+      if (arm) arm.scale.y = seated && action === 'desk' && status === 'working' ? 1.5 : 1;
+    }
     if (folder.current) folder.current.visible = action === 'handoff' || action === 'printer';
     if (cup.current) cup.current.visible = interacting && action === 'coffee';
     if (label.current) {
@@ -592,6 +611,9 @@ function AgentFigure({
       label.current.dataset.z = person.z.toFixed(2);
       label.current.dataset.walking = String(walking);
       label.current.dataset.action = action;
+      label.current.dataset.seated = String(seated);
+      label.current.dataset.bodyX = (person.x + body.current.position.x).toFixed(2);
+      label.current.dataset.bodyZ = (person.z + body.current.position.z).toFixed(2);
       const text = !moving
         ? 'Movement paused'
         : walking
@@ -675,7 +697,7 @@ function AgentFigure({
           { x: -0.35, ref: leftArm },
           { x: 0.35, ref: rightArm },
         ].map(({ x, ref }) => (
-          <group key={x} ref={ref} position={[x, 1.21, 0]}>
+          <group key={x} ref={ref} position={[x, 1.35, 0]}>
             <mesh position={[0, -0.16, 0]} rotation={[0, 0, x < 0 ? -0.2 : 0.2]} castShadow>
               <capsuleGeometry args={[0.085, 0.3, 6, 12]} />
               <meshStandardMaterial color={agent.color} />
@@ -683,18 +705,24 @@ function AgentFigure({
           </group>
         ))}
         {[
-          { x: -0.15, ref: leftLeg },
-          { x: 0.15, ref: rightLeg },
-        ].map(({ x, ref }) => (
+          { x: -0.15, ref: leftLeg, shin: leftShin },
+          { x: 0.15, ref: rightLeg, shin: rightShin },
+        ].map(({ x, ref, shin }) => (
           <group key={x} ref={ref} position={[x, 0.85, 0]}>
-            <mesh position={[0, -0.26, 0.035]} castShadow>
-              <capsuleGeometry args={[0.105, 0.3, 6, 12]} />
+            <mesh position={[0, -0.145, 0]} castShadow>
+              <capsuleGeometry args={[0.095, 0.12, 6, 12]} />
               <meshStandardMaterial color={agent.color} />
             </mesh>
-            <mesh position={[0, -0.47, 0.08]} scale={[1, 0.55, 1.3]} castShadow>
-              <sphereGeometry args={[0.12, 12, 10]} />
-              <meshStandardMaterial color="#293743" />
-            </mesh>
+            <group ref={shin} position={[0, -0.29, 0]}>
+              <mesh position={[0, -0.145, 0]} castShadow>
+                <capsuleGeometry args={[0.09, 0.12, 6, 12]} />
+                <meshStandardMaterial color={agent.color} />
+              </mesh>
+              <mesh position={[0, -0.38, 0.08]} scale={[1, 0.55, 1.3]} castShadow>
+                <sphereGeometry args={[0.12, 12, 10]} />
+                <meshStandardMaterial color="#293743" />
+              </mesh>
+            </group>
           </group>
         ))}
         <group ref={folder} visible={false} position={[-0.34, 1.06, 0.22]} rotation={[0.2, 0, 0.1]}>
