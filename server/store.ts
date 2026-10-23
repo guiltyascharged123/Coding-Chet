@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path';
 import type { Attempt, WorkspaceState } from '../shared/types.js';
 import { defaultPolicy, backupSchema, stateSchema } from '../shared/schemas.js';
 import { initialState } from './seed.js';
+import { CONSOLE_LIMITS, type ConsoleEntry } from '../shared/console.js';
+import { consoleText } from './console.js';
 
 export class Store {
   private db: DatabaseSync;
@@ -13,6 +15,9 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec(
       'PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, output TEXT NOT NULL)',
+    );
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS console_entries (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, project_id TEXT NOT NULL, payload TEXT NOT NULL); CREATE INDEX IF NOT EXISTS console_project ON console_entries(project_id, sequence)',
     );
     const row = this.db.prepare('SELECT payload FROM workspace WHERE id=1').get() as
       { payload: string } | undefined;
@@ -68,6 +73,63 @@ export class Store {
     return (this.db.prepare('SELECT payload FROM attempts').all() as { payload: string }[]).map(
       (r) => JSON.parse(r.payload),
     );
+  }
+  consoleEntries(projectId: string): ConsoleEntry[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT sequence, payload FROM console_entries WHERE project_id=? ORDER BY sequence',
+        )
+        .all(projectId) as { sequence: number; payload: string }[]
+    ).map((r) => ({ ...JSON.parse(r.payload), sequence: r.sequence }));
+  }
+  putConsole(input: Omit<ConsoleEntry, 'sequence' | 'createdAt' | 'updatedAt'>) {
+    const existing = this.db
+      .prepare('SELECT payload FROM console_entries WHERE id=?')
+      .get(input.id) as { payload: string } | undefined;
+    const entry = {
+      ...input,
+      ...Object.fromEntries(
+        ['taskTitle', 'agentName', 'agentRole', 'model']
+          .filter((key) => typeof input[key as keyof typeof input] === 'string')
+          .map((key) => [key, consoleText(input[key as keyof typeof input] as string).text]),
+      ),
+      ...consoleText(input.text),
+      createdAt: existing ? JSON.parse(existing.payload).createdAt : Date.now(),
+      updatedAt: Date.now(),
+    };
+    const row = this.db
+      .prepare(
+        'INSERT OR REPLACE INTO console_entries(id,project_id,payload) VALUES(?,?,?) RETURNING sequence',
+      )
+      .get(entry.id, entry.projectId, JSON.stringify(entry)) as { sequence: number };
+    const removed: string[] = [];
+    const trim = (projectId?: string) => {
+      const rows = this.db
+        .prepare(
+          `SELECT sequence,id,length(payload) AS length FROM console_entries ${projectId ? 'WHERE project_id=?' : ''} ORDER BY sequence DESC`,
+        )
+        .all(...(projectId ? [projectId] : [])) as {
+        sequence: number;
+        id: string;
+        length: number;
+      }[];
+      let characters = 0;
+      rows.forEach((r, i) => {
+        characters += r.length;
+        if (
+          i >= (projectId ? CONSOLE_LIMITS.projectEntries : CONSOLE_LIMITS.workspaceEntries) ||
+          characters >
+            (projectId ? CONSOLE_LIMITS.projectCharacters : CONSOLE_LIMITS.workspaceCharacters)
+        ) {
+          this.db.prepare('DELETE FROM console_entries WHERE sequence=?').run(r.sequence);
+          removed.push(r.id);
+        }
+      });
+    };
+    trim(entry.projectId);
+    trim();
+    return { entry: { ...entry, sequence: row.sequence }, removed };
   }
   putAttempt(attempt: Attempt) {
     this.db

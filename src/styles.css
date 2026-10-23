@@ -4825,3 +4825,137 @@ button.connection:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.live-console {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #293d4a;
+  padding: 24px;
+}
+.console-intro {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.console-intro h2 {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+.console-intro p {
+  margin: 0 0 20px;
+  line-height: 1.7;
+}
+.console-toolbar,
+.console-options,
+.console-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 14px;
+  margin: 16px 0;
+}
+.console-toolbar label {
+  display: grid;
+  gap: 7px;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.console-toolbar select {
+  width: 100%;
+  min-width: 0;
+}
+.console-options {
+  align-items: center;
+}
+.console-options label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+.console-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  font-size: 15px;
+}
+.console-viewport {
+  background: #172731;
+  border: 1px solid #496373;
+  border-radius: 10px;
+  height: min(65vh, 760px);
+  min-height: 340px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.console-entry {
+  padding: 18px 20px;
+  border-bottom: 1px solid #354b59;
+  color: #e0e8ed;
+}
+.console-entry header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 15px;
+}
+.console-entry header span,
+.console-entry-meta,
+.console-receipt {
+  color: #b4c7d2;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.console-entry-meta {
+  margin: 7px 0;
+}
+.console-entry pre {
+  font:
+    15px/1.7 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 12px 0 0;
+  tab-size: 2;
+}
+.console-request {
+  border-left: 3px solid #7e9fbc;
+}
+.console-response {
+  border-left: 3px solid #5c9c8d;
+}
+.console-command,
+.console-tool {
+  border-left: 3px solid #ba9b66;
+}
+.console-error {
+  border-left: 3px solid #d39280;
+}
+.console-error pre,
+.console-clipped {
+  color: #efc5a0;
+}
+.console-empty {
+  padding: 30px;
+  color: #c5d5de;
+  line-height: 1.7;
+}
+@media (max-width: 600px) {
+  .live-console {
+    padding: 14px;
+  }
+  .console-entry {
+    padding: 14px;
+  }
+  .console-actions .button {
+    flex: 1 1 180px;
+  }
+}

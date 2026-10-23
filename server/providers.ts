@@ -111,6 +111,7 @@ async function generate(
                 ctx.project?.reasoningEffort || 'medium',
                 true,
                 !!ctx.project?.researchEnabled,
+                ctx.onTrace,
               )
             : codexGenerate(
                 system,
@@ -121,6 +122,7 @@ async function generate(
                 undefined,
                 ctx.project?.reasoningEffort || 'medium',
                 { enabled: !!ctx.research, onTool: ctx.onTool },
+                ctx.onTrace,
               );
         let response: Response;
         const timeout = AbortSignal.timeout(90_000);
@@ -191,14 +193,17 @@ async function generate(
               `Gemini returned HTTP ${response.status}. Check the server’s key, model access, and quota.`,
             );
           const data = (await response.json()) as {
-            candidates?: { content?: { parts?: { text?: string }[] } }[];
+            candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
             usageMetadata?: {
               promptTokenCount: number;
               candidatesTokenCount: number;
               thoughtsTokenCount?: number;
             };
           };
-          const output = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('');
+          const output = data.candidates?.[0]?.content?.parts
+            ?.filter((p) => !p.thought)
+            .map((p) => p.text || '')
+            .join('');
           if (!output?.trim())
             throw new Error(
               'Gemini returned no text. The request may have been blocked or the model may need a different configuration.',
@@ -414,6 +419,11 @@ async function structuredTask(
     }
     const retrieval = retrievalSchema.safeParse(value);
     if (retrieval.success && retrievals++ < 2) {
+      ctx.onTrace?.({
+        type: 'status',
+        text: `Retrieving saved evidence: ${retrieval.data.requests.map((r) => `${r.sourceId} at character ${r.offset}`).join(', ')}.`,
+        status: 'retrieval',
+      });
       input = {
         ...data,
         teammateOutputs: [],
@@ -443,6 +453,11 @@ async function structuredTask(
       continue;
     }
     if (repairs++ < 1 && !retrieval.success) {
+      ctx.onTrace?.({
+        type: 'status',
+        text: 'The response did not satisfy the work-result format. Requesting the one allowed format correction.',
+        status: 'correction',
+      });
       input = {
         ...data,
         responseCorrection:

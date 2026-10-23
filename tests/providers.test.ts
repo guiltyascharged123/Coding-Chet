@@ -77,7 +77,16 @@ test('Gemini uses a server-side key header and retains revision and teammate con
       assert.equal(content.teammateOutputs[0].output, previous.output);
       return new Response(
         JSON.stringify({
-          candidates: [{ content: { parts: [{ text: JSON.stringify(result()) }] } }],
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { thought: true, text: 'PRIVATE_GEMINI_REASONING' },
+                  { text: JSON.stringify(result()) },
+                ],
+              },
+            },
+          ],
         }),
         { status: 200 },
       );

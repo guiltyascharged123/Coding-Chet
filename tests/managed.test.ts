@@ -23,6 +23,7 @@ import {
 } from '../server/managed.js';
 import { codexFailure, CodexWorkerError } from '../server/codex-errors.js';
 import { result } from './work-fixtures.js';
+import type { ConsoleEvent } from '../shared/console.js';
 
 test('the bundled native CLI accepts the complete document worker configuration without inference', () => {
   const directory = mkdtempSync(join(tmpdir(), 'workroom-native-config-'));
@@ -154,7 +155,8 @@ test('structured native work retains acceptance evidence, supports explicit sear
     ready = managedInfo.codexReady;
   managedInfo.codexReady = true;
   try {
-    const entries: string[] = [];
+    const entries: string[] = [],
+      visible: ConsoleEvent[] = [];
     for (const withCommand of [true, false]) {
       const factory = (options: any): Pick<Codex, 'startThread'> => {
         assert.equal(options.config.web_search, 'live');
@@ -183,7 +185,7 @@ test('structured native work retains acceptance evidence, supports explicit sear
                           id: 'command',
                           type: 'command_execution',
                           command: 'node --test',
-                          aggregated_output: '',
+                          aggregated_output: '2 passing',
                           status: 'completed',
                           exit_code: 0,
                         },
@@ -222,6 +224,7 @@ test('structured native work retains acceptance evidence, supports explicit sear
         'medium',
         true,
         true,
+        (e) => visible.push(e),
       );
       const value = JSON.parse(answer.text);
       assert.equal(value.outcome, withCommand ? 'complete' : 'blocked');
@@ -229,6 +232,7 @@ test('structured native work retains acceptance evidence, supports explicit sear
     }
     assert.ok(entries.includes('web search'));
     assert.ok(entries.includes('command'));
+    assert.ok(visible.some((e) => e.type === 'command' && /2 passing/.test(e.text)));
   } finally {
     managedInfo.codexReady = ready;
     rmSync(directory, { recursive: true, force: true });

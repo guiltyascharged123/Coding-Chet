@@ -8,6 +8,8 @@ import type { Codex, CodexOptions, ThreadOptions } from '@openai/codex-sdk';
 import { codexFailure, CodexWorkerError } from './codex-errors.js';
 import type { Task, ReasoningEffort } from '../shared/types.js';
 import { WORK_RESULT_JSON_SCHEMA, workResultSchema } from '../shared/work.js';
+import type { ConsoleEvent } from '../shared/console.js';
+import { nativeConsole } from './console.js';
 
 export const managedInfo = {
   codexReady: false,
@@ -488,6 +490,7 @@ export async function codexWork(
   effort: ReasoningEffort = 'medium',
   structured = false,
   research = false,
+  onTrace?: (event: ConsoleEvent) => void,
 ): Promise<Generated> {
   if (!managedInfo.codexReady) throw new CodexWorkerError('CODEX_AUTH');
   const controller = new AbortController();
@@ -527,6 +530,7 @@ export async function codexWork(
       completed = false,
       toolsCompleted = false,
       usage: Generated = { text: '' };
+    const trace = nativeConsole(onTrace);
     for await (const event of turn.events) {
       if (
         event.type === 'item.started' ||
@@ -546,6 +550,7 @@ export async function codexWork(
           controller.abort();
           throw new CodexWorkerError('CODEX_TOOL_BLOCKED');
         }
+        trace(event);
         if (item.type === 'web_search')
           onTool?.({
             id: item.id,
@@ -643,6 +648,7 @@ export async function codexGenerate(
   factory?: (options: CodexOptions) => Pick<Codex, 'startThread'>,
   effort: ReasoningEffort = 'medium',
   research?: { enabled: boolean; onTool?: (entry: NonNullable<Task['toolLog']>[number]) => void },
+  onTrace?: (event: ConsoleEvent) => void,
 ): Promise<Generated> {
   if (!managedInfo.codexReady)
     throw new Error(
@@ -672,6 +678,7 @@ export async function codexGenerate(
     let text = '',
       completed = false,
       usage: Generated = { text: '' };
+    const trace = nativeConsole(onTrace);
     for await (const event of turn.events) {
       if (
         (event.type === 'item.started' ||
@@ -683,6 +690,7 @@ export async function codexGenerate(
         controller.abort();
         throw new CodexWorkerError('CODEX_TOOL_BLOCKED');
       }
+      trace(event);
       if (
         (event.type === 'item.started' || event.type === 'item.completed') &&
         event.item.type === 'web_search' &&

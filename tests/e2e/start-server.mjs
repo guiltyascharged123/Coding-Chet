@@ -66,6 +66,8 @@ const modelServer = createServer(async (req, res) => {
     return;
   }
   if (input.task) {
+    if (input.project.title.includes('Live console fixture'))
+      await new Promise((resolve) => setTimeout(resolve, 4000));
     const needsInput =
       input.task.title.includes('Human decision fixture') && !input.humanDirection?.length;
     const result = {

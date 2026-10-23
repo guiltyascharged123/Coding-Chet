@@ -257,3 +257,5 @@ Managed source folders live beside the database under `.data/projects/` by defau
 ### Evidence-based team work
 
 Each project has a visible **Model → Change** control for its connection and exact model ID. Direct model tasks report deliverables, acceptance evidence, assumptions, concrete human decisions and bounded internal follow-ups. Large handoffs use budgeted source excerpts and targeted retrieval rather than failing on accumulated prose. Any Codex team can explicitly enable managed file/command tools; sandbox and cost controls still apply. Project instruction improvements are reviewable and versioned. See the [easy guide](docs/EASY-GUIDE.md#useful-work-evidence-and-recovery) for usage and limits. Model-reported checks are not proof of correctness; actual receipts and independent review matter.
+
+Use **Live console** to inspect prepared Workroom requests, public model replies, command output and work events. Filter by agent/task, follow incoming events, and export visible logs. Viewing adds no model calls and exposes no private reasoning. See [watch the agents work](docs/EASY-GUIDE.md#watch-the-agents-work) for history and provider limits.

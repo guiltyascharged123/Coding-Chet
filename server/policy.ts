@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Attempt, CostPolicy, MemoryItem, Project, Provider, Task } from '../shared/types.js';
 import type { Store } from './store.js';
 import { defaultPolicy } from '../shared/schemas.js';
+import type { ConsoleEvent } from '../shared/console.js';
 
 export type GenerationContext = {
   store?: Store;
@@ -20,6 +21,7 @@ export type GenerationContext = {
   cache?: boolean;
   cacheWhen?: (text: string) => boolean;
   onContext?: () => void;
+  onTrace?: (event: ConsoleEvent) => void;
 };
 export type Generated = { text: string; inputTokens?: number; outputTokens?: number };
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -198,6 +200,12 @@ export async function guarded(
     };
     store!.putAttempt(receipt);
     ctx.onAttempt?.(receipt.id);
+    ctx.onTrace?.({
+      type: 'status',
+      text: 'Reusing a confirmed cached response. No model request was sent.',
+      status: 'cached',
+    });
+    ctx.onTrace?.({ id: 'reply:cached', type: 'response', text: cached, status: 'cached' });
     return cached;
   }
   const attempt =
@@ -214,6 +222,12 @@ export async function guarded(
         )
       : undefined;
   if (attempt) ctx.onAttempt?.(attempt.id);
+  ctx.onTrace?.({
+    id: 'request',
+    type: 'request',
+    text: `Workroom instructions:\n${system}\n\nAssignment and selected context:\n${user}`,
+    status: 'dispatching',
+  });
   // Keep the dispatch quote even if settings are edited while a request is running.
   const rate =
     billingFor(provider) === 'api'
@@ -221,6 +235,8 @@ export async function guarded(
       : undefined;
   try {
     const result = await generate();
+    if (provider !== 'codex')
+      ctx.onTrace?.({ id: 'result', type: 'response', text: result.text, status: 'completed' });
     if (!result.text.trim()) throw new Error('The model returned no document.');
     if (result.text.length > 200000)
       throw new Error('The model response exceeds the document limit.');
@@ -246,8 +262,18 @@ export async function guarded(
       if (ctx.cache !== false && (!ctx.cacheWhen || ctx.cacheWhen(result.text)))
         store.cache(key, result.text);
     }
+    ctx.onTrace?.({
+      type: 'status',
+      text: `Model request completed${result.inputTokens === undefined ? '' : ` · input tokens: ${result.inputTokens}`}${result.outputTokens === undefined ? '' : ` · output tokens: ${result.outputTokens}`}. Completion of a model request is separate from acceptance of the work.`,
+      status: 'completed',
+    });
     return result.text;
   } catch (error) {
+    ctx.onTrace?.({
+      type: 'error',
+      text: error instanceof Error ? error.message : 'The model request failed.',
+      status: ctx.signal?.aborted ? 'cancelled' : 'failed',
+    });
     if (attempt && store)
       store.putAttempt({
         ...attempt,

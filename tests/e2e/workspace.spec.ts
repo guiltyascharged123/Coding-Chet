@@ -751,3 +751,79 @@ test('a specific human choice survives closing and resumes the unfinished model 
     state.state.approvals.find((a: { projectId: string }) => a.projectId === project.id).feedback,
   ).toContain('No external spending is authorized');
 });
+
+test('live console shows requests before replies, retains history, filters and exports without extra inference', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'Live console fixture office',
+        workflow: 'custom',
+        planning: 'template',
+        brief:
+          'Compare A at $20 and B at $35. Sensitive fixture string: browser-test-token-not-a-real-secret. Render <script>window.consoleXss=true</script> as plain text only.',
+      },
+    })
+  ).json();
+  expect((await request.get('/api/projects/missing/console')).status()).toBe(404);
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  await page.getByRole('button', { name: 'Live console', exact: true }).click();
+  const consoleView = page.getByRole('region', { name: 'Project live console', exact: true });
+  await expect(consoleView).toContainText('No console history yet');
+  await page.getByLabel('Show instructions & context', { exact: true }).check();
+  await page.getByRole('button', { name: 'Run team', exact: true }).click();
+  await expect(consoleView.locator('.console-request')).toContainText(
+    'Assignment and selected context',
+  );
+  await expect(consoleView.locator('.console-response')).toHaveCount(0);
+  await expect(consoleView.locator('.console-request')).toContainText('[REDACTED]');
+  await expect(consoleView.locator('.console-request')).not.toContainText(
+    'browser-test-token-not-a-real-secret',
+  );
+  expect(await consoleView.locator('script').count()).toBe(0);
+  expect(
+    await page.evaluate(() => (window as unknown as { consoleXss?: boolean }).consoleXss),
+  ).toBeUndefined();
+  await expect(consoleView.locator('.console-response')).toContainText('Cost comparison', {
+    timeout: 15000,
+  });
+  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  await page.getByLabel('Raw replies', { exact: true }).check();
+  await expect(consoleView.locator('.console-response pre')).toContainText('"outcome":"complete"');
+  await page.getByLabel('Console agent', { exact: true }).selectOption('atlas');
+  await expect(consoleView).toContainText('No entries match these filters');
+  await page.getByRole('button', { name: 'Show all work', exact: true }).click();
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download visible log', exact: true }).click();
+  const file = await downloadPromise;
+  expect(file.suggestedFilename()).toBe('Live-console-fixture-office-console.txt');
+  const stream = await file.createReadStream(),
+    chunks = [];
+  for await (const chunk of stream!) chunks.push(chunk);
+  const log = Buffer.concat(chunks).toString('utf8');
+  expect(log).toContain('workroom-browser-model');
+  expect(log).toContain('Cost comparison');
+  expect(log).not.toContain('browser-test-token-not-a-real-secret');
+  const before = await (await request.get(`/api/projects/${project.id}/console`)).json();
+  expect(before.entries.some((e: { type: string }) => e.type === 'request')).toBe(true);
+  await page.reload();
+  await page.getByRole('button', { name: 'Live console', exact: true }).click();
+  await expect(page.locator('.console-response')).toContainText('Cost comparison');
+  await page.getByRole('button', { name: 'Task board', exact: true }).click();
+  await page.locator('.task-card').first().click();
+  await page.getByRole('button', { name: 'Open live console for this task', exact: true }).click();
+  const state = await (await request.get('/api/state')).json(),
+    task = state.state.tasks.find((t: { projectId: string }) => t.projectId === project.id);
+  await expect(page.getByLabel('Console task', { exact: true })).toHaveValue(task.id);
+  expect(
+    state.attempts.filter((a: { projectId: string }) => a.projectId === project.id),
+  ).toHaveLength(1);
+  await page.screenshot({ path: '/tmp/workroom-live-console.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

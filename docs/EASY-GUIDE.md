@@ -298,3 +298,18 @@ off Codespaces, see the [local setup reference](LOCAL-SETUP.md).
 ## Back up both records and source
 
 **Workspace controls → Backup & restore** exports briefs, plans, roles, results, approvals, verified memory and usage receipts. That JSON does **not** contain managed source files. Copy `.data/projects/` separately (with the team stopped), or download each project's source ZIP. ZIP downloads omit hidden files, dependency folders, symlinks and private-key extensions; use a full local folder copy when you need everything. Browser exports are limited to 2,000 files and 25 MB. Restoring records never rolls back source-file changes.
+
+## Watch the agents work
+
+Open **Live console** in the sidebar, or open a task and click **Open live console for this task**.
+
+- Watch public Codex messages, command output and exit codes, file changes, searches, and completion/error events. Planning and meeting jobs appear too.
+- Enable **Show instructions & context** to inspect the Workroom instructions and selected project data prepared for a request. SDK/provider protocol instructions and authentication headers are not displayed.
+- Filter by agent, task or phase. **Raw replies** shows the original response text; readable mode extracts the useful deliverable from structured results. Disable **Follow new output** while reading earlier entries.
+- **Copy visible log** or **Download visible log** exports the currently visible entries. Including instructions can include project details, so review a log before sharing it.
+
+This is a read-only viewer. Opening it makes no additional model request and does not feed logs into the agents’ context. Codex events appear when the SDK emits them, rather than simulated typing. Some jobs send no public message until their final response. OpenAI, Gemini, Ollama and compatible text adapters currently show their reply at completion. A generic model-activity notice can appear during Codex processing; private reasoning text is never displayed. Use **Team discussions** for the agents’ deliberate public proposals and critiques.
+
+Recent console history survives reloads and server restarts in the same SQLite database. Reconnecting reloads the retained history. Old runs from before this feature cannot be reconstructed. History is bounded per project and workspace, and large entries are labeled excerpts. Known credentials are redacted; arbitrary project secrets may still appear in text or command output. Portable JSON project backups do not include console history—download logs separately when needed.
+
+Demo entries explicitly say that no AI ran. External workers show assignment status and submitted results; Workroom cannot see their internal terminal unless their protocol is extended.

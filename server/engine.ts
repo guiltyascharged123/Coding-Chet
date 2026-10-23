@@ -23,6 +23,7 @@ import { hash, memoryCurrent, policy, reserve, selectedMemory, relevantContext }
 import { collaborationSchema, policySchema } from '../shared/schemas.js';
 import type { FollowUp } from '../shared/work.js';
 import { hasProjectTools } from '../shared/capabilities.js';
+import type { ConsoleEvent } from '../shared/console.js';
 import type { CostPolicy } from '../shared/types.js';
 
 export class AppError extends Error {
@@ -80,6 +81,63 @@ export class Engine extends EventEmitter {
     this.state.activities = this.state.activities.slice(0, 250);
     this.store.save();
     this.emit('change', this.bootstrap());
+  }
+  private consoleEvent(
+    project: Project,
+    phase: 'plan' | 'task' | 'meeting',
+    event: ConsoleEvent,
+    task?: Task,
+    agentId?: string,
+    meetingId?: string,
+    attemptId?: string,
+  ) {
+    const agent = (project.team || this.state.agents).find((a) => a.id === agentId);
+    try {
+      const update = this.store.putConsole({
+        ...event,
+        id: `${attemptId || randomUUID()}:${event.id || randomUUID()}`,
+        projectId: project.id,
+        phase,
+        taskId: task?.id,
+        taskTitle: task?.title,
+        agentId,
+        agentName: agent?.name,
+        agentRole: agent?.role,
+        meetingId,
+        attemptId,
+        provider: project.provider,
+        model: project.model,
+      });
+      this.emit('console', update);
+    } catch {
+      this.emit('console_warning', {
+        projectId: project.id,
+        message:
+          'Console history could not be saved. Work continues independently; reconnect to reload the history still available.',
+      });
+    }
+  }
+  private tracing(
+    project: Project,
+    phase: 'plan' | 'task' | 'meeting',
+    task?: Task,
+    agentId?: string,
+    meetingId?: string,
+  ) {
+    let attemptId: string | undefined;
+    const connection = {
+      ...project,
+      team: (project.team || this.state.agents).map((a) => ({ ...a })),
+    };
+    return {
+      onAttempt: (id: string) => {
+        attemptId = id;
+        if (task) task.attemptId = id;
+        this.commit();
+      },
+      onTrace: (event: ConsoleEvent) =>
+        this.consoleEvent(connection, phase, event, task, agentId, meetingId, attemptId),
+    };
   }
   event(
     projectId: string,
@@ -202,10 +260,17 @@ export class Engine extends EventEmitter {
       store: this.store,
       project,
       signal: controller.signal,
-      onAttempt: () => this.commit(),
+      ...this.tracing(project, 'plan'),
     })
       .then((tasks) => {
-        if (!controller.signal.aborted) this.finishPlan(project, tasks);
+        if (!controller.signal.aborted) {
+          this.finishPlan(project, tasks);
+          this.consoleEvent(project, 'plan', {
+            type: 'status',
+            text: `Saved and validated a plan with ${tasks.length} tasks.`,
+            status: 'completed',
+          });
+        }
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -214,6 +279,11 @@ export class Engine extends EventEmitter {
             error instanceof Error ? error.message : 'Planning failed. Your brief is saved.';
           project.status = 'paused';
           this.event(project.id, 'error', project.planningError);
+          this.consoleEvent(project, 'plan', {
+            type: 'error',
+            text: project.planningError,
+            status: 'failed',
+          });
           this.commit();
         }
       })
@@ -761,7 +831,7 @@ export class Engine extends EventEmitter {
             store: this.store,
             project,
             signal: controller.signal,
-            onAttempt: () => this.commit(),
+            ...this.tracing(project, 'meeting', undefined, agent.id, meeting.id),
           });
           if (controller.signal.aborted) return;
           meeting.contributions.push({
@@ -784,7 +854,7 @@ export class Engine extends EventEmitter {
           store: this.store,
           project,
           signal: controller.signal,
-          onAttempt: () => this.commit(),
+          ...this.tracing(project, 'meeting', undefined, meeting.participants[0].id, meeting.id),
         });
         if (controller.signal.aborted) return;
         meeting.summary = summary.slice(0, 20000);
@@ -915,6 +985,23 @@ export class Engine extends EventEmitter {
     task.status = 'working';
     task.startedAt = Date.now();
     delete task.error;
+    const project = this.project(task.projectId);
+    this.consoleEvent(
+      project,
+      'task',
+      {
+        type: 'status',
+        text:
+          project.provider === 'demo'
+            ? 'Demo task started. No AI model or tools will run.'
+            : project.provider === 'external'
+              ? 'External worker claimed this assignment. Internal worker messages are not available through this protocol.'
+              : 'Task started. Preparing the assignment and selected project context.',
+        status: 'started',
+      },
+      task,
+      task.agentId,
+    );
     this.event(task.projectId, 'started', `Started “${task.title}”.`, task.agentId);
     const previous = task.dependencies.map((id) => this.task(id)).at(-1);
     if (previous)
@@ -968,15 +1055,14 @@ export class Engine extends EventEmitter {
             const entry = { ...raw, id: `${task.attemptId || task.id}:${raw.id}` };
             task.toolLog ||= [];
             const existing = task.toolLog.findIndex((e) => e.id === entry.id);
+            if (existing >= 0 && JSON.stringify(task.toolLog[existing]) === JSON.stringify(entry))
+              return;
             if (existing >= 0) task.toolLog[existing] = entry;
             else task.toolLog.push(entry);
             task.toolLog = task.toolLog.slice(-100);
             this.commit();
           },
-          onAttempt: (id) => {
-            task.attemptId = id;
-            this.commit();
-          },
+          ...this.tracing(project, 'task', task, agent.id),
           onContext: () => this.commit(),
         },
       );
@@ -1047,6 +1133,17 @@ export class Engine extends EventEmitter {
     task.dependencies = [...new Set([...task.dependencies, ...dependencies])];
     task.coordinationRounds = (task.coordinationRounds || 0) + 1;
     task.status = 'queued';
+    this.consoleEvent(
+      this.project(task.projectId),
+      'task',
+      {
+        type: 'status',
+        text: `Queued ${created.length} internal specialist assignments. This task will resume with their results.`,
+        status: 'waiting_for_team',
+      },
+      task,
+      task.agentId,
+    );
     const index = this.state.tasks.indexOf(task);
     this.state.tasks.splice(index, 0, ...created);
     this.event(
@@ -1099,6 +1196,32 @@ export class Engine extends EventEmitter {
       this.handoff(task);
     }
     this.checkCompletion(project);
+    if (project.provider === 'demo' || project.provider === 'external')
+      this.consoleEvent(
+        project,
+        'task',
+        {
+          type: 'response',
+          text: output,
+          status: project.provider === 'demo' ? 'demo_preview' : 'external_result',
+        },
+        task,
+        task.agentId,
+      );
+    this.consoleEvent(
+      project,
+      'task',
+      {
+        type: 'status',
+        text:
+          task.status === 'review'
+            ? 'Work is waiting for the requested human decision. Open Review work for the question and choices.'
+            : 'Task work accepted. The saved result and reported checks are available in Outputs.',
+        status: task.status,
+      },
+      task,
+      task.agentId,
+    );
     this.commit();
   }
   private fail(task: Task, message: string) {
@@ -1107,6 +1230,13 @@ export class Engine extends EventEmitter {
     delete task.leaseId;
     delete task.leaseExpiresAt;
     this.project(task.projectId).status = 'paused';
+    this.consoleEvent(
+      this.project(task.projectId),
+      'task',
+      { type: 'error', text: message, status: 'failed' },
+      task,
+      task.agentId,
+    );
     this.event(task.projectId, 'error', message, task.agentId);
     this.commit();
   }

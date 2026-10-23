@@ -8,6 +8,7 @@ import { Engine, AppError } from './engine.js';
 import { Store } from './store.js';
 import { allowedOrigin } from './origin.js';
 import { collaborationSchema, providerSchema } from '../shared/schemas.js';
+import { CONSOLE_LIMITS, type ConsoleEntry } from '../shared/console.js';
 import { refreshManagedInfo } from './managed.js';
 import { projectWorkspace, workspaceFiles, workspaceFile, workspaceZip } from './workspaces.js';
 
@@ -60,6 +61,46 @@ app.get('/api/events', (req, res) => {
   });
 });
 engine.setMaxListeners(100);
+app.get(
+  '/api/projects/:id/console',
+  route((req, res) => {
+    const project = engine.project(param(req, 'id'));
+    res.json({ entries: store.consoleEntries(project.id), limits: CONSOLE_LIMITS });
+  }),
+);
+app.get(
+  '/api/projects/:id/console/events',
+  route((req, res) => {
+    const project = engine.project(param(req, 'id'));
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    const send = (event: string, value: unknown) =>
+      res.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
+    const update = (value: { entry: ConsoleEntry; removed: string[] }) => {
+      if (value.entry.projectId === project.id || value.removed.length)
+        send('update', {
+          entry: value.entry.projectId === project.id ? value.entry : undefined,
+          removed: value.removed,
+        });
+    };
+    engine.on('console', update);
+    const warning = (value: { projectId: string; message: string }) => {
+      if (value.projectId === project.id) send('warning', value);
+    };
+    engine.on('console_warning', warning);
+    // Send a fresh bounded snapshot on reconnect, including updates to an earlier SDK item.
+    send('snapshot', { entries: store.consoleEntries(project.id), limits: CONSOLE_LIMITS });
+    const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15000);
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      engine.off('console', update);
+      engine.off('console_warning', warning);
+    });
+  }),
+);
 app.post(
   '/api/projects',
   route(async (req, res) => {

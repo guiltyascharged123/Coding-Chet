@@ -27,6 +27,7 @@ import {
   RotateCcw,
   Settings2,
   Sparkles,
+  TerminalSquare,
   Users,
   Wifi,
   WifiOff,
@@ -62,15 +63,17 @@ import ProjectModal from './components/ProjectModal';
 import PlanEditor from './components/PlanEditor';
 import ProjectFiles from './components/ProjectFiles';
 import Collaboration from './components/Collaboration';
+import LiveConsole from './components/LiveConsole';
 
 const Office = lazy(() => import('./components/Office'));
-type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs' | 'discussions';
+type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs' | 'discussions' | 'console';
 const nav = [
   { id: 'discussions' as View, label: 'Team discussions', icon: MessageCircle },
   { id: 'workspace' as View, label: 'Workspace', icon: LayoutDashboard },
   { id: 'team' as View, label: 'Your team', icon: Users },
   { id: 'tasks' as View, label: 'Task board', icon: ClipboardList },
   { id: 'activity' as View, label: 'Activity', icon: ActivityIcon },
+  { id: 'console' as View, label: 'Live console', icon: TerminalSquare },
   { id: 'outputs' as View, label: 'Outputs', icon: FolderOpen },
 ];
 const taskLabels: Record<TaskStatus, string> = {
@@ -98,6 +101,11 @@ export default function App() {
     null,
   );
   const [controlsTab, setControlsTab] = useState('limits');
+  const [consoleFocus, setConsoleFocus] = useState<{
+    projectId?: string;
+    taskId?: string;
+    agentId?: string;
+  }>({});
   const [agentId, setAgentId] = useState<string>();
   const [taskId, setTaskId] = useState<string>();
   const [reviewId, setReviewId] = useState<string>();
@@ -334,7 +342,10 @@ export default function App() {
               key={item.id}
               aria-label={item.label}
               className={`nav-item ${view === item.id ? 'active' : ''}`}
-              onClick={() => setView(item.id)}
+              onClick={() => {
+                if (item.id === 'console') setConsoleFocus({});
+                setView(item.id);
+              }}
             >
               <item.icon size={18} strokeWidth={1.7} />
               <span>{item.label}</span>
@@ -476,28 +487,32 @@ export default function App() {
               <h1>
                 {view === 'workspace'
                   ? 'Good work starts with a little space.'
-                  : view === 'discussions'
-                    ? 'Better decisions through debate.'
-                    : view === 'team'
-                      ? 'Different minds. One shared goal.'
-                      : view === 'tasks'
-                        ? 'Big ideas, manageable steps.'
-                        : view === 'outputs'
-                          ? 'A little less talk. A little more made.'
-                          : 'The conversation behind the work.'}
+                  : view === 'console'
+                    ? 'Watch the work as it happens.'
+                    : view === 'discussions'
+                      ? 'Better decisions through debate.'
+                      : view === 'team'
+                        ? 'Different minds. One shared goal.'
+                        : view === 'tasks'
+                          ? 'Big ideas, manageable steps.'
+                          : view === 'outputs'
+                            ? 'A little less talk. A little more made.'
+                            : 'The conversation behind the work.'}
               </h1>
               <p>
                 {view === 'workspace'
                   ? 'Your team is here. Give them a direction and watch ideas become progress.'
-                  : view === 'discussions'
-                    ? 'Proposals, objections, evidence and next actions, saved with the project.'
-                    : view === 'team'
-                      ? 'Give each teammate a role, a perspective, and a place in the studio.'
-                      : view === 'tasks'
-                        ? 'Every handoff has a purpose. Follow the work from brief to done.'
-                        : view === 'outputs'
-                          ? 'The documents, decisions, and handoffs your team has created.'
-                          : 'Live handoffs, working notes, and the decisions that move things forward.'}
+                  : view === 'console'
+                    ? 'Assignments, visible replies and tool output from the project’s actual model jobs.'
+                    : view === 'discussions'
+                      ? 'Proposals, objections, evidence and next actions, saved with the project.'
+                      : view === 'team'
+                        ? 'Give each teammate a role, a perspective, and a place in the studio.'
+                        : view === 'tasks'
+                          ? 'Every handoff has a purpose. Follow the work from brief to done.'
+                          : view === 'outputs'
+                            ? 'The documents, decisions, and handoffs your team has created.'
+                            : 'Live handoffs, working notes, and the decisions that move things forward.'}
               </p>
             </div>
             <button className="button primary new-project" onClick={() => setModal('project')}>
@@ -1224,6 +1239,16 @@ export default function App() {
               )}
             </section>
           )}
+          {view === 'console' && (
+            <LiveConsole
+              key={project.id}
+              project={project}
+              team={state.agents}
+              tasks={tasks}
+              focus={consoleFocus.projectId === project.id ? consoleFocus : {}}
+              meetingActive={!!currentMeeting}
+            />
+          )}
           <footer className="page-footer">
             <span>MADE FOR THINKING TOGETHER.</span>
             <a
@@ -1345,6 +1370,17 @@ export default function App() {
         >
           <div className="task-detail">
             <p className="task-description">{selectedTask.description}</p>
+            <button
+              className="button secondary"
+              onClick={() => {
+                setConsoleFocus({ projectId: project.id, taskId: selectedTask.id });
+                setTaskId(undefined);
+                setView('console');
+              }}
+            >
+              <TerminalSquare size={16} />
+              Open live console for this task
+            </button>
             <WorkEvidence task={selectedTask} />
             {!!selectedTask.toolLog?.length && (
               <details className="tool-activity" open>
