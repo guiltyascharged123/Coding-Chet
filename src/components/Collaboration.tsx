@@ -55,7 +55,10 @@ export default function Collaboration({
         {project.meetingPolicy?.enabled
           ? `kickoff and after every ${project.meetingPolicy.everyTasks} completed tasks`
           : 'off'}
-        . Codex reasoning: {project.reasoningEffort || 'medium'}.
+        .{' '}
+        {project.provider === 'codex' && (
+          <>Codex reasoning: {project.reasoningEffort || 'medium'}.</>
+        )}
       </p>
       <details className="meeting-agenda-editor" open={!meetings.length}>
         <summary>{meetings.length ? 'Start another meeting' : 'Meeting agenda'}</summary>

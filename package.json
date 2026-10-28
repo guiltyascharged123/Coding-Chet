@@ -10,6 +10,8 @@
   "scripts": {
     "demo": "node scripts/launch.mjs",
     "local": "node scripts/launch.mjs --workspace",
+    "setup:local": "node scripts/local-model.mjs",
+    "local:prepare": "node scripts/launch.mjs --prepare-only --workspace",
     "demo:prepare": "node scripts/launch.mjs --prepare-only",
     "codespace:start": "node scripts/codespace.mjs",
     "codespace:restart": "node scripts/codespace.mjs --restart",
@@ -18,7 +20,7 @@
     "dev:web": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:e2e": "npm run build && playwright test",
     "worker": "node examples/external-worker.mjs",
     "format": "prettier --write ."

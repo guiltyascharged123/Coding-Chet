@@ -77,31 +77,35 @@ export default function PlanEditor({
           tasks to extend a project. Changes take effect when you save.
         </p>
         <fieldset className="plan-row">
-          <legend>Collaboration & reasoning</legend>
-          <label>
-            Codex reasoning effort
-            <select
-              aria-label="Codex reasoning effort"
-              value={effort}
-              onChange={(e) => setEffort(e.target.value as ReasoningEffort)}
-            >
-              <option value="low">Economy · low</option>
-              <option value="medium">Balanced · medium</option>
-              <option value="high">Deep work · high</option>
-            </select>
-            <span className="field-hint">
-              Higher reasoning can improve difficult work and consume more allowance. This controls
-              Codex; other providers use their configured defaults.
-            </span>
-          </label>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={draft.researchEnabled}
-              onChange={(e) => saveDraft({ ...draft, researchEnabled: e.target.checked })}
-            />
-            Allow Codex web research (read-only searches with cited sources)
-          </label>
+          <legend>Meeting settings</legend>
+          {project.provider === 'codex' && (
+            <>
+              <label>
+                Codex reasoning effort
+                <select
+                  aria-label="Codex reasoning effort"
+                  value={effort}
+                  onChange={(e) => setEffort(e.target.value as ReasoningEffort)}
+                >
+                  <option value="low">Economy · low</option>
+                  <option value="medium">Balanced · medium</option>
+                  <option value="high">Deep work · high</option>
+                </select>
+                <span className="field-hint">
+                  Higher reasoning can improve difficult work and consume more allowance. This
+                  controls Codex; other providers use their configured defaults.
+                </span>
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={draft.researchEnabled}
+                  onChange={(e) => saveDraft({ ...draft, researchEnabled: e.target.checked })}
+                />
+                Allow Codex web research (read-only searches with cited sources)
+              </label>
+            </>
+          )}
           <label className="checkbox-label">
             <input
               type="checkbox"

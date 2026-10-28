@@ -1,5 +1,7 @@
 # Connecting real AI workers
 
+> **Local-first update:** Start with [the current local model/provider guide](LOCAL-MODELS.md). `npm run local` now sets up Ollama and the selected default model when needed; normal startup cannot run simulated work. Existing providers/projects are retained. New AI plans use the model; manual recovery starts empty. The sections below retain advanced account, tool and cost details.
+
 New to Workroom? Follow the [easy guide](EASY-GUIDE.md) for basic startup,
 ChatGPT/Codex sign-in, account safety, and your first project. This page is the
 reference for all supported connections.
@@ -8,14 +10,13 @@ Workroom schedules work; a runtime supplies the intelligence behind each charact
 Walking and meetings visualize activity. Assignments, documents, verified project
 memory, and review decisions carry the actual collaboration.
 
-| Connection        | What it uses                                            | Costs and setup                                                       |
-| ----------------- | ------------------------------------------------------- | --------------------------------------------------------------------- |
-| Demo              | Labeled local templates                                 | No model or credentials                                               |
-| Codex             | Codex CLI signed in with ChatGPT                        | Your account's Codex allowance; install CLI and sign in locally       |
-| Ollama            | An installed local model                                | Your hardware and electricity; no automatic downloads                 |
-| OpenAI-compatible | Chat Completions server, such as LM Studio or llama.cpp | Local hardware, or separate hosted billing                            |
-| OpenAI / Gemini   | Provider APIs                                           | API key, quota, explicit paid-request permission and price estimates  |
-| External worker   | Your independently running agent                        | Your worker's models, tools and billing; internal calls are unmetered |
+| Connection        | What it uses                                            | Costs and setup                                                                |
+| ----------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Codex             | Codex CLI signed in with ChatGPT                        | Your account's Codex allowance; install CLI and sign in locally                |
+| Ollama            | An installed local model                                | Your hardware and electricity; automatic first-use setup through npm run local |
+| OpenAI-compatible | Chat Completions server, such as LM Studio or llama.cpp | Local hardware, or separate hosted billing                                     |
+| OpenAI / Gemini   | Provider APIs                                           | API key, quota, explicit paid-request permission and price estimates           |
+| External worker   | Your independently running agent                        | Your worker's models, tools and billing; internal calls are unmetered          |
 
 One connection serves the team. Each task receives the character's role, specialty,
 bounded goal, assignment, brief, feedback, dependency outputs and verified memory.
@@ -34,9 +35,9 @@ controls → Limits & connections**, and explicitly set its project connection.
 Changing it preserves existing task plans and outputs. Changes to model settings
 in `.env` supply defaults for new projects. Existing projects retain their selected IDs. Click the project’s **Model: … · Change** control to select a provider and edit its exact model ID while paused. This saves a preference without generating or verifying access; paid pricing must match that exact ID.
 
-New dashboard projects with a real direct connection default to **AI planning**, which uses allowance/budget. Choose **Editable task template** to make **no planning request**. Demo/external projects use templates. Choose office coordination, software delivery, research/decision support, venture validation, or a custom plan. Each project stores its own four-role team, so editing one team's roles does not change other projects. Add/remove tasks and change assignments, dependencies, approval gates and instructions through **Edit plan**. A 30-task default ceiling is configurable; six is not a workflow constraint.
+New dashboard projects with a real direct connection default to **AI planning**, which uses allowance/budget. Choose **Write my own tasks** to start empty with no planning request. External projects use manual plans. Choose office coordination, software delivery, research/decision support, venture validation, or a custom plan. Each project stores its own four-role team, so editing one team's roles does not change other projects. Add/remove tasks and change assignments, dependencies, approval gates and instructions through **Edit plan**. A 30-task default ceiling is configurable; six is not a workflow constraint.
 
-AI planning is optional and uses allowance/budget. The project and brief are saved before dispatch; the saved project reports planning state and offers retry or an explicit template fallback. Duplicate submissions reuse a project ID. Uncertain planning receipts require acknowledgment before retry. Invalid model plans are not replayed from the text cache. Stopped/restarted planning becomes a visible failed plan without losing the brief.
+AI planning is optional and uses allowance/budget. The project and brief are saved before dispatch; the saved project reports planning state and offers retry or an empty manual plan. Duplicate submissions reuse a project ID. Uncertain planning receipts require acknowledgment before retry. Invalid model plans are not replayed from the text cache. Stopped/restarted planning becomes a visible failed plan without losing the brief.
 
 Input limits are measured in UTF-8 bytes, not exact model tokens. Respect your model
 server's context window too; raising the app's byte limit does not enlarge it.
@@ -124,7 +125,7 @@ remain in place; there is no unrestricted or paid-API fallback.
 Error messages never copy raw CLI response bodies, prompts, paths, or credentials.
 Do not send `.env`, auth files, or login tokens when asking for help. After reviewing
 an uncertain attempt, acknowledge it in **Workspace controls → Usage**, then open
-the failed task and choose **Retry task**, or choose **Retry planning** on the saved project. **Use editable template** provides a no-model planning fallback. Older builds could lose a brief before saving the project; that unsaved content cannot be recovered by updating. Historical attempt counts and reservations remain; no work is automatically repeated.
+the failed task and choose **Retry task**, or choose **Retry planning** on the saved project. **Create tasks manually** provides a no-model planning fallback. Older builds could lose a brief before saving the project; that unsaved content cannot be recovered by updating. Historical attempt counts and reservations remain; no work is automatically repeated.
 
 ## Ollama and other local servers
 
@@ -229,8 +230,7 @@ See the [endpoint reference](../README.md#embody-independently-running-agents).
 
 Expired leases stop for explicit review; they are not automatically rerun. Workers
 need their own idempotency, tool permissions, cost limits and approval before side
-effects. The included example returns labeled samples without a key; with its own
-OpenAI key it makes separately billed, unmetered calls. Prefer built-in controlled
+effects. The included example uses real local Ollama by default; WORKER_PROVIDER=openai explicitly enables its separately billed API adapter. Missing models or keys fail the task. Prefer built-in controlled
 adapters for document work.
 
 This remains a trusted single-user app. Private Codespaces ports also require
@@ -243,7 +243,7 @@ undo a worker's earlier file changes or actions.
 
 Software folders are named with a readable title and a stable project-ID hash under `projects/` beside the database (normally `.data/projects/`). Roles share files; project titles may repeat without sharing folders. Files are retained on failures, retries, restarts and record restores. Outputs includes a source browser and a real ZIP download. Hidden files, symlinks, dependency folders and private-key extensions are omitted from browser exports. File previews are limited to 256 KB, ZIPs to 25 MB and 2,000 files. Use the local folder directly for larger projects.
 
-Portable JSON backups contain records, not source. Copy managed folders separately with workers stopped, or download source ZIPs. Record restores never revert file edits. Existing legacy projects, six-document packs, exports and external leases remain supported. Normal new workspaces start empty; the explicit demo launcher retains a sample fixture.
+Portable JSON backups contain records, not source. Copy managed folders separately with workers stopped, or download source ZIPs. Record restores never revert file edits. Existing legacy projects, six-document packs, exports and external leases remain supported. Normal new workspaces start empty; simulation remains only in explicitly enabled automated tests.
 
 ## Saved team meetings and specialist quality
 

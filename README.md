@@ -1,261 +1,104 @@
 # Workroom
 
-**A little space for agents. A lot of room for ideas.**
+An open-source browser workspace for model-powered agent teams. Describe a goal, review a model-generated task plan, run the team, inspect real work and answer necessary decisions. A Three.js office visualizes task, handoff and meeting state.
 
-An open-source browser workspace for collaborating AI agents. Give the team a
-brief, follow their handoffs in a 3D studio, review decisions, and download the
-deliverables. Built in Coding-Chet for office coordination, planning, research and Codex software delivery.
+## Run locally
 
-**Start here:** [Easy guide: run Workroom, connect ChatGPT/Codex, and understand account safety](docs/EASY-GUIDE.md).
-It covers the first project, everyday startup, costs, disconnecting, and common problems.
-
-![The Workroom studio](docs/screenshots/workspace.png)
-
-## Try it in your browser — no installation
-
-1. Open [the Workroom branch on GitHub](https://github.com/guiltyascharged123/Coding-Chet/tree/workroom-starter).
-2. Click **Code → Codespaces → Create codespace on workroom-starter**.
-3. Wait for the one-time setup. The **Workroom demo** browser tab should open automatically.
-   If it does not, open the **Ports** tab in Codespaces and click the globe beside port **3000**.
-4. In the app, click **Run team**. When **Review work** appears, read the draft and
-   click **Approve & continue**. The team finishes its handoffs; find the results in **Outputs**.
-
-No API key is needed. The demo uses local templates and makes no model calls.
-The forwarded port is private by default. Codespaces usage counts against your
-GitHub account’s included allowance; stop the codespace when finished.
-
-## Run it on your computer — one command
-
-Install **Node.js 24 LTS** from [nodejs.org](https://nodejs.org) if needed. From the
-project folder, run:
+Install **Node.js 24 LTS**, open a terminal in this repository, and run:
 
 ```bash
 npm run local
 ```
 
-That command installs dependencies, builds the app, and attempts to open your browser.
-If a browser cannot open automatically, copy the address printed in the terminal
-into your browser. Keep the terminal open; press **Ctrl+C** to stop. Later starts
-reuse the installed dependencies and build unless something changed.
+First startup installs app dependencies, builds the interface, creates `.env` if missing, installs/starts Ollama as needed, and downloads **`huihui_ai/qwen3.5-abliterated:4B`**. Linux installation may request sudo permission; Windows requires winget or a separately installed Ollama application. The model download needs internet and several GB of disk space. Later starts reuse installed dependencies and weights. Existing environments and saved Codex/API/external defaults are preserved.
 
-If you have the earlier README-only clone, first get the application:
+Open the URL printed in the terminal, normally **http://127.0.0.1:3001**. Keep the terminal open; Ctrl+C stops Workroom. Ollama may remain running for reuse. On Windows, the same command works in PowerShell or Command Prompt; use `npm.cmd run local` if PowerShell blocks npm scripts.
+
+If local model setup needs attention:
+
+```bash
+npm run setup:local
+```
+
+[Local model and provider guide](docs/LOCAL-MODELS.md) explains Ubuntu/Windows installation, other model tags, OpenAI, Codex, Gemini/AI Studio, compatible servers, troubleshooting and costs. If the requested registry tag is unavailable, setup stops and reports the problem; it does not choose another model or simulate work. Live model download and quality could not be verified from this development host.
+
+## Use it
+
+1. **Model connections:** check readiness and choose the default for new projects.
+2. **New project:** provide the goal, useful deliverables, constraints and evidence. Choose a team. AI planning uses the configured model; the manual option starts empty.
+3. **Edit plan:** inspect tasks, owners, dependencies and acceptance criteria.
+4. **Run team:** agents use the selected model with their role instructions and saved project context. The default permits one task at a time to control resource use.
+5. **Task board / Live console:** inspect actual responses, checks, errors and public tool output. Retry saved failures without rewriting the brief.
+6. **View results / Outputs:** read and export deliverables. A completed plan does not by itself prove an external goal was achieved; inspect the evidence.
+
+Model-backed meetings are optional and off by default. A normal full meeting adds five model requests. A seated or moving avatar is not evidence of inference; the console and receipts show actual work.
+
+The Workroom logo returns to Workspace. Sidebar pages, model settings and recovery actions are described in the [functionality audit](docs/UI-FUNCTIONALITY.md).
+
+## Capabilities
+
+- Project-specific teams, specialist instructions, roles and desks; a 3D office with purposeful movement, seated work, meetings and a WebGL fallback.
+- Model-generated plans, editable task graphs, bounded specialist follow-ups, shared context, evidence-backed result records and source retrieval.
+- Saved project briefs, task outputs, human decisions, draft autosave, retries and interrupted-work recovery.
+- Optional model-backed meetings with proposals, critiques, decisions and saved contributions.
+- Public request/response/tool console with filtering, local retention and downloads; private model reasoning is not exposed.
+- Word, Excel, Markdown and print/PDF exports; source viewing and ZIP downloads for managed file projects.
+- Ollama, ChatGPT-authenticated Codex, OpenAI, Gemini, OpenAI-compatible servers and authenticated external workers.
+- Per-project provider/model choices, request limits, explicit paid API permission, estimates, usage receipts and no automatic paid fallback.
+- Project memory with provenance, versioned instructions and portable backup/restore. An empty workspace can import a backup.
+
+**Tool capabilities depend on the connection.** Ollama, OpenAI, Gemini and compatible adapters generate text from supplied material. Codex projects can explicitly enable managed file editing and commands after a sandbox readiness check; software teams require Codex. Optional Codex research enables built-in read-only web search. Role names alone do not grant tools or establish expertise.
+
+Normal startup never runs canned work or falls back to Demo. Historical simulation projects and their outputs remain saved; choose a real project connection before running them. The old `npm run demo` command is a compatibility alias for the real workspace. Simulation is retained only as an explicitly enabled automated-test fixture.
+
+## Configure and update
+
+New empty workspaces default to local Ollama. `.env.example` supplies the model and endpoint defaults. An existing `.env` is never overwritten. Set `AGENT_PROVIDER` only when you want an explicit startup override; otherwise the saved default remains. **Model connections** changes future projects; **Model → Change** changes an existing project after pausing it.
+
+Stop Workroom, then update from your repository directory:
 
 ```bash
 git pull --ff-only origin workroom-starter
 npm run local
 ```
 
-The saved workspace runs on port **3001** by default and uses `.data/workroom.sqlite`.
-Set `PORT` in `.env` to choose another port. For a separate test drive, `npm run demo`
-uses port **3000**, `.data/demo.sqlite`, and starts in Demo mode.
+Saved records normally live in ignored `.data/workroom.sqlite`; if only the older `.data/demo.sqlite` exists, the launcher opens it automatically to retain access to that work. When both exist, use backup/import or an explicit DATABASE_PATH. Managed project files live in `.data/projects/`. Portable backups include records and usage, not the actual source folders or console history. Back these up separately. See [the local setup/migration guide](docs/LOCAL-SETUP.md).
 
-On Windows, use the same commands in PowerShell or Command Prompt. If PowerShell
-blocks npm scripts, use `npm.cmd run local`. See the [local setup and migration
-guide](docs/LOCAL-SETUP.md) to bring your Codespaces projects home using a portable backup.
+## Codespaces
 
-## Update an existing copy
+Create a Codespace on `workroom-starter`. The container builds the app and opens the real workspace on forwarded port **3001**. It does not automatically install model weights in the cloud; configure a usable model connection and check readiness. A browser in Codespaces cannot directly use an Ollama service on your laptop's localhost. To run local models on your own hardware, clone this repository and use `npm run local` there.
 
-On your computer, stop the app with **Ctrl+C**, then run:
+Use `npm run codespace:restart` after pulling an update. Codespaces compute is billed according to your GitHub account; stop it when finished.
 
-```bash
-git pull --ff-only origin workroom-starter
-npm run local
-```
+## External workers
 
-In an existing Codespace, run these in its terminal instead:
+Set a strong shared `RUNNER_TOKEN` on the server and worker, choose **External workers**, and run:
 
 ```bash
-git pull --ff-only origin workroom-starter
-npm run codespace:restart
+npm run worker
 ```
 
-Refresh the app's browser tab after restarting. Saved projects and documents stay
-in the database. Create a new project, choose a team and workflow, then use **Edit plan** to customize its assignments; existing projects keep their original tasks and results.
+The example worker calls real local Ollama by default. Set `WORKER_PROVIDER=openai` explicitly for its API adapter. Missing models/keys fail the assignment; no sample success is returned. The authenticated runner API leases work, accepts heartbeats/events, and validates completion against the lease. Custom frameworks need a bridge to that protocol; they are not preinstalled integrations. External costs and tools are managed separately. See [AI connections](docs/AI-CONNECTIONS.md).
 
-## Development
+## Development and verification
 
-For hot reloading, use `npm ci` followed by `npm run dev`. Vite serves port **5173**
-and proxies `/api` to the Node runtime on port **3001**.
+```bash
+npm ci
+npm run dev
+```
 
-For one process serving the built interface and API on port **3001**:
+Vite serves port 5173 and proxies the server on 3001. `npm run local:prepare` builds without installing Ollama or downloading weights. `npm start` starts an already built server; manage the model separately or run `npm run setup:local` first.
 
 ```bash
 npm run build
-npm start
+npm test
+npm exec -- playwright test
 ```
 
-Cloud tasks should use the existing checkout; tasks are already isolated, so a Git
-worktree is unnecessary. If npm’s default cache is unwritable, use
-`npm ci --cache /workspace/.npm-cache`.
+Browser/model fixtures are deterministic tests of behavior, not evidence of live model quality. Native sandbox support depends on the host. Ubuntu/Windows CI is configured; platform-specific installation still needs evaluation on actual machines.
 
-## Included
+## Project scope
 
-- Slate, walnut, and brass interface with readable text and an interactive Three.js office.
-  Agents walk around furniture, visit the planning wall, meeting area, coffee counter,
-  and printer, and meet for runtime handoffs. Orbit, zoom, floor-plan, and a separate
-  movement pause control are included. Reduced motion starts with movement paused.
-- Four teammates with editable names, roles, perspectives, and assigned desks.
-  Selecting an occupied desk swaps seats.
-- Project creation and switching, task decomposition, dependency scheduling,
-  pause/resume, failure reporting, and retry.
-- Live task states and handoffs via server-sent events; the office visualizes their activity.
-- Human approval gates, revision requests, and optional browser notifications.
-- Saved team discussions: specialist proposals, adversarial critique and chair decisions, optional kickoff/milestone meetings, usage receipts and retry of remaining contributions.
-- Purposeful office movement: focused desk work, reviews, handoffs and a meeting room tied to real meeting state.
-- Ten specialist presets, selectable Codex reasoning, venture validation and optional read-only Codex web research.
-- Autosaved browser drafts for review feedback, retry directions, memory, agendas and plan edits.
-- Project-specific team presets for office coordination, research, software delivery and custom work; editable plans with flexible task counts, owners, dependencies and approval gates. Legacy office packs and their exports remain supported.
-- Codex software assignments edit, review and test actual files in a shared managed project folder, with tool activity, blocked results, a source browser and ZIP downloads. Coding readiness is checked locally before execution.
-- Briefs are saved before AI planning, unfinished form drafts survive reloads, and failed plans offer retry or template fallback.
-- Editable Word (`.docx`) documents, Excel (`.xlsx`) workbooks with separate table sheets
-  and calculated budget totals, Markdown, and Print / PDF exports. Individual and combined
-  downloads preserve draft/review status. Excel notes retain the narrative context.
-- SQLite persistence in ignored `.data/workroom.sqlite`. On restart, interrupted
-  requests without confirmed receipts become uncertain and pause for review. Completed work is retained.
-- Demo, ChatGPT-authenticated Codex, Ollama, OpenAI-compatible servers, OpenAI, Gemini,
-  and authenticated external-worker adapters. Existing projects retain their connection/model.
-- Workspace controls: paid APIs disabled by default, editable economy limits, request receipts,
-  estimated API reservations/budgets, uncertain-request acknowledgment, and project-scoped caching.
-- Verified project memory with document provenance and stale-source detection.
-- Validated portable backup/restore, automatic recovery snapshots, and migration between computers.
-- Responsive navigation, accessible dialogs, reduced-motion support, and a clickable
-  2D fallback when WebGL is unavailable. Fonts and scene assets are bundled locally.
+Workroom is a trusted local, single-user application. Classroom/multi-user use needs a separate design for privacy, permissions, supervision and model controls. The present work focuses on a clear project flow and useful model-backed output.
 
-**Demo mode is a simulation:** no AI or tools run. Normal new workspaces start empty. Editable templates create no model request; optional AI planning does. Office/research/venture/custom model assignments generate text by default, with optional built-in Codex web research. **Software delivery uses Codex file and command tools**, and other Codex teams can explicitly enable them too, after the local sandbox readiness check passes. See the [easy guide](docs/EASY-GUIDE.md) for a first run, task retries, managed files and limitations.
-
-## Connect a model
-
-See the [AI connection guide](docs/AI-CONNECTIONS.md) for a plain-language comparison,
-step-by-step provider setup, built-in Codex coding tools, and custom worker options.
-
-Copy `.env.example` to `.env` (ignored by Git), configure the connection and restart.
-Select the default for new projects in Runtime settings. To switch an existing
-project, pause it and explicitly choose its connection in Workspace controls.
-
-| Connection        | What you supply                                                                   |
-| ----------------- | --------------------------------------------------------------------------------- |
-| Codex             | ChatGPT sign-in through the bundled Codex CLI; enabled account and exact model ID |
-| Ollama            | Running local service and installed model tag                                     |
-| OpenAI-compatible | Local/HTTPS server URL and exact model ID; authentication if needed               |
-| OpenAI / Gemini   | Server API key, compatible model, API quota, explicit paid permission and prices  |
-| External workers  | Strong runner token and your separately running worker                            |
-
-One model can serve all agent roles and bounded goals. For about 16 GB RAM with
-integrated graphics, first evaluate a quantized 3–4B instruct model with a single
-active task. Model weights are not bundled or automatically downloaded. A ChatGPT
-subscription can supply Codex allowance when the account includes access; it does
-not supply paid API credits. There is no automatic paid API fallback.
-
-Economy defaults: one active task, 30 tasks/project, one revision/task, 30 requests
-per rolling day. Paid API estimates default to $2/day and $1/project, with paid
-requests disabled until explicitly enabled and exact-model prices supplied.
-Application estimates do not cap unrelated account spending or external workers.
-
-The [connection guide](docs/AI-CONNECTIONS.md) covers actual commands, metadata checks,
-quota limitations, local hardware, memory, and custom worker frameworks. Briefs and
-relevant documents go to the chosen model; credential values stay on the server.
-With restricted cloud egress, allow your provider's endpoints. Some platforms reserve
-`OPENAI_*` variables and require their supported secret-binding mechanism.
-
-## Embody independently running agents
-
-Your agents can run outside the browser, on this machine or elsewhere. Workroom
-provides an authenticated task-leasing protocol to connect an agent framework,
-background process, or hosted service to its studio character.
-
-1. Generate a strong token locally with `openssl rand -hex 32`, save it as
-   `RUNNER_TOKEN` in the server’s `.env`, and restart the runtime.
-2. Select **External workers**, then run a project.
-3. In another terminal, configure the same token and run:
-
-   ```bash
-   npm run worker
-   ```
-
-The example reads `.env`. Without an OpenAI key it returns labeled sample documents;
-with a key it requests model-generated documents. Replace `perform()` in
-`examples/external-worker.mjs` with your agent framework or tool runner. The example
-does not execute generated code.
-
-Optional worker variables: `WORKSPACE_URL` (defaults to the local runtime), `AGENT_ID`
-(`mira`, `sol`, `atlas`, or `echo`), `OPENAI_API_KEY`, and `OPENAI_MODEL`. Start separate
-workers with distinct agent IDs to embody independently hosted agents.
-
-All runner requests use `Authorization: Bearer <RUNNER_TOKEN>` and JSON:
-
-| Endpoint                              | Body                                             | Result                                                                  |
-| ------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------- |
-| `POST /api/runner/claim`              | `{}` or `{ "agentId": "atlas" }`                 | Assignment with task, agent, project, context, and `leaseId`, or `null` |
-| `POST /api/runner/tasks/:id/events`   | `{ "leaseId": "…", "message": "Working…" }`      | Activity event and lease renewal; omit message for a heartbeat          |
-| `POST /api/runner/tasks/:id/complete` | `{ "leaseId": "…", "output": "# Deliverable…" }` | Saved output and review or completion                                   |
-| `POST /api/runner/tasks/:id/fail`     | `{ "leaseId": "…", "error": "…" }`               | Visible failure; project pauses for retry                               |
-
-Leases last **120 seconds**. Send a heartbeat every 30 seconds during long work.
-Expired tasks stop for review of uncertain usage before explicit retry; stale
-completions are rejected, and pausing invalidates worker leases. This is not exactly-once execution: external
-workers must handle idempotency and approvals for their own side effects.
-
-Use TLS for remote workers. `HOST=127.0.0.1` is the default; `HOST=0.0.0.0` exposes
-other interfaces. This is a **single-user app for a trusted machine**. Add dashboard
-authentication and authorization before exposing it publicly. The runner token
-protects the runner API, not the entire dashboard.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  UI[React + Three.js studio] <-->|HTTP + live SSE| Runtime[Node scheduler]
-  Runtime --> DB[(SQLite)]
-  Runtime --> Planner[Validated task planner]
-  Runtime --> Models[Demo / Codex / Local models / APIs]
-  Workers[Your external agents] <-->|Authenticated leases| Runtime
-  Runtime --> Review[Human review gate]
-  Review --> Runtime
-```
-
-- `src/`: interface, office scene, dialogs, and live state subscription.
-- `server/engine.ts`: scheduling, handoffs, approvals, and worker leases.
-- `server/providers.ts`: model adapters, plan validation, and demo templates.
-- `server/store.ts`: durable SQLite state and interrupted-task recovery.
-- `shared/types.ts`: visualization/runtime contract.
-- `examples/external-worker.mjs`: independently running agent example.
-
-The runtime is a single process with a small persistent queue. Accounts, multi-user
-tenancy, distributed locking and general tool-worker isolation remain future work.
-Built-in document generation has bounded scheduling and application usage estimates.
-
-## Checks
-
-```bash
-npm test                 # scheduling, reviews, leases, persistence, adapter contracts
-npm run build            # strict TypeScript check and production build
-npx playwright install chromium
-npm run test:e2e         # full browser workflow and authenticated runner API
-```
-
-If system Chromium is already installed, skip the browser download and use:
-
-```bash
-CHROMIUM_PATH=/usr/bin/chromium npm run test:e2e
-```
-
-Document tests inspect the actual Word/Excel file contents and budget formulas.
-Office tests exercise furniture clearance, character separation, continued movement,
-physical handoff meetings, and desk reassignment.
-
-Browser tests start an isolated server on port 3107 with a temporary database. They
-exercise revision and approval, output downloads, reload persistence, desk swaps,
-mobile navigation, and runner authentication. Adapter unit tests mock HTTP; live
-OpenAI/Gemini access requires your credentials and is not verified by those tests.
-
-## Contributing and license
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under [MIT](LICENSE).
-
-Managed source folders live beside the database under `.data/projects/` by default. Workspace JSON backups contain records and reports, **not source files**; copy managed folders separately or use Outputs → Download source ZIP. The coding worker is bounded to project files plus read access for system tooling; tool network starts disabled and can be enabled per project for dependency downloads. Native execution must pass the local readiness check. Development verified native configuration and mocked worker contracts; the cloud host cannot start the native coding sandbox because of its reserved socket-directory permissions. No live account generation or unrestricted fallback was used.
-
-### Evidence-based team work
-
-Each project has a visible **Model → Change** control for its connection and exact model ID. Direct model tasks report deliverables, acceptance evidence, assumptions, concrete human decisions and bounded internal follow-ups. Large handoffs use budgeted source excerpts and targeted retrieval rather than failing on accumulated prose. Any Codex team can explicitly enable managed file/command tools; sandbox and cost controls still apply. Project instruction improvements are reviewable and versioned. See the [easy guide](docs/EASY-GUIDE.md#useful-work-evidence-and-recovery) for usage and limits. Model-reported checks are not proof of correctness; actual receipts and independent review matter.
-
-Use **Live console** to inspect prepared Workroom requests, public model replies, command output and work events. Filter by agent/task, follow incoming events, and export visible logs. Viewing adds no model calls and exposes no private reasoning. See [watch the agents work](docs/EASY-GUIDE.md#watch-the-agents-work) for history and provider limits.
+MIT license for the application. Model weights and third-party services retain their own licenses and terms.

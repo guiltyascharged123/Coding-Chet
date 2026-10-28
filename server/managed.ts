@@ -10,6 +10,7 @@ import type { Task, ReasoningEffort } from '../shared/types.js';
 import { WORK_RESULT_JSON_SCHEMA, workResultSchema } from '../shared/work.js';
 import type { ConsoleEvent } from '../shared/console.js';
 import { nativeConsole } from './console.js';
+import { DEFAULT_LOCAL_MODEL } from '../shared/defaults.js';
 
 export const managedInfo = {
   codexReady: false,
@@ -124,14 +125,14 @@ export async function refreshManagedInfo(checkApis = false) {
     const url = serviceUrl(process.env.OLLAMA_URL || 'http://127.0.0.1:11434', true);
     const response = await fetch(new URL('/api/tags', url), { signal: AbortSignal.timeout(2500) });
     const data = (await response.json()) as { models?: { name: string; model?: string }[] };
-    const chosen = process.env.OLLAMA_MODEL;
+    const chosen = process.env.OLLAMA_MODEL || DEFAULT_LOCAL_MODEL;
     managedInfo.ollamaReady =
       !!chosen &&
       response.ok &&
       !!data.models?.some((m) => m.name === chosen || m.model === chosen);
     managedInfo.ollamaMessage = managedInfo.ollamaReady
       ? 'Local service and selected model detected. No model was downloaded or run.'
-      : 'Ollama is reachable; set OLLAMA_MODEL to an installed model name.';
+      : `Selected local model is not installed: ${chosen}. Run npm run setup:local, then check connections.`;
   } catch {
     managedInfo.ollamaReady = false;
     managedInfo.ollamaMessage =
@@ -203,6 +204,7 @@ export async function localGenerate(
   maxTokens: number,
   signal?: AbortSignal,
   json = false,
+  outputSchema?: Record<string, unknown>,
 ): Promise<Generated> {
   const url = serviceUrl(process.env.OLLAMA_URL || 'http://127.0.0.1:11434', true);
   const response = await fetch(new URL('/api/chat', url), {
@@ -214,8 +216,9 @@ export async function localGenerate(
     body: JSON.stringify({
       model,
       stream: false,
+      think: false,
       keep_alive: '2m',
-      ...(json ? { format: 'json' } : {}),
+      ...(json ? { format: outputSchema || 'json' } : {}),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

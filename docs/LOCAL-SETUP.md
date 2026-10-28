@@ -1,11 +1,13 @@
 # Run your saved office on Ubuntu or Windows
 
+> **Local-first update:** Start with [the current local model/provider guide](LOCAL-MODELS.md). `npm run local` now sets up Ollama and the selected default model when needed; normal startup cannot run simulated work. Existing providers/projects are retained. New AI plans use the model; manual recovery starts empty. See that guide for current provider setup.
+
 For a guided first project and ChatGPT/Codex sign-in, start with the
 [easy guide](EASY-GUIDE.md). This page covers installation and migration in more detail.
 
 The same browser app runs on both systems. Node.js runs the local server; SQLite
 saves work on disk. A Python/desktop rewrite is unnecessary. Internet is needed
-for installation and hosted models. After preparation, Demo/local inference runs
+for installation and hosted models. After preparation, local inference runs
 on your computer without Codespaces.
 
 ## First start
@@ -34,21 +36,13 @@ on your computer without Codespaces.
 If PowerShell blocks `npm.ps1`, use `npm.cmd run local` or Command Prompt; no
 execution-policy change is necessary. A downloaded GitHub branch ZIP also works.
 
-## Ports, modes and saved data
+## Ports and saved data
 
-| Command         | Default port | Database                | Runtime at startup           |
-| --------------- | ------------ | ----------------------- | ---------------------------- |
-| `npm run local` | 3001         | `.data/workroom.sqlite` | Retains a configured default |
-| `npm run demo`  | 3000         | `.data/demo.sqlite`     | Demo                         |
+`npm run local` opens port **3001** and `.data/workroom.sqlite` by default. `PORT` and `DATABASE_PATH` in `.env` select alternatives. The first local start configures Ollama and downloads the chosen missing model; existing provider choices and `.env` are retained. No model connection failure causes a simulation fallback.
 
-Both modes can explicitly connect models after startup. Their workspaces are
-separate. New installs start with Demo; Run team in Demo creates labeled samples,
-without model calls. See [AI connections](AI-CONNECTIONS.md) for actual models.
+The old `npm run demo` command is now a compatibility alias for the real workspace. If only the older `.data/demo.sqlite` exists, its records open automatically in real-model mode. If both databases exist, the current workspace takes precedence; import the older backup or deliberately set `DATABASE_PATH=.data/demo.sqlite` to open it. Legacy simulation projects need a real project connection before execution.
 
-Copy `.env.example` to `.env` in your editor. Set `PORT` to your preferred free
-port for local mode; `WORKROOM_DEMO_PORT` sets demo mode. Stop/restart after changes.
-Use the printed address and keep the server running. In Codespaces forward the
-actual printed port. There is no requirement to use 3000 or 3001.
+Use the address printed by the server. Codespaces now forwards **3001** by default and skips automatic cloud model installation; configure an available connection there. It cannot reach a laptop's Ollama through its own localhost.
 
 ## Bring existing work home from Codespaces
 

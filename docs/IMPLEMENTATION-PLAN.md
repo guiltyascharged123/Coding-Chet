@@ -1,5 +1,11 @@
 # Local, controlled agent office
 
+## Current interface and local-model pass
+
+The user's October 28 direction supersedes earlier requirements to expose Demo in normal use. The feature contract and audit are in [UI-FUNCTIONALITY.md](UI-FUNCTIONALITY.md). Preserve saved records and existing integrations while centering the UI on connection, brief, model plan, real execution, evidence, recovery and useful results. Normal startup must not simulate successful work or silently substitute a provider.
+
+Use Ollama with `huihui_ai/qwen3.5-abliterated:4B` for a new local workspace. Install/start/download on first local use, reuse installed weights, preserve `.env` and existing provider choices, and provide explicit failures plus setup instructions. Keep a no-download preparation path for CI/Codespaces. Local setup fixture tests establish behavior; a live model download and useful task still require evaluation on the user's machine. Classroom-specific work is deferred.
+
 Approved baseline: `594211e9fda3a8bdd9903ed4c3a65440316c65d2`.
 
 Preserve the slate office, walking and interactions, readable labels, role/desk editing,

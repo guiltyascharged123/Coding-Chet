@@ -16,14 +16,15 @@ import { setTimeout as delay } from 'node:timers/promises';
 const root = fileURLToPath(new URL('../', import.meta.url));
 process.chdir(root);
 mkdirSync('.data', { recursive: true });
-const port = process.env.WORKROOM_DEMO_PORT || '3000';
+if (existsSync('.env')) process.loadEnvFile('.env');
+const port = process.env.PORT || '3001';
 const workspaceId = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 16);
 async function health() {
   try {
     const result = await (
       await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(800) })
     ).json();
-    return result.ok && result.mode === 'demo' && result.workspaceId === workspaceId;
+    return result.ok && result.mode === 'workspace' && result.workspaceId === workspaceId;
   } catch {
     return false;
   }
@@ -32,7 +33,8 @@ if (process.argv.includes('--restart')) {
   const pidFile = `.data/codespace-${port}.pid`;
   if (existsSync(pidFile)) {
     const pid = Number(readFileSync(pidFile, 'utf8').trim());
-    if (!Number.isInteger(pid) || pid < 2) throw new Error('The saved demo process ID is invalid.');
+    if (!Number.isInteger(pid) || pid < 2)
+      throw new Error('The saved Workroom process ID is invalid.');
     try {
       const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
       const absoluteLauncher = resolve(root, 'scripts/launch.mjs');
@@ -42,7 +44,7 @@ if (process.argv.includes('--restart')) {
           resolve(readlinkSync(`/proc/${pid}/cwd`)) === resolve(root));
       if (!belongsHere)
         throw new Error(
-          'The saved process is not this workspace’s demo launcher. Stop the demo in its terminal and try again.',
+          'The saved process is not this workspace’s workspace launcher. Stop Workroom in its terminal and try again.',
         );
       process.kill(pid, 'SIGTERM');
       for (let attempt = 0; attempt < 40 && (await health()); attempt++) await delay(250);
@@ -52,7 +54,7 @@ if (process.argv.includes('--restart')) {
   }
   if (await health())
     throw new Error(
-      'The demo is still running outside this helper. Stop it with Ctrl+C in its terminal, then run npm run demo.',
+      'Workroom is still running outside this helper. Stop it with Ctrl+C in its terminal, then run npm run local.',
     );
 }
 if (await health()) {
@@ -60,11 +62,15 @@ if (await health()) {
   process.exit(0);
 }
 const log = openSync('.data/codespace.log', 'a');
-const child = spawn(process.execPath, [resolve(root, 'scripts/launch.mjs')], {
+const child = spawn(process.execPath, [resolve(root, 'scripts/launch.mjs'), '--workspace'], {
   cwd: root,
   detached: true,
   stdio: ['ignore', log, log],
-  env: { ...process.env, WORKROOM_NO_OPEN: '1' },
+  env: {
+    ...process.env,
+    WORKROOM_NO_OPEN: '1',
+    WORKROOM_LOCAL_SETUP: process.env.WORKROOM_CLOUD_LOCAL_SETUP || '0',
+  },
 });
 child.on('error', (error) => {
   console.error(error.message);
@@ -87,12 +93,12 @@ for (let attempt = 0; attempt < 120 && !stopped; attempt++) {
 }
 if (ready)
   console.log(
-    `Workroom is ready. Open the forwarded Workroom demo port (${port}), then click Run team.`,
+    `Workroom is ready. Open the forwarded Workroom port (${port}), then click Run team.`,
   );
 else {
   console.error(readFileSync('.data/codespace.log', 'utf8').split('\n').slice(-25).join('\n'));
   console.error(
-    'Workroom did not become ready. Run npm run demo in the terminal to see the error.',
+    'Workroom did not become ready. Run npm run local in the terminal to see the error.',
   );
   process.exitCode = 1;
 }

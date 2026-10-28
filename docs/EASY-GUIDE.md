@@ -1,67 +1,26 @@
 # Workroom: easy start guide
 
-Use this guide to run Workroom, try a project, and optionally connect your ChatGPT
-account through Codex. Start with Demo if you just want to look around.
-
-Already running? Jump to [Connect ChatGPT/Codex](#4-connect-your-chatgpt-account-through-codex)
-or [Account access and costs](#5-understand-account-access-and-costs).
-
 ## 1. Understand what you have
 
-You have the **full current open-source version**, which is still an early
-prototype. Demo is a connection setting inside the app, not a separate edition.
+Workroom is an early open-source agent workspace. Each role sends assignments to the project's selected model, with its brief, saved work and instructions. The 3D office visualizes real task and meeting state. An idle or moving avatar does not by itself mean inference is happening.
 
-- **Demo runtime:** scripted tasks and labeled template documents; no AI model calls.
-- **Office/research/custom teams with a model:** real work from each role, using its assignment, the brief, handoffs and verified memory. These connections generate text.
-- **Software delivery with Codex:** real file editing, shell commands, code review and testing in a shared managed project folder. Check **Model connections → Coding tools** for readiness.
-
-The walking characters visualize activity. Their movement does not itself perform work. Each role is a separate assignment to the selected model, with a shared project and distinct responsibilities. There are four desks; team presets change those roles. This is a bounded task workflow, not an indefinitely self-starting agent.
+The default is a local Ollama model: **huihui_ai/qwen3.5-abliterated:4B**. Local text agents can plan, analyze and draft from supplied evidence. Codex can additionally edit files and execute commands after its sandbox readiness check. Normal workspaces cannot run simulated assignments or silently fall back to Demo.
 
 ## 2. Start Workroom on your computer
 
-Install **Node.js 24 or newer** from [nodejs.org](https://nodejs.org) if needed.
-Reopen your terminal after installing it. Check with:
-
-```bash
-node --version
-```
-
-If you already have Workroom, open a terminal in your **Coding-Chet project folder**
-and run:
+Install Node.js 24 LTS, open a terminal in Coding-Chet, and run:
 
 ```bash
 npm run local
 ```
 
-The first start installs dependencies and builds the app automatically. It opens
-your browser or prints the address to open. Keep that terminal running while you
-use Workroom. Press **Ctrl+C** in it to stop the app. Next time, use the same command.
+First startup installs app dependencies, builds the browser interface, creates `.env` if missing, installs/starts Ollama if needed, and downloads the selected model. The OS installer may ask for normal administrator permission; the model download needs internet and several GB of disk. Existing settings and saved provider choices are preserved. See [local model setup](LOCAL-MODELS.md) for installation problems, exact tags and alternative providers.
 
-If you need a fresh copy, install Git and run:
+Open the printed URL, normally **http://127.0.0.1:3001**. Keep the terminal open; Ctrl+C stops Workroom. Ollama may continue running in the background. Windows uses the same command; if PowerShell blocks npm scripts, use `npm.cmd run local`.
 
-```bash
-git clone --branch workroom-starter https://github.com/guiltyascharged123/Coding-Chet.git
-cd Coding-Chet
-npm run local
-```
+Your data is in `.data/workroom.sqlite`, unless `DATABASE_PATH` selects another database. If only the older `.data/demo.sqlite` exists, its saved records open automatically. If both databases exist, import the older backup or select its DATABASE_PATH deliberately. The old demo command now opens the real workspace. Existing simulation records remain readable but require a real project connection before execution.
 
-**Windows:** use the same commands in PowerShell or Command Prompt. If PowerShell
-blocks `npm.ps1`, use `npm.cmd run local`. Likewise, use `npx.cmd` instead of `npx`
-for the Codex commands below if PowerShell blocks that script.
-
-| Command         | Default port | Where work is saved     |
-| --------------- | ------------ | ----------------------- |
-| `npm run local` | 3001         | `.data/workroom.sqlite` |
-| `npm run demo`  | 3000         | `.data/demo.sqlite`     |
-
-Both commands launch the same app, with **separate saved workspaces**. New installs
-start with an empty workspace and Demo selected. The demo launcher includes an explicit sample project and selects Demo again on every restart; the local
-launcher retains a configured default connection. You can choose a real connection
-in either workspace. Always use the actual address printed in your terminal.
-
-To change ports, edit `PORT` in `.env` for local mode or `WORKROOM_DEMO_PORT` for
-the demo launcher, then restart. For moving projects between these workspaces or
-from Codespaces, see [backup and migration](LOCAL-SETUP.md#bring-existing-work-home-from-codespaces).
+Already running? [Connect a model](LOCAL-MODELS.md), [connect ChatGPT/Codex](#4-connect-your-chatgpt-account-through-codex), or [review account access and costs](#5-understand-account-access-and-costs).
 
 ## 3. Try your first project
 
@@ -71,13 +30,13 @@ from Codespaces, see [backup and migration](LOCAL-SETUP.md#bring-existing-work-h
    > Identify missing quotes and approvals. Do not invent confirmed dates,
    > purchases, or completed work.
 
-2. Choose **Office & project coordination**. With a real connection, **AI plan tailored to the brief** is selected by default and uses one model request. Choose **Editable task template** for a no-model starter plan instead.
+2. Choose **Office & project coordination**. With a real connection, **AI plan tailored to the brief** is selected by default and uses one model request. Choose **Write my own tasks** for an empty manual plan instead.
 3. Click **Create project**, then **Edit plan**. Adjust assignments and acceptance criteria, choose owners, add/remove tasks, and set dependencies and human approval gates. There is no fixed number of steps. The default task ceiling is 30, adjustable under Workspace controls; older custom limits are retained.
-4. Click **Model: … · Change** under the project brief. Select its connection and exact **Project model ID**, then **Set project connection**. Pause first when changing an active project. Click **Run team**. Demo is visibly labeled and only previews assignments; it does not do real work.
+4. Click **Model: … · Change** under the project brief. Select its connection and exact **Project model ID**, then **Set project connection**. Pause first when changing an active project. Click **Run team**. If a model is unavailable, setup must be completed before work can run.
 5. Let routine planning, internal checks and specialist follow-ups proceed. When **Review work** appears for a model decision, read its specific question, why your answer is necessary, and the options. Choose or add direction. The agent resumes the unfinished task with your answer. Explicit approval gates you put in the plan still pause for review.
 6. Open **Outputs** to inspect results and download useful reports as Word, Excel, Markdown, or Print / PDF. The team should create only material serving your goal, not a standard pile of unnecessary documents.
 
-**Your writing is saved.** Unsubmitted briefs are retained in this browser when you close the dialog or reload. Once created, the project and original brief are saved on the server before AI planning begins. Expand **Saved project brief** to read or download it. AI planning runs in the background; a failure shows **Retry planning**, **Use editable template**, and **Review usage**. If usage is uncertain, review and acknowledge its receipt before another model attempt. No automatic paid fallback occurs. A same-submission retry does not create a duplicate project.
+**Your writing is saved.** Unsubmitted briefs are retained in this browser when you close the dialog or reload. Once created, the project and original brief are saved on the server before AI planning begins. Expand **Saved project brief** to read or download it. AI planning runs in the background; a failure shows **Retry planning**, **Create tasks manually**, and **Review usage**. If usage is uncertain, review and acknowledge its receipt before another model attempt. No automatic paid fallback occurs. A same-submission retry does not create a duplicate project.
 
 For a failed task, click **See task** or its task-board card, read its report and actual tool activity, add direction if useful, then **Retry task**. A blocked software task retains its report and files. A retry resumes from those files; cancellation does not undo changes. Add follow-up tasks with **Edit plan**, even after a project finishes.
 
@@ -91,7 +50,7 @@ Old demo projects and six-document packs remain available with their original ou
 
 ### Useful work, evidence and recovery
 
-Text responses and native Codex workers now return a checked work record: a plain-language result, the actual deliverable, acceptance checks with evidence, known facts, assumptions and a concrete next step. Open a task to see **Reported result**, outstanding checks and **Context used**. A schema check cannot certify that a model is right: read the evidence, independent reviews and actual tool receipts. **Plan finished** means the planned tasks finished, not that customers paid, a product deployed, or a real-world goal was achieved.
+Text responses and native Codex workers now return a checked work record: a plain-language result, the actual deliverable, acceptance checks with evidence, known facts, assumptions and a concrete next step. Open a task to see **Reported result**, outstanding checks and **Context used**. A schema check cannot certify that a model is right: read the evidence, independent reviews and actual tool receipts. **View results** becomes available when the planned tasks finished, not that customers paid, a product deployed, or a real-world goal was achieved.
 
 Agents can request up to three focused internal specialist assignments before resuming their original task. These use the same project/model, permissions and cost controls; the parent waits for their results. Internal coordination rounds use the per-task revision limit (default one), and added assignments respect the project task ceiling. Failed checks or missing capabilities are saved as blockers rather than silently accepted as completed work.
 
@@ -206,13 +165,12 @@ WORKROOM_CODEX_MODEL=REPLACE_WITH_YOUR_MODEL_ID
 In Nano, save with **Ctrl+O**, press **Enter**, and exit with **Ctrl+X**. On Windows,
 you can edit `.env` with your usual text editor; make sure it is not named `.env.txt`.
 
-Restart the workspace you were using (`npm run local` normally). If you were using
-`npm run demo`, use that command again to keep the same saved workspace.
+Restart with `npm run local`. If work lives in an older separate `.data/demo.sqlite`, import its backup or explicitly select that DATABASE_PATH.
 
 In Workroom:
 
 1. Open **Runtime settings** by clicking the runtime card near the bottom of the
-   sidebar; initially it says **Demo runtime**.
+   sidebar; it shows the selected default provider.
 2. Click **Check connections**, then select **Codex · ChatGPT sign-in**.
 3. Create a **new project** and follow the first-project steps above.
 
@@ -260,8 +218,7 @@ From the project folder, run:
 npx --no-install codex logout
 ```
 
-This signs the local Codex CLI out too. Restart Workroom and select Demo for any
-project you want to keep testing. Projects retain their chosen connection until
+This signs the local Codex CLI out too. Restart Workroom and select a configured Ollama model for local work. Projects retain their chosen connection until
 you explicitly change it.
 
 ## 6. Update and troubleshoot
@@ -273,8 +230,7 @@ git pull --ff-only origin workroom-starter
 npm run local
 ```
 
-Use `npm run demo` instead if that is where your saved work lives. Refresh the
-browser after restarting. For an existing Codespace's background demo, use
+For a legacy separate database, set DATABASE_PATH explicitly or import a backup. Refresh the browser after restarting. For a Codespace's background workspace, use
 `npm run codespace:restart` after the pull instead of starting a second server.
 
 | What you see                                    | What to check                                                                                                                                                                               |
@@ -282,7 +238,7 @@ browser after restarting. For an existing Codespace's background demo, use
 | Page will not load or Codespaces returns 502    | Keep the server running and use its printed port. In Codespaces, forward that actual port.                                                                                                  |
 | `Missing script: local`                         | Check that you are in the Coding-Chet folder and have the current `workroom-starter` source.                                                                                                |
 | `Unexpected token {` at the launcher's `import` | This terminal may be using old Node.js. Check `node --version`; Workroom requires 24+. If you use nvm, run `nvm install 24`, `nvm use 24`, and `nvm alias default 24`.                      |
-| Projects seem to have disappeared               | Check whether you switched between `local` and `demo`; they use separate databases. Use backup/restore to move work.                                                                        |
+| Projects seem to have disappeared               | Check DATABASE_PATH and the active project. Earlier releases had a separate demo.sqlite; use backup/restore to move its records.                                                            |
 | Codex option is unavailable                     | Run `npx --no-install codex login status`, check the two active `.env` settings and exact model ID, restart, then check connections again.                                                  |
 | Existing project still says Demo                | Change that project's connection in Workspace controls, or create a new project after selecting Codex.                                                                                      |
 | No model activity after creating a starter plan | Click **Run team**. Creating the starter plan does not request AI generation.                                                                                                               |
@@ -295,7 +251,7 @@ worker used an approval setting the bundled CLI rejects. The corrected worker ke
 its restrictions and displays specific error codes; see
 [Codex job troubleshooting](AI-CONNECTIONS.md#troubleshoot-codex-jobs).
 
-If a request is marked uncertain, review and acknowledge it in **Workspace controls → Usage** before another model attempt. Open a failed task and choose **Retry task**; for a saved planning failure choose **Retry planning** or **Use editable template**. Older builds could fail before saving any project; updating cannot recover a brief that was never saved. Successful sign-in alone does not confirm model access or available quota.
+If a request is marked uncertain, review and acknowledge it in **Workspace controls → Usage** before another model attempt. Open a failed task and choose **Retry task**; for a saved planning failure choose **Retry planning** or **Create tasks manually**. Older builds could fail before saving any project; updating cannot recover a brief that was never saved. Successful sign-in alone does not confirm model access or available quota.
 
 For local models, API providers, or external workers, see the
 [AI connection reference](AI-CONNECTIONS.md). For installation, backups, and moving

@@ -8,15 +8,23 @@ import { useSavedDraft } from '../drafts';
 
 export default function WorkspaceControls({
   data,
-  project,
+  project: selectedProject,
   onClose,
   initialTab = 'limits',
 }: {
   data: Bootstrap;
-  project: Project;
+  project?: Project;
   onClose: () => void;
   initialTab?: string;
 }) {
+  const project: Project = selectedProject || {
+    id: 'workspace',
+    title: '',
+    brief: '',
+    createdAt: 0,
+    status: 'ready',
+    provider: data.state.provider,
+  };
   const [tab, setTab] = useState(initialTab),
     [draft, setDraft] = useState<CostPolicy>(() =>
       structuredClone(data.state.policy || defaultPolicy),
@@ -89,129 +97,135 @@ export default function WorkspaceControls({
             ['memory', 'Project memory'],
             ['instructions', 'Team instructions'],
             ['backup', 'Backup & restore'],
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={tab === id}
-              onClick={() => {
-                setTab(id);
-                setMessage('');
-              }}
-            >
-              {label}
-            </button>
-          ))}
+          ]
+            .filter(([id]) => selectedProject || !['memory', 'instructions'].includes(id))
+            .map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={tab === id}
+                onClick={() => {
+                  setTab(id);
+                  setMessage('');
+                }}
+              >
+                {label}
+              </button>
+            ))}
         </div>
         {tab === 'limits' && (
           <>
-            <section className="control-section">
-              <h3>This project’s connection</h3>
-              <p>
-                Changing the default runtime affects new projects. This project keeps its selected
-                connection and model until you explicitly change it here. Pause it first.
-              </p>
-              <div className="control-row">
-                <select
-                  aria-label="Project connection"
-                  value={connection}
-                  onChange={(e) => {
-                    const provider = e.target.value as typeof connection;
-                    setConnection(provider);
-                    if (provider !== 'codex' && project.workflow !== 'software')
-                      setProjectTools(false);
-                    setModel(
-                      provider === project.provider
-                        ? project.model || ''
-                        : provider === 'demo' || provider === 'external'
-                          ? ''
-                          : data.runtime.models[provider],
-                    );
-                  }}
-                >
-                  {Object.entries(PROVIDER_LABELS).map(([id, label]) => (
-                    <option
-                      key={id}
-                      value={id}
-                      disabled={!data.runtime.available[id as typeof connection]}
-                    >
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="button secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    act(
-                      () =>
-                        api(`/projects/${project.id}/runtime`, {
-                          provider: connection,
-                          model,
-                          workMode: projectTools ? 'workspace' : 'text',
-                        }),
-                      'Project connection and model updated; saved work retained.',
-                    )
-                  }
-                >
-                  Set project connection
-                </button>
-              </div>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  aria-label="Enable managed project tools"
-                  checked={projectTools}
-                  disabled={project.workflow === 'software' || connection !== 'codex'}
-                  onChange={(e) => setProjectTools(e.target.checked)}
-                />
-                Enable managed project tools (Codex file editing and commands)
-              </label>
-              <p className="field-hint">
-                Available to any team using Codex. Files stay in this project’s managed folder; all
-                roles share it. Tool access requires the coding sandbox check to pass.
-                Dependency-download network access is a separate option in Edit plan. Text
-                connections cannot edit or test files.{' '}
-                {projectTools ? data.runtime.coding?.message : ''}
-              </p>
-              {connection !== 'demo' && connection !== 'external' && (
-                <label>
-                  Project model ID
+            {selectedProject && (
+              <section className="control-section">
+                <h3>This project’s connection</h3>
+                <p>
+                  Changing the default runtime affects new projects. This project keeps its selected
+                  connection and model until you explicitly change it here. Pause it first.
+                </p>
+                <div className="control-row">
+                  <select
+                    aria-label="Project connection"
+                    value={connection}
+                    onChange={(e) => {
+                      const provider = e.target.value as typeof connection;
+                      setConnection(provider);
+                      if (provider !== 'codex' && project.workflow !== 'software')
+                        setProjectTools(false);
+                      setModel(
+                        provider === project.provider
+                          ? project.model || ''
+                          : provider === 'demo' || provider === 'external'
+                            ? ''
+                            : data.runtime.models[provider],
+                      );
+                    }}
+                  >
+                    {Object.entries(PROVIDER_LABELS)
+                      .filter(([id]) => id !== 'demo' || connection === 'demo')
+                      .map(([id, label]) => (
+                        <option
+                          key={id}
+                          value={id}
+                          disabled={!data.runtime.available[id as typeof connection]}
+                        >
+                          {id === 'demo' ? 'Saved simulation · choose a real model' : label}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    className="button secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      act(
+                        () =>
+                          api(`/projects/${project.id}/runtime`, {
+                            provider: connection,
+                            model,
+                            workMode: projectTools ? 'workspace' : 'text',
+                          }),
+                        'Project connection and model updated; saved work retained.',
+                      )
+                    }
+                  >
+                    Set project connection
+                  </button>
+                </div>
+                <label className="check-row">
                   <input
-                    aria-label="Project model ID"
-                    value={model}
-                    maxLength={150}
-                    list="project-model-ids"
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder={data.runtime.models[connection]}
+                    type="checkbox"
+                    aria-label="Enable managed project tools"
+                    checked={projectTools}
+                    disabled={project.workflow === 'software' || connection !== 'codex'}
+                    onChange={(e) => setProjectTools(e.target.checked)}
                   />
-                  <datalist id="project-model-ids">
-                    {[
-                      ...new Set(
-                        [
-                          data.runtime.models[connection],
-                          ...data.state.projects
-                            .filter((p) => p.provider === connection)
-                            .map((p) => p.model),
-                        ].filter(Boolean),
-                      ),
-                    ].map((id) => (
-                      <option key={id} value={id} />
-                    ))}
-                  </datalist>
-                  <span className="field-hint">
-                    Use the exact ID available to your account or local server. For Codex, run the
-                    bundled Codex CLI and use /model to see your choices. Saving does not make a
-                    generation request or verify access. Paid API pricing must match this ID.
-                  </span>
+                  Enable managed project tools (Codex file editing and commands)
                 </label>
-              )}
-              <p>
-                Current project: {PROVIDER_LABELS[project.provider]}
-                {project.model ? ` · ${project.model}` : ''}. External workers have their own tools
-                and billing; Workroom cannot meter their internal calls.
-              </p>
-            </section>
+                <p className="field-hint">
+                  Available to any team using Codex. Files stay in this project’s managed folder;
+                  all roles share it. Tool access requires the coding sandbox check to pass.
+                  Dependency-download network access is a separate option in Edit plan. Text
+                  connections cannot edit or test files.{' '}
+                  {projectTools ? data.runtime.coding?.message : ''}
+                </p>
+                {connection !== 'demo' && connection !== 'external' && (
+                  <label>
+                    Project model ID
+                    <input
+                      aria-label="Project model ID"
+                      value={model}
+                      maxLength={150}
+                      list="project-model-ids"
+                      onChange={(e) => setModel(e.target.value)}
+                      placeholder={data.runtime.models[connection]}
+                    />
+                    <datalist id="project-model-ids">
+                      {[
+                        ...new Set(
+                          [
+                            data.runtime.models[connection],
+                            ...data.state.projects
+                              .filter((p) => p.provider === connection)
+                              .map((p) => p.model),
+                          ].filter(Boolean),
+                        ),
+                      ].map((id) => (
+                        <option key={id} value={id} />
+                      ))}
+                    </datalist>
+                    <span className="field-hint">
+                      Use the exact ID available to your account or local server. For Codex, run the
+                      bundled Codex CLI and use /model to see your choices. Saving does not make a
+                      generation request or verify access. Paid API pricing must match this ID.
+                    </span>
+                  </label>
+                )}
+                <p>
+                  Current project: {PROVIDER_LABELS[project.provider]}
+                  {project.model ? ` · ${project.model}` : ''}. External workers have their own
+                  tools and billing; Workroom cannot meter their internal calls.
+                </p>
+              </section>
+            )}
             <form
               onSubmit={(e: FormEvent) => {
                 e.preventDefault();

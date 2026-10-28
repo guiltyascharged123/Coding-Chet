@@ -1,3 +1,4 @@
+process.env.WORKROOM_DEMO = '1'; // Explicit, isolated fixture; normal startup disables simulation.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

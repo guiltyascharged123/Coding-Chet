@@ -49,10 +49,16 @@ export class Engine extends EventEmitter {
   ) {
     super();
     const configured = process.env.AGENT_PROVIDER as Provider | undefined;
-    if (configured && runtimeInfo().available[configured]) {
+    if (
+      configured &&
+      ['demo', 'ollama', 'codex', 'compatible', 'openai', 'gemini', 'external'].includes(configured)
+    ) {
       store.state.provider = configured;
     }
-    if (!runtimeInfo().available[store.state.provider]) store.state.provider = 'demo';
+    // Connection failure is a blocker, never permission to simulate work or
+    // silently switch accounts. Existing projects retain their own provider.
+    if (store.state.provider === 'demo' && process.env.WORKROOM_DEMO !== '1')
+      store.state.provider = 'ollama';
     for (const project of store.state.projects)
       if (!project.model && project.provider !== 'demo' && project.provider !== 'external')
         project.model = runtimeInfo().models[project.provider];
@@ -179,7 +185,7 @@ export class Engine extends EventEmitter {
     title: string,
     brief: string,
     documentPack: DocumentPack = 'studio',
-    planning: 'template' | 'ai' = 'template',
+    planning: 'template' | 'ai' | 'manual' = 'template',
     requestId?: string,
     workflow?: Workflow,
     collaboration?: {
@@ -231,7 +237,11 @@ export class Engine extends EventEmitter {
     this.event(project.id, 'system', 'Project and original brief saved.');
     this.commit();
     if (planning === 'ai') this.startPlanning(project);
-    else this.finishPlan(project, templatePlan(project, project.team || this.state.agents));
+    else
+      this.finishPlan(
+        project,
+        planning === 'manual' ? [] : templatePlan(project, project.team || this.state.agents),
+      );
     return project;
   }
   private finishPlan(project: Project, tasks: Task[]) {
@@ -242,7 +252,9 @@ export class Engine extends EventEmitter {
     this.event(
       project.id,
       'system',
-      `${tasks.length} tasks are ready. Edit the plan before running; tasks are not limited to six.`,
+      tasks.length
+        ? `Saved a plan with ${tasks.length} tasks. Review the assignments before running.`
+        : 'Manual plan created. Add tasks and acceptance criteria in Edit plan.',
     );
     this.commit();
   }
@@ -250,6 +262,15 @@ export class Engine extends EventEmitter {
     if (this.planners.has(project.id)) throw new AppError('Planning is already active.', 409);
     if (this.state.tasks.some((t) => t.projectId === project.id))
       throw new AppError('Edit the existing plan instead of replacing it.');
+    if (!runtimeInfo().available[project.provider]) {
+      project.planningStatus = 'failed';
+      project.planningError =
+        'The selected model connection is not ready. Open Model connections, complete setup and check connections, then retry planning. No model request was sent.';
+      project.status = 'paused';
+      this.event(project.id, 'error', project.planningError);
+      this.commit();
+      return;
+    }
     const controller = new AbortController();
     this.planners.set(project.id, controller);
     project.planningStatus = 'planning';
@@ -305,8 +326,8 @@ export class Engine extends EventEmitter {
     const project = this.project(id);
     if (this.planners.has(id) || this.state.tasks.some((t) => t.projectId === id))
       throw new AppError('Stop planning first, or edit the existing plan.');
-    project.planning = 'template';
-    this.finishPlan(project, templatePlan(project, project.team || this.state.agents));
+    project.planning = 'manual';
+    this.finishPlan(project, []);
   }
   editPlan(id: string, rows: Task[], toolNetwork?: boolean, collaboration?: unknown) {
     const project = this.project(id);
@@ -486,6 +507,8 @@ export class Engine extends EventEmitter {
     )
       throw new AppError('Pause all work before restoring a backup.');
     this.store.restore(value);
+    if (this.state.provider === 'demo' && process.env.WORKROOM_DEMO !== '1')
+      this.state.provider = 'ollama';
     this.commit();
   }
   addMemory(projectId: string, content: string, sourceTaskId?: string) {
@@ -542,6 +565,10 @@ export class Engine extends EventEmitter {
   }
   runProject(id: string) {
     const project = this.project(id);
+    if (project.provider === 'demo' && process.env.WORKROOM_DEMO !== '1')
+      throw new AppError(
+        'This is a saved simulation project. Select a real project model before running. Its previous outputs have been retained.',
+      );
     if ((this.state.meetings || []).some((m) => m.projectId === id && m.status === 'failed'))
       throw new AppError(
         'Retry or skip the failed meeting before continuing. Saved contributions are retained.',
@@ -578,7 +605,7 @@ export class Engine extends EventEmitter {
       'system',
       project.status === 'needs_input'
         ? 'Waiting for your review before continuing.'
-        : 'The team is on it. Follow their handoffs in the activity feed.',
+        : 'Project started. Eligible tasks will use the selected model connection.',
     );
     this.commit();
     this.tick();
@@ -1008,7 +1035,7 @@ export class Engine extends EventEmitter {
       this.event(
         task.projectId,
         'message',
-        `Picked up ${(this.project(task.projectId).team || this.state.agents).find((a) => a.id === previous.agentId)?.name || 'the team'}’s handoff and the shared project context.`,
+        `Dependency completed: “${previous.title}”. Its saved result is available to this assignment.`,
         task.agentId,
         previous.agentId,
       );

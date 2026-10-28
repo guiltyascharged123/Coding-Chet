@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { unzipSync, strFromU8 } from 'fflate';
 
@@ -48,9 +49,7 @@ test('a project runs through revision, human approval, outputs, and persistent r
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
-  await expect(
-    page.getByRole('heading', { name: 'Good work starts with a little space.' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Workspace', exact: true })).toBeVisible();
   await expect(page.locator('canvas')).toBeVisible();
   await expect(page.locator('.scene-agent-label')).toHaveCount(4);
   await page.getByRole('button', { name: 'Floor plan', exact: true }).click();
@@ -69,7 +68,7 @@ test('a project runs through revision, human approval, outputs, and persistent r
   await page.getByRole('button', { name: 'Review work', exact: true }).click({ timeout: 15000 });
   await expect(page.getByRole('dialog')).toContainText('Use a more playful accent color');
   await page.getByRole('button', { name: 'Approve & continue', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible({
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible({
     timeout: 15000,
   });
   await page.getByRole('button', { name: /^Outputs/ }).click();
@@ -81,7 +80,7 @@ test('a project runs through revision, human approval, outputs, and persistent r
   const word = unzipSync(await readFile((await download.path())!));
   expect(strFromU8(word['word/document.xml'])).toContain('Set the direction');
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -135,7 +134,7 @@ test('project creation, role assignment, desk swapping, and mobile navigation wo
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  await page.getByRole('button', { name: 'Demo runtime No API key needed', exact: true }).click();
+  await page.getByRole('button', { name: 'Model connections', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('External workers');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
 });
@@ -153,6 +152,7 @@ test('runner endpoints require authentication and enforce leases', async ({ requ
         title: 'Runner integration',
         brief: 'Check external worker planning and review through the authenticated runner API.',
         documentPack: 'studio',
+        planning: 'template', // Explicit legacy protocol fixture, not a normal creation default.
       },
     })
   ).json();
@@ -185,6 +185,25 @@ test('runner endpoints require authentication and enforce leases', async ({ requ
     'done',
   );
   // Exercise the actual bridge, without model credentials or paid calls.
+  const modelFixture = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const request = JSON.parse(body);
+    expect(request.model).toBe('external-worker-fixture');
+    expect(request.think).toBe(false);
+    res.setHeader('Content-Type', 'application/json');
+    res.end(
+      JSON.stringify({
+        message: {
+          content:
+            '# Worker protocol fixture\n\nCompared supplied constraints and produced a direction for review using the configured model endpoint.',
+        },
+        done_reason: 'stop',
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => modelFixture.listen(0, '127.0.0.1', resolve));
+  const workerModelPort = (modelFixture.address() as { port: number }).port;
   const worker = spawn(process.execPath, ['examples/external-worker.mjs'], {
     stdio: 'ignore',
     env: {
@@ -192,6 +211,9 @@ test('runner endpoints require authentication and enforce leases', async ({ requ
       WORKSPACE_URL: 'http://127.0.0.1:3107',
       RUNNER_TOKEN: 'browser-test-token-not-a-real-secret',
       AGENT_ID: 'sol',
+      WORKER_PROVIDER: 'ollama',
+      OLLAMA_URL: `http://127.0.0.1:${workerModelPort}`,
+      OLLAMA_MODEL: 'external-worker-fixture',
       OPENAI_API_KEY: '',
     },
   });
@@ -213,10 +235,11 @@ test('runner endpoints require authentication and enforce leases', async ({ requ
       (t: { projectId: string; status: string }) =>
         t.projectId === project.id && t.status === 'review',
     ).output;
-    expect(output).toContain('External worker connected successfully.');
-    expect(output).toContain('Sample output — no model call was made.');
+    expect(output).toContain('Worker protocol fixture');
+    expect(output).not.toContain('Sample output');
   } finally {
     worker.kill('SIGTERM');
+    modelFixture.close();
   }
 });
 
@@ -282,7 +305,7 @@ test('walking agents, readable surfaces, office documents, and native exports wo
   await page.getByRole('button', { name: 'Review work', exact: true }).click({ timeout: 15000 });
   await expect(page.getByRole('dialog')).toContainText('Milestone schedule');
   await page.getByRole('button', { name: 'Approve & continue', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible({
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible({
     timeout: 20000,
   });
   await page.getByRole('button', { name: /^Outputs/ }).click();
@@ -327,10 +350,8 @@ test('walking agents, readable surfaces, office documents, and native exports wo
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  await page.getByRole('button', { name: 'Demo runtime No API key needed', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText(
-    'You do not need to build four separate AIs',
-  );
+  await page.getByRole('button', { name: 'Model connections', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('No automatic model or paid fallback');
   await expect(page.getByRole('dialog')).toContainText('API key');
   expect(errors).toEqual([]);
 });
@@ -428,8 +449,8 @@ test('failed AI planning remains visible after reload and retries the saved proj
   expect(
     state.projects.find((p: { title: string }) => p.title === 'Recover a failed plan').brief,
   ).toBe(brief);
-  await page.getByRole('button', { name: 'Server connected', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('Coding tools');
+  await page.getByRole('button', { name: 'Model connections', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Codex coding tools');
   await page.getByRole('button', { name: 'Check connections', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('No model was run');
 });
@@ -485,12 +506,18 @@ test('an empty normal workspace welcomes the user and creates a real saved proje
   empty.state.activities = [];
   empty.state.approvals = [];
   empty.state.memory = [];
+  empty.state.provider = 'compatible';
   expect((await request.post('/api/restore', { data: empty })).ok()).toBe(true);
   try {
     await page.goto('/');
-    await expect(
-      page.getByRole('heading', { name: 'Your workspace is ready.', exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Start a project', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Import backup', exact: true }).click();
+    await expect(page.getByRole('tab', { name: 'Backup & restore', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(page.getByRole('dialog')).toContainText('Move your workspace between computers');
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     await page.getByRole('button', { name: 'New project', exact: true }).click();
     await page.getByLabel('Project name').fill('First meaningful project');
     await page
@@ -503,7 +530,7 @@ test('an empty normal workspace welcomes the user and creates a real saved proje
       page.getByRole('heading', { name: 'First meaningful project', exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: 'Edit plan · 4 tasks', exact: true }),
+      page.getByRole('button', { name: 'Edit plan · 2 tasks', exact: true }),
     ).toBeVisible();
   } finally {
     await request.post('/api/restore', { data: backup });
@@ -608,12 +635,12 @@ test('team discussions record real model-protocol contributions and guide purpos
   ).toHaveLength(5);
   expect(meeting.status).toBe('completed');
   await page.getByRole('button', { name: 'Meeting & reasoning settings', exact: true }).click();
-  await page.getByLabel('Codex reasoning effort').selectOption('high');
+  await expect(page.getByLabel('Codex reasoning effort')).toHaveCount(0);
   await page.getByLabel('Automatic team meetings', { exact: true }).check();
   await page.getByLabel('Completed tasks between meetings').fill('2');
   await page.getByRole('button', { name: 'Save plan', exact: true }).click();
   await expect(page.locator('.collaboration-panel')).toContainText('after every 2 completed tasks');
-  await expect(page.locator('.collaboration-panel')).toContainText('reasoning: high');
+  await expect(page.locator('.collaboration-panel')).not.toContainText('Codex reasoning:');
   await page.getByRole('button', { name: 'Your team', exact: true }).click();
   await page
     .locator('.team-profile')
@@ -673,7 +700,9 @@ test('project model choice, checked outputs and reviewed instruction versions ar
     state.state.projects.find((p: { id: string }) => p.id === project.id).instructionHistory,
   ).toHaveLength(1);
   await page.getByRole('button', { name: 'Run team', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'View results', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Outputs', exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Task board', exact: true }).click();
   await page.locator('.task-card').first().click();
   await expect(page.getByRole('dialog')).toContainText('Reported result');
@@ -739,7 +768,7 @@ test('a specific human choice survives closing and resumes the unfinished model 
     'Prepare a plan only. No external spending is authorized.',
   );
   await page.getByRole('button', { name: 'Approve & continue', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
   state = await (await request.get('/api/state')).json();
   expect(
     state.attempts.filter((a: { projectId: string }) => a.projectId === project.id),
@@ -792,7 +821,7 @@ test('live console shows requests before replies, retains history, filters and e
   await expect(consoleView.locator('.console-response')).toContainText('Cost comparison', {
     timeout: 15000,
   });
-  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
   await page.getByLabel('Raw replies', { exact: true }).check();
   await expect(consoleView.locator('.console-response pre')).toContainText('"outcome":"complete"');
   await page.getByLabel('Console agent', { exact: true }).selectOption('atlas');
@@ -888,9 +917,96 @@ test('agents sit at their chairs and rejected replies survive reload until a cor
   await expect(details).toHaveCount(0, { timeout: 15000 });
   await expect(page.getByRole('dialog')).toContainText('Reported result');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Plan finished', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
   state = await (await request.get('/api/state')).json();
   const attempts = state.attempts.filter((a: { projectId: string }) => a.projectId === project.id);
   expect(attempts).toHaveLength(3);
   expect(attempts.every((a: { status: string }) => a.status === 'completed')).toBe(true);
+});
+
+test('navigation has real destinations, provider setup stays accessible, and manual planning inserts no canned tasks', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'Interface audit',
+        workflow: 'custom',
+        planning: 'manual',
+        brief: 'Compare supplied costs and produce only useful evidence for the user.',
+      },
+    })
+  ).json();
+  await page.goto('/');
+  await page.evaluate((id) => {
+    localStorage.setItem('workroom-project', id);
+    localStorage.removeItem('workroom-project-draft-v1');
+  }, project.id);
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Workspace', exact: true })).toBeVisible();
+  await expect(page.locator('.studio-picker')).toHaveText('Your agent workspace');
+  await expect(page.locator('.studio-monogram')).toHaveCount(0);
+  await expect(page.getByText('Good ideas are in the making.', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.brand svg path')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Server connected', exact: true })).toHaveCount(0);
+  for (const label of [
+    'Task board',
+    'Outputs',
+    'Your team',
+    'Team discussions',
+    'Activity',
+    'Live console',
+  ]) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await expect(page.getByRole('heading', { name: label, exact: true }).first()).toBeVisible();
+  }
+  await page.getByRole('link', { name: 'Workroom · Workspace', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Workspace', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Model connections', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(
+    dialog.getByRole('heading', { name: 'Model connections', exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByRole('link', { name: 'Setup guide ↗', exact: true })).toHaveCount(6);
+  const guides = await dialog
+    .getByRole('link', { name: 'Setup guide ↗', exact: true })
+    .evaluateAll((links) => links.map((link) => link.getAttribute('href')));
+  expect(
+    guides.every((href) =>
+      /LOCAL-MODELS.md#(ollama|codex|openai|gemini|compatible|external)$/.test(href || ''),
+    ),
+  ).toBe(true);
+  await expect(dialog.locator('.provider-demo')).toHaveCount(0);
+  await expect(dialog).toContainText('npm run setup:local');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await page.screenshot({ path: '/tmp/workroom-functional-workspace.png' });
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
+  await expect(page.getByLabel('Task planning')).toHaveValue('ai');
+  await expect(page.getByLabel('Automatic kickoff and progress meetings')).not.toBeChecked();
+  await expect(page.getByLabel('Codex reasoning effort')).toHaveCount(0);
+  await page.getByLabel('Project name').fill('A manual project');
+  await page
+    .getByLabel('The brief')
+    .fill('Compare supplied office costs and provide the difference with evidence.');
+  await page.getByLabel('Task planning').selectOption('manual');
+  await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Edit plan · 0 tasks', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run team', exact: true })).toBeDisabled();
+  await expect(page.getByText(/Your manual plan is empty/)).toBeVisible();
+  const state = await (await request.get('/api/state')).json();
+  const saved = state.state.projects.find((p: { title: string }) => p.title === 'A manual project');
+  expect(saved.meetingPolicy.enabled).toBe(false);
+  expect(
+    state.state.tasks.filter((t: { projectId: string }) => t.projectId === saved.id),
+  ).toHaveLength(0);
+  expect(
+    state.attempts.filter((a: { projectId: string }) => a.projectId === saved.id),
+  ).toHaveLength(0);
 });

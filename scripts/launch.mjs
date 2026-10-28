@@ -4,11 +4,16 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import {
+  createLocalEnv,
+  ensureLocalModel,
+  startupProvider,
+  startupDatabase,
+} from './local-model.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 process.chdir(root);
 const prepareOnly = process.argv.includes('--prepare-only');
-const workspace = process.argv.includes('--workspace');
 const workspaceId = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 16);
 let server;
 
@@ -69,6 +74,7 @@ function sourceHash() {
     'shared/',
     'public/',
     'tests/',
+    'scripts/',
   ])
     add(name);
   return hash.digest('hex');
@@ -99,7 +105,7 @@ async function health(url) {
     return (
       result.ok &&
       result.service === 'workroom' &&
-      result.mode === (workspace ? 'workspace' : 'demo') &&
+      result.mode === 'workspace' &&
       result.workspaceId === workspaceId
     );
   } catch {
@@ -110,7 +116,7 @@ async function health(url) {
 try {
   if (Number(process.versions.node.split('.')[0]) < 24)
     throw new Error(
-      'Install Node.js 24 LTS from https://nodejs.org, reopen your terminal, then run npm run demo again. Or use the browser-only GitHub Codespaces option in the README.',
+      'Install Node.js 24 LTS from https://nodejs.org, reopen your terminal, then run npm run local again.',
     );
   mkdirSync(join(root, '.data'), { recursive: true });
   const lockHash = createHash('sha256').update(readFileSync('package-lock.json')).digest('hex');
@@ -129,19 +135,33 @@ try {
   } else console.log('2/3 · Browser app is ready.');
   if (prepareOnly) {
     console.log(
-      '\nWorkroom is prepared. Run npm run local for your saved workspace, or npm run demo for a test drive.\n',
+      '\nWorkroom is prepared. Run npm run local for your saved workspace and local model setup.\n',
     );
     process.exit(0);
   }
-  // Keep this test drive separate from the normal workspace and any paid runtime.
-  if (existsSync('.env')) process.loadEnvFile('.env');
-  const port = Number(
-    workspace ? process.env.PORT || 3001 : process.env.WORKROOM_DEMO_PORT || 3000,
-  );
-  if (!Number.isInteger(port) || port < 1024 || port > 65535)
-    throw new Error(
-      'Set PORT (workspace) or WORKROOM_DEMO_PORT (demo) to a port between 1024 and 65535.',
+  // New files receive local defaults; existing configuration stays intact.
+  createLocalEnv(root);
+  process.loadEnvFile('.env');
+  const selected = startupProvider(root);
+  const database = startupDatabase(root);
+  if (!process.env.DATABASE_PATH && database === join(root, '.data', 'demo.sqlite'))
+    console.log(
+      'Opening existing records from .data/demo.sqlite. This workspace uses real model connections; historical simulation results remain labeled.',
     );
+  // Preserve an existing Codex/API/external choice. Only local-first workspaces
+  // trigger installation, and setup can explicitly be managed separately.
+  if (selected === 'ollama' && process.env.WORKROOM_LOCAL_SETUP !== '0') {
+    try {
+      await ensureLocalModel(root);
+    } catch (error) {
+      throw new Error(
+        `Local model setup could not finish: ${error.message}\nRun npm run setup:local to retry. See docs/LOCAL-MODELS.md for installation and exact-tag troubleshooting. Your saved work is retained; no model or API fallback was used.`,
+      );
+    }
+  }
+  const port = Number(process.env.PORT || 3001);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535)
+    throw new Error('Set PORT to a port between 1024 and 65535.');
   const localUrl = `http://127.0.0.1:${port}`;
   const forwardedUrl =
     process.env.CODESPACES === 'true' && process.env.CODESPACE_NAME
@@ -149,10 +169,12 @@ try {
       : '';
   const displayUrl = forwardedUrl || localUrl;
   if (await health(localUrl)) {
-    console.log(`\nWorkroom is already ready: ${displayUrl}\nClick Run team in the page.\n`);
+    console.log(
+      `\nWorkroom is already ready: ${displayUrl}\nCreate a project or open your saved work.\n`,
+    );
     openBrowser(displayUrl);
   } else {
-    console.log(`\n3/3 · Opening your ${workspace ? 'saved workspace' : 'demo studio'}…\n`);
+    console.log('\n3/3 · Opening your saved workspace…\n');
     server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
       cwd: root,
       stdio: 'inherit',
@@ -160,13 +182,9 @@ try {
         ...process.env,
         PORT: String(port),
         HOST: process.env.CODESPACES === 'true' ? '0.0.0.0' : '127.0.0.1',
-        ...(!workspace ? { AGENT_PROVIDER: 'demo' } : {}),
-        WORKROOM_DEMO: workspace ? '0' : '1',
-        DATABASE_PATH: resolve(
-          workspace
-            ? process.env.DATABASE_PATH || join(root, '.data', 'workroom.sqlite')
-            : process.env.WORKROOM_DEMO_DATABASE_PATH || join(root, '.data', 'demo.sqlite'),
-        ),
+        AGENT_PROVIDER: selected,
+        WORKROOM_DEMO: '0',
+        DATABASE_PATH: database,
         ...(forwardedUrl ? { WORKROOM_ORIGIN: forwardedUrl } : {}),
       },
     });
@@ -189,10 +207,10 @@ try {
     }
     if (!ready)
       throw new Error(
-        `Workroom could not start on port ${port}. Check the server message above. If another app uses that port, set ${workspace ? 'PORT' : 'WORKROOM_DEMO_PORT'} to a free port and try again.`,
+        `Workroom could not start on port ${port}. Check the server message above. If another app uses that port, set PORT to a free port and try again.`,
       );
     console.log(
-      `\nWORKROOM IS READY\n${displayUrl}\n\nClick Run team → wait for Review work → approve the draft.\n${workspace ? 'Demo is available without keys. Select a real connection explicitly in Runtime settings.' : 'No API key is needed. Demo mode makes no model calls.'}\nKeep this terminal open; press Ctrl+C to stop.\n`,
+      `\nWORKROOM IS READY\n${displayUrl}\n\nCreate a project → review its model-generated plan → Run team.\nConnection: ${selected}. No simulated work or automatic paid fallback.\nKeep this terminal open; press Ctrl+C to stop. Ollama may keep running in the background.\n`,
     );
     openBrowser(displayUrl);
   }

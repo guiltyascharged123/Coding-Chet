@@ -10,7 +10,7 @@ type Draft = {
   title: string;
   brief: string;
   workflow: Workflow;
-  planning: 'template' | 'ai';
+  planning: 'template' | 'ai' | 'manual';
   requestId: string;
   reasoningEffort?: ReasoningEffort;
   meetings?: boolean;
@@ -20,10 +20,10 @@ const fresh = (): Draft => ({
   title: '',
   brief: '',
   workflow: 'office',
-  planning: 'template',
+  planning: 'ai',
   requestId: crypto.randomUUID(),
   reasoningEffort: 'medium',
-  meetings: true,
+  meetings: false,
 });
 function readDraft(provider: Provider): Draft {
   try {
@@ -33,25 +33,33 @@ function readDraft(provider: Provider): Draft {
       typeof d.title === 'string' &&
       typeof d.brief === 'string' &&
       d.workflow in WORKFLOWS &&
-      ['ai', 'template'].includes(d.planning) &&
+      ['ai', 'template', 'manual'].includes(d.planning) &&
       /^[0-9a-f-]{36}$/.test(d.requestId)
     )
-      return d;
+      return {
+        ...d,
+        planning: d.planning === 'template' && provider !== 'demo' ? 'manual' : d.planning,
+      };
   } catch {
     /* A storage warning is shown by the save effect. */
   }
   const draft = fresh();
-  if (provider !== 'demo' && provider !== 'external') draft.planning = 'ai';
+  if (provider === 'demo') draft.planning = 'template';
+  if (provider === 'external') draft.planning = 'manual';
   return draft;
 }
 export default function ProjectModal({
   onClose,
   onCreated,
   provider,
+  model,
+  onConfigure,
 }: {
   onClose: () => void;
   onCreated: (id: string) => void;
   provider: Provider;
+  model?: string;
+  onConfigure?: () => void;
 }) {
   const [draft, setDraft] = useState(() => readDraft(provider));
   const [storage, setStorage] = useState('');
@@ -80,7 +88,7 @@ export default function ProjectModal({
           researchEnabled: !!draft.researchEnabled,
           reasoningEffort: draft.reasoningEffort || 'medium',
           meetingPolicy: {
-            enabled: provider !== 'external' && (draft.meetings ?? true),
+            enabled: provider !== 'external' && (draft.meetings ?? false),
             everyTasks: 3,
           },
         },
@@ -107,6 +115,18 @@ export default function ProjectModal({
       onClose={submitting ? () => {} : onClose}
     >
       <form className="modal-form" onSubmit={submit}>
+        <div className="planning-note">
+          <strong>Model: {model || provider}</strong>
+          <p>
+            The selected model writes the plan and performs text assignments. File editing and
+            command execution require Codex tools.
+          </p>
+          {onConfigure && (
+            <button type="button" className="text-button" onClick={onConfigure}>
+              Change model connection
+            </button>
+          )}
+        </div>
         <label>
           Project name
           <input
@@ -141,7 +161,7 @@ export default function ProjectModal({
             onChange={(e) => change({ workflow: e.target.value as Workflow })}
           >
             {Object.entries(WORKFLOWS).map(([id, w]) => (
-              <option value={id} key={id}>
+              <option value={id} key={id} disabled={id === 'software' && provider !== 'codex'}>
                 {w.label}
               </option>
             ))}
@@ -162,7 +182,8 @@ export default function ProjectModal({
             value={draft.planning}
             onChange={(e) => change({ planning: e.target.value as Draft['planning'] })}
           >
-            <option value="template">Editable task template · no model call</option>
+            <option value="manual">Write my own tasks · starts with an empty plan</option>
+            {provider === 'demo' && <option value="template">Legacy test fixture</option>}
             <option value="ai" disabled={provider === 'demo' || provider === 'external'}>
               AI plan tailored to the brief · uses allowance or budget
             </option>
@@ -172,43 +193,47 @@ export default function ProjectModal({
             is no fixed step count.
           </span>
         </label>
-        <label>
-          Codex reasoning effort
-          <select
-            aria-label="Codex reasoning effort"
-            value={draft.reasoningEffort || 'medium'}
-            onChange={(e) => change({ reasoningEffort: e.target.value as ReasoningEffort })}
-          >
-            <option value="low">Economy · low</option>
-            <option value="medium">Balanced · medium</option>
-            <option value="high">Deep work · high</option>
-          </select>
-          <span className="field-hint">
-            High uses more allowance; the selected model must support it. Other providers use their
-            configured defaults.
-          </span>
-        </label>
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            checked={!!draft.researchEnabled}
-            onChange={(e) => change({ researchEnabled: e.target.checked })}
-          />
-          Allow Codex web research (read-only search; applies to text work, not coding tools)
-        </label>
+        {provider === 'codex' && (
+          <>
+            <label>
+              Codex reasoning effort
+              <select
+                aria-label="Codex reasoning effort"
+                value={draft.reasoningEffort || 'medium'}
+                onChange={(e) => change({ reasoningEffort: e.target.value as ReasoningEffort })}
+              >
+                <option value="low">Economy · low</option>
+                <option value="medium">Balanced · medium</option>
+                <option value="high">Deep work · high</option>
+              </select>
+              <span className="field-hint">
+                High uses more allowance; the selected model must support it. Other providers use
+                their configured defaults.
+              </span>
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={!!draft.researchEnabled}
+                onChange={(e) => change({ researchEnabled: e.target.checked })}
+              />
+              Allow Codex web research (read-only search; applies to text work, not coding tools)
+            </label>
+          </>
+        )}
         <label className="checkbox-label">
           <input
             type="checkbox"
             disabled={provider === 'external'}
-            checked={provider !== 'external' && (draft.meetings ?? true)}
+            checked={provider !== 'external' && (draft.meetings ?? false)}
             onChange={(e) => change({ meetings: e.target.checked })}
           />
           Automatic kickoff and progress meetings
         </label>
         <p className="field-hint">
           A normal meeting uses five model requests, plus bounded corrections for malformed replies.
-          It records proposals, critique and next actions. Change the cadence in Edit plan. Demo
-          meetings make no model calls.
+          It records proposals, critique and next actions. Leave off to save model calls; request a
+          meeting when useful. Change the cadence in Edit plan.
         </p>
         {draft.workflow === 'software' && (
           <p className="planning-note">
@@ -234,7 +259,13 @@ export default function ProjectModal({
             type="button"
             className="text-button"
             disabled={submitting}
-            onClick={() => setDraft(fresh())}
+            onClick={() =>
+              setDraft({
+                ...fresh(),
+                planning:
+                  provider === 'external' ? 'manual' : provider === 'demo' ? 'template' : 'ai',
+              })
+            }
           >
             Clear draft
           </button>

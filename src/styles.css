@@ -124,7 +124,7 @@ button strong {
   display: flex;
   align-items: center;
   gap: 9px;
-  margin: 0 7px 32px;
+  margin: 0 7px 14px;
   font-family: Manrope, sans-serif;
   font-size: 25px;
   letter-spacing: -1.5px;
@@ -158,7 +158,45 @@ button strong {
   border: 1px solid var(--line);
   border-radius: 9px;
   background: #303b46;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
+}
+.brand-mark {
+  flex-shrink: 0;
+  color: #253440;
+  background: #c09a60;
+  padding: 0;
+  transform: none;
+  border-radius: 9px;
+}
+.studio-picker {
+  min-height: 40px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text);
+}
+.welcome-brand {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+}
+.provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  margin-top: 12px;
+}
+.runtime-option > div {
+  min-width: 0;
+}
+.provider-model {
+  overflow-wrap: anywhere;
+}
+.provider-actions a {
+  text-decoration: underline;
+}
+.runtime-option {
+  cursor: default;
 }
 .studio-picker > svg {
   margin-left: auto;

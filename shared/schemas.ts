@@ -126,7 +126,7 @@ export const stateSchema = z
           provider: providerSchema,
           documentPack: z.enum(['studio', 'office']).optional(),
           model: text.max(150).optional(),
-          planning: z.enum(['template', 'ai']).optional(),
+          planning: z.enum(['template', 'ai', 'manual']).optional(),
           planningStatus: z.enum(['planning', 'failed', 'ready']).optional(),
           planningError: text.max(4000).optional(),
           workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),

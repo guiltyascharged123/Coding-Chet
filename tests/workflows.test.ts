@@ -199,11 +199,12 @@ test('invalid planner output is not replayed from cache and a stopped/restarted 
     assert.equal(restored.brief, brief);
     engine.starterPlan(restored.id);
     assert.equal(restored.planningStatus, 'ready');
-    assert.equal(store.state.tasks.filter((t) => t.projectId === restored.id).length, 4);
+    assert.equal(store.state.tasks.filter((t) => t.projectId === restored.id).length, 0);
+    assert.equal(restored.planning, 'manual');
     assert.equal(
       store.attempts().filter((a) => a.projectId === restored.id).length,
       1,
-      'template fallback makes no model call',
+      'manual recovery makes no model call and inserts no canned tasks',
     );
   } finally {
     engine.stop();

@@ -1,14 +1,14 @@
 {
-  "name": "Workroom — ready to try",
+  "name": "Workroom workspace",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
   "remoteUser": "node",
-  "forwardPorts": [3000],
+  "forwardPorts": [3001],
   "portsAttributes": {
-    "3000": {
-      "label": "Workroom demo",
+    "3001": {
+      "label": "Workroom",
       "onAutoForward": "openBrowser"
     }
   },
-  "postCreateCommand": "npm run demo:prepare",
+  "postCreateCommand": "npm run local:prepare",
   "postStartCommand": "npm run codespace:start"
 }

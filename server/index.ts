@@ -109,7 +109,7 @@ app.post(
         title: z.string().trim().min(2).max(80),
         brief: z.string().trim().min(20).max(6000),
         documentPack: z.enum(['studio', 'office']).default('office'),
-        planning: z.enum(['template', 'ai']).default('template'),
+        planning: z.enum(['template', 'ai', 'manual']).optional(),
         requestId: z.string().uuid().optional(),
         collaboration: collaborationSchema.optional(),
         workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
@@ -119,7 +119,12 @@ app.post(
       body.title,
       body.brief,
       body.documentPack,
-      body.planning,
+      body.planning ||
+        (engine.state.provider === 'external'
+          ? 'manual'
+          : engine.state.provider === 'demo' && process.env.WORKROOM_DEMO === '1'
+            ? 'template'
+            : 'ai'),
       body.requestId,
       body.workflow || (Object.hasOwn(req.body, 'documentPack') ? undefined : 'office'),
       body.collaboration,

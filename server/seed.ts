@@ -112,7 +112,7 @@ export function initialState(demo = true): WorkspaceState {
     agents: structuredClone(agents),
     projects: demo ? [project] : [],
     tasks: demo ? demoPlan(project, agents) : [],
-    provider: 'demo',
+    provider: demo ? 'demo' : 'ollama',
     approvals: [],
     activities: demo
       ? [

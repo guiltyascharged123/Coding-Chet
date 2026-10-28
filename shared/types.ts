@@ -84,7 +84,7 @@ export interface Project {
   provider: Provider;
   documentPack?: DocumentPack;
   model?: string;
-  planning?: 'template' | 'ai';
+  planning?: 'template' | 'ai' | 'manual';
   planningStatus?: 'planning' | 'failed' | 'ready';
   planningError?: string;
   workflow?: Workflow;

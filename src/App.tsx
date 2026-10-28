@@ -58,6 +58,7 @@ import { useSavedDraft } from './drafts';
 import { SPECIALISTS } from '../shared/specialists';
 import WorkspaceControls from './components/WorkspaceControls';
 import WorkEvidence from './components/WorkEvidence';
+import BrandMark from './components/BrandMark';
 import { hasProjectTools } from '../shared/capabilities';
 import ProjectModal from './components/ProjectModal';
 import PlanEditor from './components/PlanEditor';
@@ -68,13 +69,13 @@ import LiveConsole from './components/LiveConsole';
 const Office = lazy(() => import('./components/Office'));
 type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs' | 'discussions' | 'console';
 const nav = [
-  { id: 'discussions' as View, label: 'Team discussions', icon: MessageCircle },
   { id: 'workspace' as View, label: 'Workspace', icon: LayoutDashboard },
-  { id: 'team' as View, label: 'Your team', icon: Users },
   { id: 'tasks' as View, label: 'Task board', icon: ClipboardList },
+  { id: 'outputs' as View, label: 'Outputs', icon: FolderOpen },
+  { id: 'team' as View, label: 'Your team', icon: Users },
+  { id: 'discussions' as View, label: 'Team discussions', icon: MessageCircle },
   { id: 'activity' as View, label: 'Activity', icon: ActivityIcon },
   { id: 'console' as View, label: 'Live console', icon: TerminalSquare },
-  { id: 'outputs' as View, label: 'Outputs', icon: FolderOpen },
 ];
 const taskLabels: Record<TaskStatus, string> = {
   queued: 'Up next',
@@ -247,8 +248,8 @@ export default function App() {
   if (!data || !state)
     return (
       <div className="loading-screen">
-        <span className="brand-mark">w</span>
-        <h1>Making room for your team.</h1>
+        <BrandMark />
+        <h1>Connecting to Workroom</h1>
         {initialError ? (
           <>
             <p>{initialError}</p>
@@ -268,17 +269,24 @@ export default function App() {
   if (!project)
     return (
       <div className="welcome-workspace">
-        <span className="brand-mark">w</span>
-        <h1>Your workspace is ready.</h1>
+        <a
+          className="brand welcome-brand"
+          href="#"
+          aria-label="Workroom · Workspace"
+          onClick={(e) => e.preventDefault()}
+        >
+          <BrandMark />
+          <span>workroom.</span>
+        </a>
+        <h1>Start a project</h1>
         <p>
-          Create a project with your own goal. Choose a team, edit its task plan, and connect a
-          model when you are ready.
+          Connect your model, describe a goal, and review the task plan before running the team.
         </p>
         <p>
           Current connection: {PROVIDER_LABELS[state.provider]}.{' '}
-          {state.provider === 'demo'
-            ? 'Demo previews do not run AI or tools.'
-            : 'Model work starts only when you request planning or run a team.'}
+          {data.runtime.available[state.provider]
+            ? 'Connection ready. Planning and tasks use this model.'
+            : 'Setup needed. Open Model connections to see the connection error and setup guide.'}
         </p>
         <div className="file-actions">
           <button className="button primary" onClick={() => setModal('project')}>
@@ -287,10 +295,25 @@ export default function App() {
           <button className="button secondary" onClick={() => setModal('runtime')}>
             Model connections
           </button>
+          <button
+            className="button secondary"
+            onClick={() => {
+              setControlsTab('backup');
+              setModal('controls');
+            }}
+          >
+            Import backup
+          </button>
         </div>
         {modal === 'project' && (
           <ProjectModal
             provider={state.provider}
+            model={
+              state.provider !== 'demo' && state.provider !== 'external'
+                ? data.runtime.models[state.provider]
+                : undefined
+            }
+            onConfigure={() => setModal('runtime')}
             onClose={() => setModal(null)}
             onCreated={(id) => {
               setProjectId(id);
@@ -309,6 +332,9 @@ export default function App() {
           />
         )}
         {toast && <p role="status">{toast}</p>}
+        {modal === 'controls' && (
+          <WorkspaceControls data={data} initialTab={controlsTab} onClose={() => setModal(null)} />
+        )}
       </div>
     );
 
@@ -317,25 +343,20 @@ export default function App() {
       <aside className="sidebar">
         <a
           className="brand"
+          aria-label="Workroom · Workspace"
           href="#"
           onClick={(e) => {
             e.preventDefault();
             setView('workspace');
           }}
         >
-          <span className="brand-mark">w</span>
+          <BrandMark />
           <span>
             workroom<span className="brand-period">.</span>
           </span>
         </a>
-        <div className="studio-picker">
-          <span className="studio-monogram">S</span>
-          <div>
-            <strong>Personal studio</strong>
-            <span>Your space to make things</span>
-          </div>
-        </div>
-        <span className="nav-label">YOUR STUDIO</span>
+        <div className="studio-picker">Your agent workspace</div>
+        <span className="nav-label">PROJECT</span>
         <nav aria-label="Main navigation">
           {nav.map((item) => (
             <button
@@ -354,24 +375,10 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <span className="note-spark">
-            <Sparkles size={17} />
-          </span>
-          <strong>Small team. Big possibilities.</strong>
-          <p>
-            Give your agents a brief.
-            <br />
-            Make something good together.
-          </p>
-          <button onClick={() => setModal('project')}>
-            Start a project <ArrowUpRight size={15} />
-          </button>
-        </div>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setModal('help')}>
             <CircleHelp size={18} strokeWidth={1.7} />
-            <span>A little guidance</span>
+            <span>Quick guide</span>
             <ArrowUpRight size={14} />
           </button>
           <button
@@ -384,7 +391,7 @@ export default function App() {
           </button>
           <button
             className="runtime-card"
-            aria-label={`${PROVIDER_LABELS[state.provider]} ${state.provider === 'demo' ? 'No API key needed' : 'Server-side connection'}`}
+            aria-label="Model connections"
             onClick={() => setModal('runtime')}
           >
             <span className="runtime-symbol">
@@ -392,7 +399,10 @@ export default function App() {
             </span>
             <span>
               <strong>{PROVIDER_LABELS[state.provider]}</strong>
-              <small>Default for new projects</small>
+              <small>
+                Default for new projects ·{' '}
+                {data.runtime.available[state.provider] ? 'Ready' : 'Setup needed'}
+              </small>
             </span>
             <Settings2 size={15} />
           </button>
@@ -407,7 +417,7 @@ export default function App() {
       <main>
         <header className="topbar">
           <div className="breadcrumbs">
-            <span>Studio</span>
+            <span>Projects</span>
             <ChevronRight size={13} />
             <div className="project-selector">
               <button onClick={() => setProjectMenu(!projectMenu)} aria-expanded={projectMenu}>
@@ -452,14 +462,13 @@ export default function App() {
             </div>
           </div>
           <div className="topbar-right">
-            <button
+            <span
               className={`connection ${connected ? '' : 'connection-off'}`}
-              title="Browser connection to the Workroom server. Click for model connection status; this indicator does not mean agents are running."
-              onClick={() => setModal('runtime')}
+              title="Browser connection to the Workroom server. Model readiness is shown in Model connections."
             >
               {connected ? <Wifi size={13} /> : <WifiOff size={13} />}
               {connected ? 'Server connected' : 'Reconnecting'}
-            </button>
+            </span>
             <span className="topbar-divider" />
             <button
               className="icon-button notification-button"
@@ -474,45 +483,41 @@ export default function App() {
               <Bell size={18} />
               {pending.length > 0 && <i>{pending.length}</i>}
             </button>
-            <span className="user-avatar" title="You · workspace owner">
-              Y<span />
-            </span>
           </div>
         </header>
 
         <div className="page-content">
           <div className="page-heading">
             <div>
-              <div className="eyebrow">A PLACE FOR YOUR AGENTS TO THINK</div>
               <h1>
                 {view === 'workspace'
-                  ? 'Good work starts with a little space.'
+                  ? 'Workspace'
                   : view === 'console'
-                    ? 'Watch the work as it happens.'
+                    ? 'Live console'
                     : view === 'discussions'
-                      ? 'Better decisions through debate.'
+                      ? 'Team discussions'
                       : view === 'team'
-                        ? 'Different minds. One shared goal.'
+                        ? 'Your team'
                         : view === 'tasks'
-                          ? 'Big ideas, manageable steps.'
+                          ? 'Task board'
                           : view === 'outputs'
-                            ? 'A little less talk. A little more made.'
-                            : 'The conversation behind the work.'}
+                            ? 'Outputs'
+                            : 'Activity'}
               </h1>
               <p>
                 {view === 'workspace'
-                  ? 'Your team is here. Give them a direction and watch ideas become progress.'
+                  ? 'Review the plan, run the team, and inspect its work.'
                   : view === 'console'
                     ? 'Assignments, visible replies and tool output from the project’s actual model jobs.'
                     : view === 'discussions'
                       ? 'Proposals, objections, evidence and next actions, saved with the project.'
                       : view === 'team'
-                        ? 'Give each teammate a role, a perspective, and a place in the studio.'
+                        ? 'Edit each agent’s role instructions and assigned desk.'
                         : view === 'tasks'
-                          ? 'Every handoff has a purpose. Follow the work from brief to done.'
+                          ? 'Tasks, owners, dependencies, results and failures.'
                           : view === 'outputs'
-                            ? 'The documents, decisions, and handoffs your team has created.'
-                            : 'Live handoffs, working notes, and the decisions that move things forward.'}
+                            ? 'Saved deliverables and managed project files.'
+                            : 'Recorded project events, approvals and errors.'}
               </p>
             </div>
             <button className="button primary new-project" onClick={() => setModal('project')}>
@@ -568,7 +573,6 @@ export default function App() {
             <button
               disabled={
                 busy ||
-                project.status === 'completed' ||
                 !connected ||
                 !tasks.length ||
                 project.planningStatus === 'planning' ||
@@ -576,13 +580,15 @@ export default function App() {
               }
               className={`button ${project.status === 'running' ? 'secondary' : 'primary'}`}
               onClick={() =>
-                project.status === 'needs_input' && projectApprovals[0]
-                  ? openReview(projectApprovals[0])
-                  : void act(() =>
-                      api(
-                        `/projects/${project.id}/${project.status === 'running' ? 'pause' : 'run'}`,
-                      ),
-                    )
+                project.status === 'completed'
+                  ? setView('outputs')
+                  : project.status === 'needs_input' && projectApprovals[0]
+                    ? openReview(projectApprovals[0])
+                    : void act(() =>
+                        api(
+                          `/projects/${project.id}/${project.status === 'running' ? 'pause' : 'run'}`,
+                        ),
+                      )
               }
             >
               {busy ? (
@@ -599,7 +605,7 @@ export default function App() {
               {project.status === 'running'
                 ? 'Pause team'
                 : project.status === 'completed'
-                  ? 'Plan finished'
+                  ? 'View results'
                   : project.status === 'needs_input'
                     ? 'Review work'
                     : project.status === 'paused'
@@ -609,9 +615,9 @@ export default function App() {
           </section>
           {project.provider === 'demo' && (
             <div className="plan-notice" role="status">
-              <strong>Demo connection · no AI is doing project work.</strong> Choose a real model
-              with “Change project model” above. Demo runs only preview assignments and the office
-              flow.
+              <strong>Saved simulation project.</strong> Choose a real model with “Change project
+              model” before continuing. Historical outputs are retained; normal workspaces cannot
+              run simulated work.
             </div>
           )}
 
@@ -641,6 +647,12 @@ export default function App() {
               Edit plan · {tasks.length} tasks
             </button>
           </section>
+          {project.planningStatus === 'ready' && !tasks.length && (
+            <p className="plan-notice" role="status">
+              Your manual plan is empty. Use Edit plan to add tasks, owners and acceptance criteria
+              before running.
+            </p>
+          )}
           {project.planningStatus === 'planning' && (
             <div className="planning-banner" role="status">
               <Loader2 size={18} className="spin" />
@@ -663,6 +675,9 @@ export default function App() {
                 <p>{project.planningError}</p>
               </div>
               <div className="file-actions">
+                <button className="button secondary small" onClick={() => setModal('runtime')}>
+                  Model connections
+                </button>
                 <button
                   className="button secondary small"
                   disabled={busy}
@@ -675,7 +690,7 @@ export default function App() {
                   disabled={busy}
                   onClick={() => act(() => api(`/projects/${project.id}/starter-plan`))}
                 >
-                  Use editable template
+                  Create tasks manually
                 </button>
                 <button
                   className="button secondary small"
@@ -696,8 +711,11 @@ export default function App() {
                 <MessageCircle size={18} />
               </span>
               <span>
-                <strong>A little human perspective?</strong>
-                <span>Your team has a direction ready for you to review.</span>
+                <strong>{projectApprovals[0].question}</strong>
+                <span>
+                  {projectApprovals[0].decision?.why ||
+                    'Review the saved task output and choose whether to continue or request changes.'}
+                </span>
               </span>
               <span className="review-link">
                 Review & respond <ArrowRight size={16} />
@@ -706,7 +724,7 @@ export default function App() {
           )}
           {tasks.some((t) => t.status === 'failed') && (
             <div className="error-banner">
-              <strong>A teammate hit a snag.</strong>
+              <strong>A task needs attention.</strong>
               <span>{tasks.find((t) => t.status === 'failed')?.error}</span>
               <button
                 className="button secondary small"
@@ -754,7 +772,7 @@ export default function App() {
                 <section className="office-card">
                   <div className="section-header">
                     <div>
-                      <span className="section-title">The studio</span>
+                      <span className="section-title">The office</span>
                       <span
                         className="live-pill"
                         title="State comes from saved Workroom tasks and meetings."
@@ -810,7 +828,11 @@ export default function App() {
                           ? currentMeeting.status === 'gathering'
                             ? 'Team gathering'
                             : 'In a team meeting'
-                          : STATUS_LABELS[project.status]}
+                          : !tasks.length
+                            ? 'Add tasks to plan'
+                            : !data.runtime.available[project.provider]
+                              ? 'Model setup needed'
+                              : STATUS_LABELS[project.status]}
                       </span>
                       <span className="scene-agent-count">
                         <Users size={13} />
@@ -862,22 +884,19 @@ export default function App() {
                     <span className="scene-hint">
                       {cameraMode === 'orbit'
                         ? 'Drag to orbit · Scroll to zoom'
-                        : 'Your team, from a different perspective'}
+                        : 'Drag to pan · Scroll to zoom'}
                     </span>
-                    <div className="scene-wordmark">
-                      workroom<span>STUDIO 001</span>
-                    </div>
                   </div>
                   <div className="office-footer">
                     <span>
                       <span className="status-dot" />
                       {working
-                        ? `${working} ${working === 1 ? 'teammate is' : 'teammates are'} making progress`
+                        ? `${working} model ${working === 1 ? 'assignment' : 'assignments'} running`
                         : projectApprovals.length
-                          ? 'Waiting for your perspective'
+                          ? 'Waiting for your decision'
                           : project.status === 'completed'
-                            ? 'Good things, made together'
-                            : 'A good day to make something'}
+                            ? 'All planned tasks finished. Review the results.'
+                            : 'No model assignment is running.'}
                     </span>
                     <button onClick={() => setView('team')}>
                       Meet the team <ArrowUpRight size={14} />
@@ -899,7 +918,11 @@ export default function App() {
                   </div>
                   <div className="activity-intro">
                     <span className="status-dot" />
-                    Good ideas are in the making.
+                    {working
+                      ? `${working} model assignment running`
+                      : currentMeeting
+                        ? 'Meeting requests in progress'
+                        : 'Saved project events'}
                   </div>
                   <div className="activity-list compact">
                     {activities.slice(0, 8).map((activity) => (
@@ -1047,7 +1070,8 @@ export default function App() {
                               className={`task-card ${task.status}`}
                               key={task.id}
                               onClick={() =>
-                                task.status === 'review'
+                                task.status === 'review' &&
+                                projectApprovals.some((a) => a.taskId === task.id)
                                   ? openReview(projectApprovals.find((a) => a.taskId === task.id)!)
                                   : setTaskId(task.id)
                               }
@@ -1085,12 +1109,12 @@ export default function App() {
                         {!group.length && (
                           <div className="column-empty">
                             {status === 'done'
-                              ? 'Good work will land here.'
+                              ? 'No completed tasks.'
                               : status === 'review'
-                                ? 'A place for your perspective.'
+                                ? 'No tasks waiting for review.'
                                 : status === 'working'
-                                  ? 'Ready for a little momentum.'
-                                  : 'Nothing waiting in the wings.'}
+                                  ? 'No tasks running.'
+                                  : 'No queued tasks.'}
                           </div>
                         )}
                       </div>
@@ -1226,14 +1250,14 @@ export default function App() {
                   <span className="empty-icon">
                     <FolderOpen size={35} strokeWidth={1.3} />
                   </span>
-                  <h2>Good things take a little teamwork.</h2>
+                  <h2>No outputs yet</h2>
                   <p>
                     Run your team and their deliverables will collect here,
                     <br />
                     ready for you to review, keep, and build on.
                   </p>
                   <button className="button primary" onClick={() => setView('workspace')}>
-                    Back to the studio <ArrowRight size={15} />
+                    Back to Workspace <ArrowRight size={15} />
                   </button>
                 </div>
               )}
@@ -1250,13 +1274,13 @@ export default function App() {
             />
           )}
           <footer className="page-footer">
-            <span>MADE FOR THINKING TOGETHER.</span>
+            <span>WORKROOM · OPEN SOURCE</span>
             <a
               href="https://github.com/guiltyascharged123/Coding-Chet"
               target="_blank"
               rel="noreferrer"
             >
-              Open source, open possibilities <ArrowUpRight size={12} />
+              Source code <ArrowUpRight size={12} />
             </a>
           </footer>
         </div>
@@ -1266,6 +1290,12 @@ export default function App() {
         <ProjectModal
           onClose={() => setModal(null)}
           provider={state.provider}
+          model={
+            state.provider !== 'demo' && state.provider !== 'external'
+              ? data.runtime.models[state.provider]
+              : undefined
+          }
+          onConfigure={() => setModal('runtime')}
           onCreated={(id) => {
             setProjectId(id);
             setView('workspace');
@@ -1309,7 +1339,7 @@ export default function App() {
       )}
       {modal === 'help' && (
         <Modal
-          title="A little room to get started."
+          title="Quick guide"
           subtitle="From a brief to a team handoff, in a few steps."
           onClose={() => setModal(null)}
         >
@@ -1327,13 +1357,13 @@ export default function App() {
               ],
               [
                 '03',
-                'Bring your perspective',
+                'Review requested decisions',
                 'When a review appears, read the draft. Approve it or request specific changes. Dependent tasks wait for you.',
               ],
               [
                 '04',
-                'Take the good work with you',
-                'Export Word documents, Excel workbooks, Markdown, or print to PDF in Outputs. Demo mode uses labeled templates; model runtimes generate text, while external workers can connect your own tools.',
+                'Read and export results',
+                'Read the acceptance evidence in each task. Export documents from Outputs and actual managed files from Project files. Text-only connections do not execute code. Model connections shows setup and tool readiness.',
               ],
             ].map(([n, title, text]) => (
               <div key={n}>
@@ -1357,7 +1387,7 @@ export default function App() {
           onClose={() => setAgentId(undefined)}
           onSaved={() => {
             setAgentId(undefined);
-            setToast('Teammate updated. A new perspective, same shared goal.');
+            setToast('Teammate settings saved.');
           }}
         />
       )}
@@ -1450,12 +1480,16 @@ export default function App() {
                 <h3>
                   {selectedTask.status === 'working'
                     ? 'Model assignment in progress'
-                    : 'Queued assignment'}
+                    : selectedTask.status === 'failed'
+                      ? 'No accepted deliverable'
+                      : 'Queued assignment'}
                 </h3>
                 <p>
                   {selectedTask.status === 'working'
                     ? 'The deliverable will appear here when the agent finishes.'
-                    : 'This task will begin when the team is running and its dependencies are complete.'}
+                    : selectedTask.status === 'failed'
+                      ? 'Review the failure details above. Correct the blocker, then retry this saved assignment.'
+                      : 'This task will begin when the team is running and its dependencies are complete.'}
                 </p>
               </div>
             )}
@@ -1600,8 +1634,8 @@ function AgentModal({
   }
   return (
     <Modal
-      title={`A little about ${agent.name}.`}
-      subtitle="A distinct perspective makes the whole team better."
+      title={`Edit ${agent.name}`}
+      subtitle="Role instructions, focus and desk assignment for this project."
       onClose={onClose}
     >
       <form className="modal-form" onSubmit={submit}>
@@ -1856,24 +1890,24 @@ function RuntimeModal({
   onChange: (provider: Provider) => Promise<void>;
 }) {
   const [saving, setSaving] = useState(false);
-  const [checkMessage, setCheckMessage] = useState('');
-  const descriptions: Record<Provider, string> = {
-    codex:
-      'Uses your ChatGPT Codex sign-in. Software teams can edit files and run commands in their managed folder; text projects can optionally use read-only web research. Subscription allowance applies, with no API-key fallback.',
+  const [message, setMessage] = useState('');
+  const descriptions: Partial<Record<Provider, string>> = {
     ollama:
-      'A model running on your computer through Ollama. Uses local RAM and CPU/GPU. No automatic model download.',
+      'Runs on this computer. Local setup installs Ollama and downloads your selected model. Text work; no file or command tools.',
+    codex:
+      'Uses your ChatGPT Codex sign-in and allowance. Supports text work, optional search, and managed file/command tools after the sandbox check.',
+    openai:
+      'Requires an OpenAI API key, model access and separate API billing. Text work in this adapter.',
+    gemini: 'Uses a Google AI Studio / Gemini API key and its quota. Text work in this adapter.',
     compatible:
-      'Connect a configured OpenAI-compatible model server such as LM Studio or llama.cpp. API compatibility and billing depend on that server.',
-    demo: 'A local, scripted workflow. Explore tasks, reviews, and handoffs without API calls.',
-    openai: `Real AI plans and documents using ${data.runtime.models.openai}. Requires an OpenAI API key and API billing. No file or command tools in this adapter.`,
-    gemini: `Real AI plans and documents using ${data.runtime.models.gemini}. Requires a Gemini API key, model access, and available quota. No file or command tools in this adapter.`,
+      'Connect LM Studio, llama.cpp or another OpenAI-compatible Chat Completions server. Tools depend on the external worker you build.',
     external:
-      'Run your own agent processes and attach them to the office. Requires a shared RUNNER_TOKEN, a running worker, and whatever model or tools that worker uses.',
+      'Attach your own running worker through the authenticated task-leasing API. Its model, tools and costs are managed separately.',
   };
   return (
     <Modal
-      title="The minds behind the desks."
-      subtitle="Model readiness and task capabilities."
+      title="Model connections"
+      subtitle="Choose the default for new projects. Existing projects keep their model."
       onClose={onClose}
     >
       <div className="runtime-check">
@@ -1884,9 +1918,9 @@ function RuntimeModal({
             setSaving(true);
             try {
               await api('/connections/check');
-              setCheckMessage('Readiness refreshed. No model was run.');
+              setMessage('Readiness refreshed. No model was run.');
             } catch (e) {
-              setCheckMessage((e as Error).message);
+              setMessage((e as Error).message);
             } finally {
               setSaving(false);
             }
@@ -1894,97 +1928,90 @@ function RuntimeModal({
         >
           Check connections
         </button>
-        <p role="status">{checkMessage}</p>
-        {data.runtime.coding && (
-          <p>
-            <strong>Coding tools: {data.runtime.coding.ready ? 'Ready' : 'Not ready'}</strong>
-            <br />
-            {data.runtime.coding.message}
-          </p>
-        )}
+        <p role="status">{message}</p>
         <p>
-          This chooses the default for new projects. Use Workspace controls to explicitly change an
-          existing project’s connection.
+          For the local default, run <code>npm run setup:local</code> in the Workroom terminal. Then
+          check connections here. Changing a project's model is available through its Model → Change
+          control.
         </p>
       </div>
       <div className="runtime-options">
-        {(
-          ['demo', 'codex', 'ollama', 'compatible', 'openai', 'gemini', 'external'] as Provider[]
-        ).map((provider) => (
-          <button
-            className={`runtime-option ${data.state.provider === provider ? 'chosen' : ''}`}
-            key={provider}
-            disabled={!data.runtime.available[provider] || saving}
-            onClick={async () => {
-              setSaving(true);
-              await onChange(provider);
-              setSaving(false);
-            }}
-          >
-            <span className={`provider-icon provider-${provider}`}>
-              {provider === 'external' ? (
-                <Box size={20} />
-              ) : provider === 'demo' ? (
-                <Play size={19} />
-              ) : (
-                <Sparkles size={20} />
-              )}
-            </span>
-            <span>
-              <strong>
-                {PROVIDER_LABELS[provider]}
-                {data.state.provider === provider && <span className="tag">Active</span>}
-              </strong>
-              <p>{descriptions[provider]}</p>
-              <small>
-                {data.runtime.available[provider]
-                  ? data.runtime.diagnostics?.[provider] ||
-                    (provider === 'demo'
-                      ? 'Simulation · no model calls'
-                      : provider === 'external'
-                        ? 'Token configured · start a worker separately'
-                        : 'API key present · access checked on first request')
-                  : data.runtime.diagnostics?.[provider] || 'Needs server configuration'}
-              </small>
-            </span>
-            {data.state.provider === provider && <Check size={18} />}
-          </button>
-        ))}
+        {(['ollama', 'codex', 'openai', 'gemini', 'compatible', 'external'] as Provider[]).map(
+          (provider) => {
+            const ready = data.runtime.available[provider];
+            const model =
+              provider !== 'demo' && provider !== 'external' ? data.runtime.models[provider] : '';
+            return (
+              <article
+                className={`runtime-option ${data.state.provider === provider ? 'chosen' : ''}`}
+                key={provider}
+              >
+                <span className={`provider-icon provider-${provider}`}>
+                  <Zap size={20} />
+                </span>
+                <div>
+                  <strong>
+                    {PROVIDER_LABELS[provider]}{' '}
+                    {data.state.provider === provider && <span className="tag">Default</span>}
+                  </strong>
+                  {model && <p className="provider-model">{model}</p>}
+                  <p>{descriptions[provider]}</p>
+                  <small>
+                    {ready ? 'Ready · ' : 'Setup needed · '}
+                    {data.runtime.diagnostics?.[provider] ||
+                      (ready
+                        ? 'Connection configured'
+                        : 'Configure this provider before selecting it.')}
+                  </small>
+                  <div className="provider-actions">
+                    <button
+                      className="button secondary small"
+                      disabled={!ready || saving || data.state.provider === provider}
+                      title={
+                        !ready
+                          ? 'Complete setup using the guide, then check connections.'
+                          : undefined
+                      }
+                      onClick={async () => {
+                        setSaving(true);
+                        try {
+                          await onChange(provider);
+                        } catch (e) {
+                          setMessage((e as Error).message);
+                        } finally {
+                          setSaving(false);
+                        }
+                      }}
+                    >
+                      {data.state.provider === provider
+                        ? 'Selected default'
+                        : 'Use for new projects'}
+                    </button>
+                    <a
+                      href={`https://github.com/guiltyascharged123/Coding-Chet/blob/workroom-starter/docs/LOCAL-MODELS.md#${provider}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Setup guide ↗
+                    </a>
+                  </div>
+                </div>
+              </article>
+            );
+          },
+        )}
       </div>
-      <div className="runtime-instructions">
-        <strong>These are implemented connection options</strong>
+      <p>
+        Local models use your hardware. Paid APIs remain disabled until enabled with price estimates
+        in Workspace controls. No automatic model or paid fallback is used.
+      </p>
+      {data.runtime.coding && (
         <p>
-          Use Codex through your ChatGPT account for software delivery or text work, or use a local
-          model for text work. All four characters can share one model; their roles and task context
-          make each assignment different. You do not need to build four separate AIs.
+          <strong>Codex coding tools: {data.runtime.coding.ready ? 'Ready' : 'Not ready'}</strong>
+          <br />
+          {data.runtime.coding.message}
         </p>
-        <p>
-          Codex uses your account’s Codex allowance. Local models use your hardware. Paid API access
-          is separate and starts disabled; enable it and set price estimates in Workspace controls.
-          Keys stay on the server.
-        </p>
-        <strong>Connect a provider</strong>
-        <p>
-          Copy <code>.env.example</code> to <code>.env</code> and follow the connection guide. Codex
-          needs CLI sign-in and an exact available model ID; Ollama needs a running local service
-          and installed model. Restart after configuration, then check connections.
-        </p>
-        <p>
-          Software delivery uses the built-in Codex file and command worker. For additional browsing
-          or specialist tools, connect an external worker built with an agent framework such as
-          OpenAI Agents SDK, LangGraph, CrewAI, or Google ADK. These need a custom bridge using the
-          documented runner API; they are not preinstalled integrations. A local model server can
-          also be used inside that worker. Pause running projects before switching. This single-user
-          app should stay on a trusted local network until authentication is added.{' '}
-          <a
-            href="https://github.com/guiltyascharged123/Coding-Chet/blob/workroom-starter/docs/AI-CONNECTIONS.md"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Read the AI connection guide ↗
-          </a>
-        </p>
-      </div>
+      )}
     </Modal>
   );
 }
