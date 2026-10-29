@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -504,6 +504,8 @@ test('an empty normal workspace welcomes the user and creates a real saved proje
   empty.state.projects = [];
   empty.state.tasks = [];
   empty.state.activities = [];
+  empty.activityHistory = [];
+  empty.attemptResults = [];
   empty.state.approvals = [];
   empty.state.memory = [];
   empty.state.provider = 'compatible';
@@ -1009,4 +1011,91 @@ test('navigation has real destinations, provider setup stays accessible, and man
   expect(
     state.attempts.filter((a: { projectId: string }) => a.projectId === saved.id),
   ).toHaveLength(0);
+});
+
+test('retained activity pages and interrupted-result recovery work without another model request', async ({
+  page,
+  request,
+}) => {
+  const backup = await (await request.get('/api/backup')).json();
+  const created = await request.post('/api/projects', {
+    data: {
+      title: 'Recovery and history',
+      brief:
+        'Recover an already received result without repeating work, and browse the retained project history.',
+      planning: 'manual',
+    },
+  });
+  const { project } = await created.json();
+  try {
+    const imported = await (await request.get('/api/backup')).json();
+    const taskId = crypto.randomUUID(),
+      attemptId = crypto.randomUUID();
+    imported.state.tasks.push({
+      id: taskId,
+      projectId: project.id,
+      title: 'Recover this comparison',
+      description: 'Compare the supplied costs correctly.',
+      agentId: 'mira',
+      dependencies: [],
+      requiresApproval: false,
+      status: 'working',
+      output: '',
+      feedback: '',
+      attemptId,
+    });
+    imported.attempts.push({
+      id: attemptId,
+      projectId: project.id,
+      taskId,
+      provider: project.provider,
+      phase: 'task',
+      status: 'completed',
+      createdAt: Date.now(),
+      reservedUsd: 0,
+    });
+    imported.attemptResults.push({
+      attemptId,
+      text: JSON.stringify({
+        outcome: 'complete',
+        summary: 'Compared the supplied figures.',
+        deliverable: '# Saved comparison\n\nB costs $35, A costs $20. A saves $15.',
+        checks: [{ criterion: 'Arithmetic', status: 'met', evidence: '$35 - $20 = $15.' }],
+        handoff: { facts: [], assumptions: [], next: 'Review the saved comparison.' },
+        decision: null,
+        followUps: [],
+        improvements: [],
+      }),
+    });
+    const history = Array.from({ length: 310 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      type: 'system',
+      message: `Retained audit event ${i}`,
+      createdAt: Date.now() - (310 - i) * 1000,
+    }));
+    imported.activityHistory.push(...history);
+    imported.state.activities = history.slice(-250).reverse();
+    expect((await request.post('/api/restore', { data: imported })).ok()).toBe(true);
+    const before = (await (await request.get('/api/state')).json()).attempts.length;
+    await page.goto('/');
+    await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+    await page.reload();
+    await page.getByRole('button', { name: 'Activity', exact: true }).click();
+    await expect(page.getByText('Retained audit event 309', { exact: true })).toBeVisible();
+    for (let i = 0; i < 3; i++)
+      await page.getByRole('button', { name: 'Load older activity', exact: true }).click();
+    await expect(page.getByText('Retained audit event 0', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Task board', exact: true }).click();
+    await page.getByRole('button', { name: /Recover this comparison/ }).click();
+    await page
+      .getByRole('button', { name: 'Recover saved result · no model call', exact: true })
+      .click();
+    await expect(page.getByRole('dialog')).toContainText('A saves $15');
+    const after = await (await request.get('/api/state')).json();
+    expect(after.attempts.length).toBe(before);
+    expect(after.state.tasks.find((t: any) => t.id === taskId).status).toBe('done');
+  } finally {
+    await request.post('/api/restore', { data: backup });
+  }
 });

@@ -8,6 +8,8 @@ import {
   readlinkSync,
   existsSync,
 } from 'node:fs';
+import { runtimeIdentity, runtimeMatches } from './runtime-identity.mjs';
+import { startupProvider, startupDatabase } from './local-model.mjs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,12 +21,28 @@ mkdirSync('.data', { recursive: true });
 if (existsSync('.env')) process.loadEnvFile('.env');
 const port = process.env.PORT || '3001';
 const workspaceId = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 16);
+const expected = {
+  workspaceId,
+  ...runtimeIdentity(root, {
+    ...process.env,
+    PORT: String(port),
+    HOST: '0.0.0.0',
+    AGENT_PROVIDER: startupProvider(root),
+    WORKROOM_DEMO: '0',
+    DATABASE_PATH: startupDatabase(root),
+    ...(process.env.CODESPACE_NAME
+      ? {
+          WORKROOM_ORIGIN: `https://${process.env.CODESPACE_NAME}-${port}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN || 'app.github.dev'}`,
+        }
+      : {}),
+  }),
+};
 async function health() {
   try {
     const result = await (
       await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(800) })
     ).json();
-    return result.ok && result.mode === 'workspace' && result.workspaceId === workspaceId;
+    return runtimeMatches(result, expected);
   } catch {
     return false;
   }
@@ -56,10 +74,6 @@ if (process.argv.includes('--restart')) {
     throw new Error(
       'Workroom is still running outside this helper. Stop it with Ctrl+C in its terminal, then run npm run local.',
     );
-}
-if (await health()) {
-  console.log(`Workroom is already ready. Open its forwarded port (${port}), then click Run team.`);
-  process.exit(0);
 }
 const log = openSync('.data/codespace.log', 'a');
 const child = spawn(process.execPath, [resolve(root, 'scripts/launch.mjs'), '--workspace'], {

@@ -173,6 +173,108 @@ export default function PlanEditor({
                   ))}
                 </select>
               </label>
+              {hasProjectTools(project) && (
+                <label>
+                  Work type
+                  <select
+                    aria-label={`Task ${i + 1} work type`}
+                    value={t.workType || ''}
+                    onChange={(e) =>
+                      change(t.id, { workType: (e.target.value || undefined) as Task['workType'] })
+                    }
+                  >
+                    <option value="">Existing assignment · substantive tool evidence</option>
+                    <option value="plan">Planning · useful report</option>
+                    <option value="implementation">
+                      Implementation · file changes and verification
+                    </option>
+                    <option value="review">Review · independent file inspection</option>
+                    <option value="tests">Testing · executed verification</option>
+                  </select>
+                </label>
+              )}
+              <details>
+                <summary>Acceptance evidence ({t.acceptanceCriteria?.length || 0})</summary>
+                <p className="field-hint">
+                  Stable IDs link reported checks to the assignment. Tool evidence must cite an
+                  observed command or file path. Report evidence remains a model assertion.
+                </p>
+                {(t.acceptanceCriteria || []).map((c) => (
+                  <div key={c.id}>
+                    <label>
+                      {c.id} · acceptance criterion
+                      <input
+                        maxLength={300}
+                        value={c.description}
+                        onChange={(e) =>
+                          change(t.id, {
+                            acceptanceCriteria: t.acceptanceCriteria!.map((v) =>
+                              v.id === c.id ? { ...v, description: e.target.value } : v,
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Required evidence
+                      <select
+                        value={c.evidence}
+                        onChange={(e) =>
+                          change(t.id, {
+                            acceptanceCriteria: t.acceptanceCriteria!.map((v) =>
+                              v.id === c.id
+                                ? { ...v, evidence: e.target.value as typeof c.evidence }
+                                : v,
+                            ),
+                          })
+                        }
+                      >
+                        <option value="report">Reported analysis</option>
+                        {hasProjectTools(project) && (
+                          <>
+                            <option value="artifact">Observed file change</option>
+                            <option value="verification">Successful verification command</option>
+                            <option value="inspection">Independent file inspection</option>
+                          </>
+                        )}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() =>
+                        change(t.id, {
+                          acceptanceCriteria: t.acceptanceCriteria!.filter((v) => v.id !== c.id)
+                            .length
+                            ? t.acceptanceCriteria!.filter((v) => v.id !== c.id)
+                            : undefined,
+                        })
+                      }
+                    >
+                      Remove {c.id}
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={(t.acceptanceCriteria?.length || 0) >= 10}
+                  onClick={() =>
+                    change(t.id, {
+                      acceptanceCriteria: [
+                        ...(t.acceptanceCriteria || []),
+                        {
+                          id: `c_${crypto.randomUUID().slice(0, 8)}`,
+                          description: 'Describe a concrete acceptance check.',
+                          evidence: 'report',
+                        },
+                      ],
+                    })
+                  }
+                >
+                  Add acceptance criterion
+                </button>
+              </details>
               <label className="checkbox-label">
                 <input
                   type="checkbox"

@@ -275,3 +275,7 @@ This is a read-only viewer. Opening it makes no additional model request and doe
 Recent console history survives reloads and server restarts in the same SQLite database. Reconnecting reloads the retained history. Old runs from before this feature cannot be reconstructed. History is bounded per project and workspace, and large entries are labeled excerpts. Known credentials are redacted; arbitrary project secrets may still appear in text or command output. Portable JSON project backups do not include console history—download logs separately when needed.
 
 Demo entries explicitly say that no AI ran. External workers show assignment status and submitted results; Workroom cannot see their internal terminal unless their protocol is extended.
+
+## Saved history and interrupted tasks
+
+Activity keeps older events: use **Load older activity**. This does not consume model tokens. For a task interrupted during a restart, open it and use **Recover saved result · no model call** if available. Review Usage and existing work before choosing Retry. After updating, stop the old Workroom terminal with Ctrl+C, then run `npm run local` again. See [Reliability and work evidence](STABILITY.md) for details.

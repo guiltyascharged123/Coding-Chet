@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { Attempt, WorkspaceState } from '../shared/types.js';
+import type { Observation } from '../shared/verification.js';
+import type { Activity, Attempt, WorkspaceState } from '../shared/types.js';
 import { defaultPolicy, backupSchema, stateSchema } from '../shared/schemas.js';
 import { initialState } from './seed.js';
 import { CONSOLE_LIMITS, type ConsoleEntry } from '../shared/console.js';
@@ -10,6 +11,7 @@ import { consoleText } from './console.js';
 export class Store {
   private db: DatabaseSync;
   state: WorkspaceState;
+  revision = 0;
   constructor(public path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -18,6 +20,9 @@ export class Store {
     );
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS console_entries (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, project_id TEXT NOT NULL, payload TEXT NOT NULL); CREATE INDEX IF NOT EXISTS console_project ON console_entries(project_id, sequence)',
+    );
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS activity_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, project_id TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL); CREATE INDEX IF NOT EXISTS activity_project ON activity_events(project_id, sequence); CREATE INDEX IF NOT EXISTS activity_type ON activity_events(project_id, type, sequence); CREATE TABLE IF NOT EXISTS attempt_results (attempt_id TEXT PRIMARY KEY, payload TEXT NOT NULL)',
     );
     const row = this.db.prepare('SELECT payload FROM workspace WHERE id=1').get() as
       { payload: string } | undefined;
@@ -53,16 +58,21 @@ export class Store {
         });
     for (const task of this.state.tasks)
       if (task.status === 'working') {
-        const uncertain =
-          task.attemptId &&
-          this.attempts().some((a) => a.id === task.attemptId && a.status === 'uncertain');
-        task.status =
-          uncertain ||
-          this.state.projects.find((p) => p.id === task.projectId)?.provider === 'external'
-            ? 'failed'
-            : 'queued';
-        if (task.status === 'failed')
-          task.error = 'Interrupted work may have consumed usage. Review Usage before retrying.';
+        // Any dispatched work requires explicit recovery, even when usage was confirmed.
+        // A completed receipt alone must never requeue tool work or consume another request.
+        const attempt = this.attempts().find((a) => a.id === task.attemptId);
+        task.status = 'failed';
+        task.error = 'Interrupted work needs review before retrying. No request was replayed.';
+        if (attempt) {
+          const response = this.attemptResult(attempt.id);
+          task.recovery = {
+            attemptId: attempt.id,
+            hasResponse: !!response && !response.outputLimitReached,
+          };
+          task.error = response
+            ? 'A model reply was saved before interruption. Recover the saved result without another model request, or inspect it before retrying.'
+            : 'Interrupted work may have consumed usage. Review Usage and existing files before explicitly retrying.';
+        }
         delete task.leaseId;
         delete task.leaseExpiresAt;
       }
@@ -138,6 +148,57 @@ export class Store {
       )
       .run(attempt.id, JSON.stringify(attempt));
   }
+  completeAttempt(
+    attempt: Attempt,
+    result: { text: string; outputLimitReached?: boolean; observations?: Observation[] },
+  ) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db
+        .prepare('INSERT OR REPLACE INTO attempt_results VALUES(?,?)')
+        .run(attempt.id, JSON.stringify(result));
+      this.putAttempt(attempt);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  attemptResult(
+    id: string,
+  ): { text: string; outputLimitReached?: boolean; observations?: Observation[] } | undefined {
+    const row = this.db
+      .prepare('SELECT payload FROM attempt_results WHERE attempt_id=?')
+      .get(id) as { payload: string } | undefined;
+    return row ? JSON.parse(row.payload) : undefined;
+  }
+  recordActivity(activity: Activity) {
+    this.db
+      .prepare('INSERT OR IGNORE INTO activity_events(id,project_id,type,payload) VALUES(?,?,?,?)')
+      .run(activity.id, activity.projectId, activity.type, JSON.stringify(activity));
+  }
+  activityPage(projectId: string, before?: number, type?: string, limit = 100) {
+    const rows = this.db
+      .prepare(
+        `SELECT sequence,payload FROM activity_events WHERE project_id=? AND sequence<? ${type ? 'AND type=?' : ''} ORDER BY sequence DESC LIMIT ?`,
+      )
+      .all(projectId, before ?? Number.MAX_SAFE_INTEGER, ...(type ? [type] : []), limit + 1) as {
+      sequence: number;
+      payload: string;
+    }[];
+    const page = rows.slice(0, limit);
+    return {
+      entries: page.map((r) => JSON.parse(r.payload) as Activity),
+      nextCursor: rows.length > limit ? page.at(-1)!.sequence : null,
+    };
+  }
+  private activityHistory(): Activity[] {
+    return (
+      this.db.prepare('SELECT payload FROM activity_events ORDER BY sequence DESC').all() as {
+        payload: string;
+      }[]
+    ).map((r) => JSON.parse(r.payload));
+  }
   cached(key: string) {
     return (
       this.db.prepare('SELECT output FROM cache WHERE key=?').get(key) as
@@ -152,13 +213,22 @@ export class Store {
       .run(key, output);
   }
   backup() {
-    return {
-      format: 'workroom' as const,
-      version: 2 as const,
+    const history = new Map(this.activityHistory().map((a) => [a.id, a]));
+    for (const a of this.state.activities) history.set(a.id, a);
+    return backupSchema.parse({
+      format: 'workroom',
+      version: 2,
       createdAt: Date.now(),
-      state: structuredClone(this.state),
+      state: { ...structuredClone(this.state), activities: this.state.activities.slice(0, 250) },
       attempts: this.attempts(),
-    };
+      attemptResults: (
+        this.db.prepare('SELECT attempt_id,payload FROM attempt_results').all() as {
+          attempt_id: string;
+          payload: string;
+        }[]
+      ).map((r) => ({ attemptId: r.attempt_id, ...JSON.parse(r.payload) })),
+      activityHistory: [...history.values()].sort((a, b) => b.createdAt - a.createdAt),
+    });
   }
   snapshot(label: string) {
     if (this.path === ':memory:') return;
@@ -189,6 +259,15 @@ export class Store {
       if (t.status === 'working') {
         t.status = 'failed';
         t.error = 'Restored in-flight work needs review before retry.';
+        const receipt = parsed.attempts.find(
+          (a) => a.id === t.attemptId && a.projectId === t.projectId && a.taskId === t.id,
+        );
+        const response = parsed.attemptResults?.find((r) => r.attemptId === receipt?.id);
+        if (receipt)
+          t.recovery = {
+            attemptId: receipt.id,
+            hasResponse: !!response && !response.outputLimitReached,
+          };
         delete t.leaseId;
         delete t.leaseExpiresAt;
       }
@@ -196,7 +275,25 @@ export class Store {
     try {
       this.db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(restored));
       for (const a of existing.values()) this.putAttempt(a);
-      this.db.exec('DELETE FROM cache; COMMIT');
+      this.db.exec('DELETE FROM cache; DELETE FROM activity_events; DELETE FROM attempt_results');
+      for (const r of parsed.attemptResults || [])
+        this.db
+          .prepare('INSERT OR REPLACE INTO attempt_results VALUES(?,?)')
+          .run(
+            r.attemptId,
+            JSON.stringify({
+              text: r.text,
+              outputLimitReached: r.outputLimitReached,
+              observations: r.observations,
+            }),
+          );
+      for (const a of [...(parsed.activityHistory || []), ...restored.activities].sort(
+        (a, b) => a.createdAt - b.createdAt,
+      ))
+        this.recordActivity(a);
+      restored.activities = this.activityHistory().slice(0, 250);
+      this.db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(restored));
+      this.db.exec('COMMIT');
       this.state = restored;
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -204,11 +301,21 @@ export class Store {
     }
   }
   save() {
-    this.db
-      .prepare(
-        'INSERT INTO workspace(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
-      )
-      .run(JSON.stringify(this.state));
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const activity of [...this.state.activities].reverse()) this.recordActivity(activity);
+      this.state.activities = this.state.activities.slice(0, 250);
+      this.db
+        .prepare(
+          'INSERT INTO workspace(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
+        )
+        .run(JSON.stringify(this.state));
+      this.db.exec('COMMIT');
+      this.revision++;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   private recoverProjects(state: WorkspaceState) {
     for (const m of state.meetings || [])

@@ -3,6 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
+import { commandKind, evidenceGaps } from './verification.js';
+import type { Observation } from '../shared/verification.js';
 import type { Generated } from './policy.js';
 import type { Codex, CodexOptions, ThreadOptions } from '@openai/codex-sdk';
 import { codexFailure, CodexWorkerError } from './codex-errors.js';
@@ -19,6 +21,8 @@ export const managedInfo = {
     'Coding sandbox has not been checked. Enable and sign in to Codex, then check connections.',
   codexMessage:
     'Disabled. Install Codex CLI, sign in with ChatGPT, and set WORKROOM_CODEX_ENABLED=1.',
+  ollamaModels: undefined as string[] | undefined,
+  compatibleModels: undefined as string[] | undefined,
   ollamaReady: false,
   ollamaMessage: 'Set OLLAMA_MODEL and run Ollama locally.',
   compatibleReady: false,
@@ -126,20 +130,31 @@ export async function refreshManagedInfo(checkApis = false) {
     const response = await fetch(new URL('/api/tags', url), { signal: AbortSignal.timeout(2500) });
     const data = (await response.json()) as { models?: { name: string; model?: string }[] };
     const chosen = process.env.OLLAMA_MODEL || DEFAULT_LOCAL_MODEL;
-    managedInfo.ollamaReady =
-      !!chosen &&
-      response.ok &&
-      !!data.models?.some((m) => m.name === chosen || m.model === chosen);
-    managedInfo.ollamaMessage = managedInfo.ollamaReady
-      ? 'Local service and selected model detected. No model was downloaded or run.'
-      : `Selected local model is not installed: ${chosen}. Run npm run setup:local, then check connections.`;
+    managedInfo.ollamaModels =
+      response.ok && Array.isArray(data.models)
+        ? [
+            ...new Set(
+              data.models.flatMap((m) =>
+                [m.name, m.model].filter((v): v is string => typeof v === 'string'),
+              ),
+            ),
+          ]
+        : [];
+    managedInfo.ollamaReady = response.ok && Array.isArray(data.models);
+    managedInfo.ollamaMessage = !managedInfo.ollamaReady
+      ? 'Ollama did not return a valid model list. Check the local service.'
+      : managedInfo.ollamaModels.includes(chosen)
+        ? 'Local service reachable; the default model is installed. Generation has not been tested.'
+        : `Local service reachable. Default model ${chosen} is missing; installed project models can still run. Install the default with npm run setup:local or select an installed model.`;
   } catch {
     managedInfo.ollamaReady = false;
+    managedInfo.ollamaModels = [];
     managedInfo.ollamaMessage =
       'Local Ollama is not reachable. Start it and install a suitable model yourself.';
   }
   managedInfo.compatibleReady = false;
-  if (process.env.COMPATIBLE_API_URL && process.env.COMPATIBLE_MODEL)
+  managedInfo.compatibleModels = [];
+  if (process.env.COMPATIBLE_API_URL)
     try {
       const url = serviceUrl(
         process.env.COMPATIBLE_API_URL,
@@ -152,10 +167,12 @@ export async function refreshManagedInfo(checkApis = false) {
         signal: AbortSignal.timeout(2500),
       });
       const data = (await response.json()) as { data?: { id: string }[] };
-      managedInfo.compatibleReady =
-        response.ok && !!data.data?.some((m) => m.id === process.env.COMPATIBLE_MODEL);
+      managedInfo.compatibleReady = response.ok && Array.isArray(data.data);
+      managedInfo.compatibleModels = managedInfo.compatibleReady
+        ? data.data!.map((m) => m.id).filter((id) => typeof id === 'string')
+        : [];
       managedInfo.compatibleMessage = managedInfo.compatibleReady
-        ? `${process.env.COMPATIBLE_BILLING === 'local' ? 'Local billing mode.' : 'Paid API controls apply.'} Selected model is listed. Generation compatibility is checked on the first assignment.`
+        ? `${process.env.COMPATIBLE_BILLING === 'local' ? 'Local billing mode.' : 'Paid API controls apply.'} Service reachable; project model availability is checked separately. Generation compatibility is checked on the first assignment.`
         : 'The model service did not list the configured model. Check its URL, model name, and authentication.';
     } catch {
       managedInfo.compatibleMessage =
@@ -497,6 +514,7 @@ export async function codexWork(
   structured = false,
   research = false,
   onTrace?: (event: ConsoleEvent) => void,
+  assignment?: Pick<Task, 'workType' | 'acceptanceCriteria'>,
 ): Promise<Generated> {
   if (!managedInfo.codexReady) throw new CodexWorkerError('CODEX_AUTH');
   const controller = new AbortController();
@@ -534,8 +552,8 @@ export async function codexWork(
     );
     let text = '',
       completed = false,
-      toolsCompleted = false,
       usage: Generated = { text: '' };
+    const observations: Observation[] = [];
     const trace = nativeConsole(onTrace);
     for await (const event of turn.events) {
       if (
@@ -546,12 +564,31 @@ export async function codexWork(
         const item = event.item;
         if (
           event.type === 'item.completed' &&
-          ((item.type === 'command_execution' &&
-            item.status === 'completed' &&
-            item.exit_code === 0) ||
-            (item.type === 'file_change' && item.status === 'completed'))
+          item.type === 'command_execution' &&
+          item.status === 'completed' &&
+          item.exit_code === 0
+        ) {
+          const kind = commandKind(item.command);
+          if (kind)
+            observations.push({
+              id: item.id,
+              kind,
+              reference: item.command.slice(0, 1500),
+              detail: item.aggregated_output.slice(-2000),
+            });
+        }
+        if (
+          event.type === 'item.completed' &&
+          item.type === 'file_change' &&
+          item.status === 'completed'
         )
-          toolsCompleted = true;
+          for (const change of item.changes)
+            observations.push({
+              id: item.id,
+              kind: 'artifact',
+              reference: change.path.slice(0, 1500),
+              detail: change.kind,
+            });
         if (item.type === 'mcp_tool_call' || (item.type === 'web_search' && !research)) {
           controller.abort();
           throw new CodexWorkerError('CODEX_TOOL_BLOCKED');
@@ -597,6 +634,7 @@ export async function codexWork(
       if (event.type === 'error') throw codexFailure(event.message);
     }
     if (!completed) throw new CodexWorkerError('CODEX_NO_RECEIPT');
+    usage.observations = observations.slice(-100);
     if (structured) {
       // Keep the confirmed usage receipt even if the work record is inconsistent.
       let value: unknown;
@@ -608,16 +646,17 @@ export async function codexWork(
       const parsed = workResultSchema.safeParse(value);
       if (!parsed.success) return { ...usage, text };
       const result = parsed.data;
-      if (result.outcome === 'complete' && !toolsCompleted) {
+      const gaps = evidenceGaps(assignment, observations, result);
+      if (result.outcome === 'complete' && gaps.length) {
         result.outcome = 'blocked';
         result.summary =
-          'No successful file or command activity was reported. This project assignment has not been verified.';
+          'This project assignment has not been verified. ' + gaps.join(' ').slice(0, 1050);
         result.checks = [
           ...result.checks.slice(0, 11),
           {
-            criterion: 'Real file inspection or command verification',
+            criterion: 'Observed acceptance evidence',
             status: 'not_met',
-            evidence: 'No successful file or command event was received from the native worker.',
+            evidence: gaps.join(' ').slice(0, 600),
           },
         ];
       }
@@ -631,9 +670,9 @@ export async function codexWork(
       !result.summary.trim()
     )
       throw new Error('Invalid coding result');
-    if (result.outcome === 'complete' && !toolsCompleted) {
+    if (result.outcome === 'complete' && evidenceGaps(assignment, observations).length) {
       result.outcome = 'blocked';
-      result.summary = `No successful file or command tool activity was reported. This software assignment has not been verified.\n\n${result.summary}`;
+      result.summary = `No substantive file inspection or verification tool activity was reported. This software assignment has not been verified.\n\n${result.summary}`;
     }
     return { ...usage, text: JSON.stringify(result) };
   } catch (error) {

@@ -1,3 +1,4 @@
+import type { Observation } from './verification.js';
 import type { WorkResult } from './work.js';
 export type Provider =
   'demo' | 'openai' | 'gemini' | 'external' | 'codex' | 'ollama' | 'compatible';
@@ -60,7 +61,15 @@ export interface Task {
   leaseExpiresAt?: number;
   toolLog?: { id: string; type: string; detail: string; status?: string }[];
   readOnly?: boolean;
+  workType?: 'plan' | 'implementation' | 'review' | 'tests';
+  acceptanceCriteria?: {
+    id: string;
+    description: string;
+    evidence: 'artifact' | 'verification' | 'inspection' | 'report';
+  }[];
+  observations?: Observation[];
   result?: WorkResult;
+  recovery?: { attemptId: string; hasResponse: boolean };
   responseIssue?: {
     receivedAt: number;
     issues: string[];
@@ -175,11 +184,14 @@ export interface WorkspaceState {
 }
 export interface RuntimeInfo {
   available: Record<Provider, boolean>;
+  listedModels?: Partial<Record<'ollama' | 'compatible', string[]>>;
   models: { openai: string; gemini: string; codex: string; ollama: string; compatible: string };
   diagnostics?: Record<string, string>;
   coding?: { ready: boolean; message: string };
 }
 export interface Bootstrap {
+  serverId?: string;
+  revision?: number;
   state: WorkspaceState;
   runtime: RuntimeInfo;
   attempts?: Attempt[];

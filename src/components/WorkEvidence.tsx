@@ -22,6 +22,25 @@ export default function WorkEvidence({ task }: { task: Task }) {
           </details>
         </details>
       )}
+      {!!task.observations?.length && (
+        <details className="control-section">
+          <summary>Observed tool evidence ({task.observations.length})</summary>
+          <p className="field-hint">
+            These receipts confirm tool events and command exits. They do not by themselves prove
+            the entire project correct.
+          </p>
+          {task.observations.map((o, i) => (
+            <div key={`${o.id}:${i}`}>
+              <strong>{o.kind}</strong>
+              <pre>
+                {o.reference}
+                {'\n'}
+                {o.detail}
+              </pre>
+            </div>
+          ))}
+        </details>
+      )}
       {task.result && (
         <section className="control-section" aria-label="Work result and acceptance checks">
           <h3>

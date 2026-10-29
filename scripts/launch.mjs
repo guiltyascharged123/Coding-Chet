@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { sourceHash, runtimeIdentity, runtimeMatches } from './runtime-identity.mjs';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -51,35 +52,6 @@ function runNpm(args) {
   });
 }
 
-function sourceHash() {
-  const hash = createHash('sha256');
-  const add = (name) => {
-    const path = join(root, name);
-    if (!existsSync(path)) return;
-    if (name.endsWith('/')) {
-      for (const item of readdirSync(path, { withFileTypes: true }).sort((a, b) =>
-        a.name.localeCompare(b.name),
-      ))
-        add(`${name}${item.name}${item.isDirectory() ? '/' : ''}`);
-    } else hash.update(name).update(readFileSync(path));
-  };
-  for (const name of [
-    'package.json',
-    'package-lock.json',
-    'index.html',
-    'tsconfig.json',
-    'vite.config.ts',
-    'src/',
-    'server/',
-    'shared/',
-    'public/',
-    'tests/',
-    'scripts/',
-  ])
-    add(name);
-  return hash.digest('hex');
-}
-
 function matches(path, expected) {
   return existsSync(path) && readFileSync(path, 'utf8').trim() === expected;
 }
@@ -101,15 +73,13 @@ function openBrowser(url) {
 async function health(url) {
   try {
     const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(800) });
-    const result = await response.json();
-    return (
-      result.ok &&
-      result.service === 'workroom' &&
-      result.mode === 'workspace' &&
-      result.workspaceId === workspaceId
-    );
-  } catch {
-    return false;
+    try {
+      return response.ok ? await response.json() : { occupied: true };
+    } catch {
+      return { occupied: true };
+    }
+  } catch (error) {
+    return error.cause?.code === 'ECONNREFUSED' ? undefined : { occupied: true };
   }
 }
 
@@ -119,6 +89,39 @@ try {
       'Install Node.js 24 LTS from https://nodejs.org, reopen your terminal, then run npm run local again.',
     );
   mkdirSync(join(root, '.data'), { recursive: true });
+  // New files receive local defaults; existing configuration stays intact.
+  createLocalEnv(root);
+  process.loadEnvFile('.env');
+  const selected = startupProvider(root);
+  const database = startupDatabase(root);
+  if (!process.env.DATABASE_PATH && database === join(root, '.data', 'demo.sqlite'))
+    console.log(
+      'Opening existing records from .data/demo.sqlite. This workspace uses real model connections; historical simulation results remain labeled.',
+    );
+  const port = Number(process.env.PORT || 3001);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535)
+    throw new Error('Set PORT to a port between 1024 and 65535.');
+  const localUrl = `http://127.0.0.1:${port}`;
+  const forwardedUrl =
+    process.env.CODESPACES === 'true' && process.env.CODESPACE_NAME
+      ? `https://${process.env.CODESPACE_NAME}-${port}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN || 'app.github.dev'}`
+      : '';
+  const displayUrl = forwardedUrl || localUrl;
+  const childEnv = {
+    ...process.env,
+    PORT: String(port),
+    HOST: process.env.CODESPACES === 'true' ? '0.0.0.0' : '127.0.0.1',
+    AGENT_PROVIDER: selected,
+    WORKROOM_DEMO: '0',
+    DATABASE_PATH: database,
+    ...(forwardedUrl ? { WORKROOM_ORIGIN: forwardedUrl } : {}),
+  };
+  const expected = { workspaceId, ...runtimeIdentity(root, childEnv) };
+  const running = prepareOnly ? undefined : await health(localUrl);
+  if (running && !runtimeMatches(running, expected))
+    throw new Error(
+      `Port ${port} is occupied by an older Workroom instance, different settings/database, or another service. Stop the existing Workroom terminal with Ctrl+C and run npm run local again; or choose a different PORT. No running process was stopped.`,
+    );
   const lockHash = createHash('sha256').update(readFileSync('package-lock.json')).digest('hex');
   const installStamp = join(root, 'node_modules', '.workroom-install');
   if (!existsSync('node_modules/tsx/package.json') || !matches(installStamp, lockHash)) {
@@ -126,7 +129,7 @@ try {
     await runNpm(['ci', '--no-audit', '--no-fund']);
     writeFileSync(installStamp, lockHash);
   } else console.log('\n1/3 · Dependencies are ready.');
-  const buildHash = sourceHash();
+  const buildHash = sourceHash(root);
   const buildStamp = join(root, 'dist', '.workroom-build');
   if (!existsSync('dist/index.html') || !matches(buildStamp, buildHash)) {
     console.log('\n2/3 · Preparing the browser app.\n');
@@ -139,54 +142,28 @@ try {
     );
     process.exit(0);
   }
-  // New files receive local defaults; existing configuration stays intact.
-  createLocalEnv(root);
-  process.loadEnvFile('.env');
-  const selected = startupProvider(root);
-  const database = startupDatabase(root);
-  if (!process.env.DATABASE_PATH && database === join(root, '.data', 'demo.sqlite'))
-    console.log(
-      'Opening existing records from .data/demo.sqlite. This workspace uses real model connections; historical simulation results remain labeled.',
-    );
-  // Preserve an existing Codex/API/external choice. Only local-first workspaces
-  // trigger installation, and setup can explicitly be managed separately.
-  if (selected === 'ollama' && process.env.WORKROOM_LOCAL_SETUP !== '0') {
-    try {
-      await ensureLocalModel(root);
-    } catch (error) {
-      throw new Error(
-        `Local model setup could not finish: ${error.message}\nRun npm run setup:local to retry. See docs/LOCAL-MODELS.md for installation and exact-tag troubleshooting. Your saved work is retained; no model or API fallback was used.`,
-      );
-    }
-  }
-  const port = Number(process.env.PORT || 3001);
-  if (!Number.isInteger(port) || port < 1024 || port > 65535)
-    throw new Error('Set PORT to a port between 1024 and 65535.');
-  const localUrl = `http://127.0.0.1:${port}`;
-  const forwardedUrl =
-    process.env.CODESPACES === 'true' && process.env.CODESPACE_NAME
-      ? `https://${process.env.CODESPACE_NAME}-${port}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN || 'app.github.dev'}`
-      : '';
-  const displayUrl = forwardedUrl || localUrl;
-  if (await health(localUrl)) {
+  if (runtimeMatches(running, expected)) {
     console.log(
       `\nWorkroom is already ready: ${displayUrl}\nCreate a project or open your saved work.\n`,
     );
     openBrowser(displayUrl);
   } else {
+    // Preserve an existing Codex/API/external choice. Only local-first workspaces
+    // trigger installation, and setup can explicitly be managed separately.
+    if (selected === 'ollama' && process.env.WORKROOM_LOCAL_SETUP !== '0') {
+      try {
+        await ensureLocalModel(root);
+      } catch (error) {
+        throw new Error(
+          `Local model setup could not finish: ${error.message}\nRun npm run setup:local to retry. See docs/LOCAL-MODELS.md for installation and exact-tag troubleshooting. Your saved work is retained; no model or API fallback was used.`,
+        );
+      }
+    }
     console.log('\n3/3 · Opening your saved workspace…\n');
     server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
       cwd: root,
       stdio: 'inherit',
-      env: {
-        ...process.env,
-        PORT: String(port),
-        HOST: process.env.CODESPACES === 'true' ? '0.0.0.0' : '127.0.0.1',
-        AGENT_PROVIDER: selected,
-        WORKROOM_DEMO: '0',
-        DATABASE_PATH: database,
-        ...(forwardedUrl ? { WORKROOM_ORIGIN: forwardedUrl } : {}),
-      },
+      env: childEnv,
     });
     let stopped = false;
     server.on('error', () => {
@@ -199,7 +176,7 @@ try {
     for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server?.kill('SIGTERM'));
     let ready = false;
     for (let attempt = 0; attempt < 100 && !stopped; attempt++) {
-      if (await health(localUrl)) {
+      if (runtimeMatches(await health(localUrl), expected)) {
         ready = true;
         break;
       }

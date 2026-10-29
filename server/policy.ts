@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { Observation } from '../shared/verification.js';
 import type { Attempt, CostPolicy, MemoryItem, Project, Provider, Task } from '../shared/types.js';
 import type { Store } from './store.js';
 import { defaultPolicy } from '../shared/schemas.js';
@@ -30,6 +31,7 @@ export type Generated = {
   inputTokens?: number;
   outputTokens?: number;
   outputLimitReached?: boolean;
+  observations?: Observation[];
 };
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export function billingFor(provider: Provider): Attempt['billing'] {
@@ -258,15 +260,23 @@ export async function guarded(
               result.outputTokens! * rate.outputPerMillion) /
             1e6
           : undefined;
-      store.putAttempt({
-        ...attempt,
-        status: 'completed',
-        actualUsd: actual,
-        inputTokens: usageKnown ? result.inputTokens : undefined,
-        outputTokens: usageKnown ? result.outputTokens : undefined,
-      });
+      store.completeAttempt(
+        {
+          ...attempt,
+          status: 'completed',
+          actualUsd: actual,
+          inputTokens: usageKnown ? result.inputTokens : undefined,
+          outputTokens: usageKnown ? result.outputTokens : undefined,
+        },
+        {
+          text: result.text.slice(0, 200000),
+          outputLimitReached: result.outputLimitReached || result.text.length > 200000,
+          observations: result.observations,
+        },
+      );
     }
     completionConfirmed = true;
+    if (task && result.observations) task.observations = result.observations;
     if (result.outputLimitReached) {
       const message =
         'The model reached the configured output token limit before finishing its response. Open Workspace controls → Maximum output tokens and raise it within your budget, or request a smaller deliverable, then retry. The partial reply is saved; no automatic retry or API fallback was attempted.';

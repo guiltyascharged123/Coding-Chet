@@ -417,6 +417,7 @@ test('software roles share real files through approval, blocked review, retry an
     );
     store.state.tasks.find((t) => t.projectId === p.id)!.requiresApproval = true;
     engine.start();
+    p.model ||= 'offline-fixture-model';
     engine.runProject(p.id);
     await until(() =>
       store.state.approvals.some((a) => a.projectId === p.id && a.status === 'pending'),

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { acceptanceListSchema, observationSchema } from './verification.js';
 import { decisionSchema, workResultSchema } from './work.js';
 export const providers = [
   'demo',
@@ -93,6 +94,15 @@ export const memorySchema = z.object({
   status: z.enum(['proposed', 'verified']),
   sourceTaskId: id.optional(),
   sourceHash: text.max(64).optional(),
+  createdAt: z.number().finite(),
+});
+export const activitySchema = z.object({
+  id,
+  projectId: id,
+  agentId: id.optional(),
+  targetAgentId: id.optional(),
+  type: z.enum(['system', 'started', 'message', 'completed', 'approval', 'error']),
+  message: text.max(5000),
   createdAt: z.number().finite(),
 });
 export const stateSchema = z
@@ -207,7 +217,11 @@ export const stateSchema = z
             .max(100)
             .optional(),
           readOnly: z.boolean().optional(),
+          workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
+          acceptanceCriteria: acceptanceListSchema.optional(),
+          observations: z.array(observationSchema).max(100).optional(),
           result: workResultSchema.optional(),
+          recovery: z.object({ attemptId: id, hasResponse: z.boolean() }).optional(),
           responseIssue: z
             .object({
               receivedAt: z.number().finite(),
@@ -237,19 +251,7 @@ export const stateSchema = z
         }),
       )
       .max(10000),
-    activities: z
-      .array(
-        z.object({
-          id,
-          projectId: id,
-          agentId: id.optional(),
-          targetAgentId: id.optional(),
-          type: z.enum(['system', 'started', 'message', 'completed', 'approval', 'error']),
-          message: text.max(5000),
-          createdAt: z.number().finite(),
-        }),
-      )
-      .max(1000),
+    activities: z.array(activitySchema).max(1000),
     approvals: z
       .array(
         z.object({
@@ -355,4 +357,15 @@ export const backupSchema = z.object({
   createdAt: z.number().finite(),
   state: stateSchema,
   attempts: z.array(attemptSchema).max(50000),
+  activityHistory: z.array(activitySchema).optional(),
+  attemptResults: z
+    .array(
+      z.object({
+        attemptId: id,
+        text: text.max(200000),
+        outputLimitReached: z.boolean().optional(),
+        observations: z.array(observationSchema).max(100).optional(),
+      }),
+    )
+    .optional(),
 });

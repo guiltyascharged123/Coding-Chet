@@ -203,6 +203,9 @@ export default function WorkspaceControls({
                         ...new Set(
                           [
                             data.runtime.models[connection],
+                            ...(data.runtime.listedModels?.[
+                              connection as 'ollama' | 'compatible'
+                            ] || []),
                             ...data.state.projects
                               .filter((p) => p.provider === connection)
                               .map((p) => p.model),
@@ -517,11 +520,12 @@ export default function WorkspaceControls({
           <section className="control-section">
             <h3>Move your workspace between computers</h3>
             <p>
-              Export projects, task results, approvals, curated memory, limits, and request
-              receipts. Source files in managed coding folders are separate; copy those folders or
-              download their source ZIPs as well. Credentials and model weights are not included.
-              Keep the file private: it contains your project data. Demo and normal workspaces have
-              separate databases; export from the one you are using.
+              Export projects, task results, approvals, curated memory, full activity history, saved
+              model replies, limits, and request receipts. Source files in managed coding folders
+              are separate; copy those folders or download their source ZIPs as well. Credentials
+              and model weights are not included. Keep the file private: it contains your project
+              data. Demo and normal workspaces have separate databases; export from the one you are
+              using.
             </p>
             <button
               className="button primary"

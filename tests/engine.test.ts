@@ -156,7 +156,8 @@ test('SQLite preserves work and safely recovers interrupted tasks', () => {
     store = new Store(path);
     assert.equal(store.state.projects[0].status, 'paused');
     assert.equal(store.state.tasks[0].output, 'Saved deliverable');
-    assert.equal(store.state.tasks[1].status, 'queued');
+    assert.equal(store.state.tasks[1].status, 'failed');
+    assert.match(store.state.tasks[1].error!, /review/i);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

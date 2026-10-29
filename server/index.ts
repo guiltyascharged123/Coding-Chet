@@ -6,7 +6,10 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { Engine, AppError } from './engine.js';
 import { Store } from './store.js';
-import { allowedOrigin } from './origin.js';
+import { allowedHost, allowedOrigin, BrowserSessions } from './origin.js';
+// @ts-expect-error Shared Node bootstrap module is intentionally dependency-free JavaScript.
+import { runtimeIdentity } from '../scripts/runtime-identity.mjs';
+import { acceptanceListSchema } from '../shared/verification.js';
 import { collaborationSchema, providerSchema } from '../shared/schemas.js';
 import { CONSOLE_LIMITS, type ConsoleEntry } from '../shared/console.js';
 import { refreshManagedInfo } from './managed.js';
@@ -14,16 +17,58 @@ import { projectWorkspace, workspaceFiles, workspaceFile, workspaceZip } from '.
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '25mb' }));
+const sessions = new BrowserSessions();
+// Validate authority and browser session before reading potentially expensive bodies.
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
-  if (req.method !== 'GET' && req.headers.origin) {
-    if (!allowedOrigin(req.headers.origin, req.headers.host, process.env.WORKROOM_ORIGIN))
-      return res.status(403).json({ error: 'Cross-origin writes are not allowed.' });
+  if (!allowedHost(req.headers.host, process.env.WORKROOM_ORIGIN))
+    return res
+      .status(403)
+      .json({ error: 'Untrusted request host. Configure WORKROOM_ORIGIN for a trusted proxy.' });
+  if (
+    req.headers.origin &&
+    !allowedOrigin(req.headers.origin, req.headers.host, process.env.WORKROOM_ORIGIN)
+  )
+    return res.status(403).json({ error: 'Cross-origin requests are not allowed.' });
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    if (req.path.startsWith('/api/runner/')) {
+      const expected = process.env.RUNNER_TOKEN || '';
+      const supplied = req.headers.authorization?.replace(/^Bearer /i, '') || '';
+      if (
+        expected.length < 24 ||
+        Buffer.byteLength(supplied) !== Buffer.byteLength(expected) ||
+        !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))
+      )
+        return res
+          .status(401)
+          .json({ error: 'A valid server-configured RUNNER_TOKEN is required.' });
+    } else if (!sessions.accepts(req.headers.cookie, req.get('X-Workroom-CSRF'))) {
+      return res.status(403).json({
+        code: 'SESSION_REQUIRED',
+        error: 'Refresh the browser session before making changes.',
+      });
+    }
   }
   next();
 });
+app.get('/api/session', (req, res) => {
+  const token = sessions.issue(req.headers.cookie);
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader(
+    'Set-Cookie',
+    `workroom_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${process.env.WORKROOM_ORIGIN?.startsWith('https://') ? '; Secure' : ''}`,
+  );
+  res.json({ token });
+});
+app.use((req, res, next) =>
+  express.json({ limit: req.path === '/api/restore' ? '25mb' : '1mb', inflate: false })(
+    req,
+    res,
+    next,
+  ),
+);
+const identity = runtimeIdentity(resolve('.'));
 const store = new Store(process.env.DATABASE_PATH || resolve('.data/workroom.sqlite'));
 await refreshManagedInfo();
 const engine = new Engine(store);
@@ -39,12 +84,33 @@ const param = (req: express.Request, key: string) => String(req.params[key]);
 app.get('/api/health', (_req, res) =>
   res.json({
     ok: true,
+    ...identity,
     service: 'workroom',
     mode: process.env.WORKROOM_DEMO === '1' ? 'demo' : 'workspace',
     workspaceId: createHash('sha256').update(resolve('.')).digest('hex').slice(0, 16),
   }),
 );
 app.get('/api/state', (_req, res) => res.json(engine.bootstrap()));
+app.get(
+  '/api/projects/:id/activity',
+  route((req, res) => {
+    const project = engine.project(param(req, 'id'));
+    const query = z
+      .object({
+        before: z.coerce.number().int().positive().optional(),
+        type: z.enum(['system', 'started', 'message', 'completed', 'approval', 'error']).optional(),
+      })
+      .parse(req.query);
+    res.json(store.activityPage(project.id, query.before, query.type));
+  }),
+);
+app.post(
+  '/api/tasks/:id/recover',
+  route((req, res) => {
+    engine.recoverTask(param(req, 'id'));
+    res.json({ ok: true });
+  }),
+);
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -159,6 +225,8 @@ app.put(
           dependencies: z.array(z.string()).max(100),
           requiresApproval: z.boolean(),
           readOnly: z.boolean().optional(),
+          workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
+          acceptanceCriteria: acceptanceListSchema.optional(),
         }),
       )
       .min(1)
@@ -416,6 +484,18 @@ app.use(
         error: error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; '),
       });
     if (error instanceof AppError) return res.status(error.status).json({ error: error.message });
+    if (
+      error &&
+      typeof error === 'object' &&
+      'status' in error &&
+      [413, 415].includes(Number(error.status))
+    )
+      return res.status(Number(error.status)).json({
+        error:
+          Number(error.status) === 413
+            ? 'The request is too large.'
+            : 'Compressed request bodies are not supported.',
+      });
     if (error instanceof SyntaxError && 'body' in error)
       return res.status(400).json({ error: 'Invalid JSON request.' });
     // Provider errors are deliberately sanitized in providers.ts; never log credentials.

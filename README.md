@@ -102,3 +102,5 @@ Browser/model fixtures are deterministic tests of behavior, not evidence of live
 Workroom is a trusted local, single-user application. Classroom/multi-user use needs a separate design for privacy, permissions, supervision and model controls. The present work focuses on a clear project flow and useful model-backed output.
 
 MIT license for the application. Model weights and third-party services retain their own licenses and terms.
+
+See [Reliability, history and work evidence](docs/STABILITY.md) for activity retention, interrupted-result recovery, startup conflicts and verification limits.

@@ -1,17 +1,36 @@
 import type { Bootstrap } from '../shared/types';
+let session: Promise<string> | undefined;
+function browserToken(refresh = false) {
+  if (refresh) session = undefined;
+  return (session ||= fetch('/api/session', { cache: 'no-store' })
+    .then(async (response) => {
+      if (!response.ok)
+        throw new Error('The browser session could not connect. Refresh and try again.');
+      return (await response.json()).token as string;
+    })
+    .catch((error) => {
+      session = undefined;
+      throw error;
+    }));
+}
 export async function api<T = { ok: boolean }>(
   path: string,
   body?: unknown,
   method = 'POST',
 ): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
-  return data as T;
+  const send = async (refresh = false): Promise<T> => {
+    const token = await browserToken(refresh);
+    const response = await fetch(`/api${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'X-Workroom-CSRF': token },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const data = await response.json();
+    if (response.status === 403 && data.code === 'SESSION_REQUIRED' && !refresh) return send(true);
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+    return data as T;
+  };
+  return send();
 }
 export async function getState(): Promise<Bootstrap> {
   const response = await fetch('/api/state');

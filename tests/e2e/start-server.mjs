@@ -9,7 +9,11 @@ const seen = new Set();
 const modelServer = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   if (req.url === '/v1/models') {
-    res.end(JSON.stringify({ data: [{ id: 'workroom-browser-model' }] }));
+    res.end(
+      JSON.stringify({
+        data: [{ id: 'workroom-browser-model' }, { id: 'workroom-browser-model-variant' }],
+      }),
+    );
     return;
   }
   let raw = '';

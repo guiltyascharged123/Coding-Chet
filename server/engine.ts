@@ -22,6 +22,10 @@ import { projectWorkspace, workspaceFolder } from './workspaces.js';
 import { hash, memoryCurrent, policy, reserve, selectedMemory, relevantContext } from './policy.js';
 import { collaborationSchema, policySchema } from '../shared/schemas.js';
 import type { FollowUp } from '../shared/work.js';
+import { evidenceGaps, reportedAcceptanceGaps } from './verification.js';
+import { modelReadiness } from '../shared/model-readiness.js';
+import { workResultSchema } from '../shared/work.js';
+import { jsonValue } from './work-results.js';
 import { hasProjectTools } from '../shared/capabilities.js';
 import type { ConsoleEvent } from '../shared/console.js';
 import type { CostPolicy } from '../shared/types.js';
@@ -36,6 +40,7 @@ export class AppError extends Error {
 }
 
 export class Engine extends EventEmitter {
+  private serverId = randomUUID();
   private active = new Map<string, AbortController>();
   private planners = new Map<string, AbortController>();
   private conferences = new Map<string, AbortController>();
@@ -69,6 +74,8 @@ export class Engine extends EventEmitter {
   }
   bootstrap(): Bootstrap {
     return {
+      serverId: this.serverId,
+      revision: this.store.revision,
       state: {
         ...this.state,
         memory: (this.state.memory || []).map((m) => ({
@@ -84,7 +91,6 @@ export class Engine extends EventEmitter {
     };
   }
   commit() {
-    this.state.activities = this.state.activities.slice(0, 250);
     this.store.save();
     this.emit('change', this.bootstrap());
   }
@@ -152,7 +158,7 @@ export class Engine extends EventEmitter {
     agentId?: string,
     targetAgentId?: string,
   ) {
-    this.state.activities.unshift({
+    const activity: Activity = {
       id: randomUUID(),
       projectId,
       agentId,
@@ -160,7 +166,9 @@ export class Engine extends EventEmitter {
       type,
       message,
       createdAt: Date.now(),
-    });
+    };
+    this.store.recordActivity(activity);
+    this.state.activities = [activity, ...this.state.activities].slice(0, 250);
   }
   start() {
     this.timer = setInterval(() => this.tick(), 300);
@@ -262,7 +270,7 @@ export class Engine extends EventEmitter {
     if (this.planners.has(project.id)) throw new AppError('Planning is already active.', 409);
     if (this.state.tasks.some((t) => t.projectId === project.id))
       throw new AppError('Edit the existing plan instead of replacing it.');
-    if (!runtimeInfo().available[project.provider]) {
+    if (!modelReadiness(runtimeInfo(), project.provider, project.model).ready) {
       project.planningStatus = 'failed';
       project.planningError =
         'The selected model connection is not ready. Open Model connections, complete setup and check connections, then retry planning. No model request was sent.';
@@ -332,10 +340,10 @@ export class Engine extends EventEmitter {
   editPlan(id: string, rows: Task[], toolNetwork?: boolean, collaboration?: unknown) {
     const project = this.project(id);
     if (
-      this.conferences.size ||
+      this.projectMeetingActive(id) ||
       this.planners.has(id) ||
       project.status === 'running' ||
-      this.active.size ||
+      this.state.tasks.some((t) => this.active.has(t.id) && t.projectId === id) ||
       this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
     )
       throw new AppError('Pause the team before editing its plan.');
@@ -353,6 +361,8 @@ export class Engine extends EventEmitter {
           original.agentId !== row.agentId ||
           original.requiresApproval !== row.requiresApproval ||
           !!original.readOnly !== !!row.readOnly ||
+          original.workType !== row.workType ||
+          JSON.stringify(original.acceptanceCriteria) !== JSON.stringify(row.acceptanceCriteria) ||
           JSON.stringify(original.dependencies) !== JSON.stringify(row.dependencies)
         )
           throw new AppError(
@@ -365,8 +375,18 @@ export class Engine extends EventEmitter {
         this.store.attempts().some((a) => a.taskId === original.id && a.status === 'running')
       )
         throw new AppError('Wait for the cancelled worker to stop before editing.');
+      const assignmentChanged =
+        original &&
+        (original.title !== row.title ||
+          original.description !== row.description ||
+          original.agentId !== row.agentId ||
+          !!original.readOnly !== !!row.readOnly ||
+          original.workType !== row.workType ||
+          JSON.stringify(original.dependencies) !== JSON.stringify(row.dependencies) ||
+          JSON.stringify(original.acceptanceCriteria) !== JSON.stringify(row.acceptanceCriteria));
       return {
         ...original,
+        recovery: assignmentChanged ? undefined : original?.recovery,
         id: row.id,
         projectId: id,
         title: row.title,
@@ -375,6 +395,8 @@ export class Engine extends EventEmitter {
         dependencies: row.dependencies,
         requiresApproval: row.requiresApproval,
         readOnly: row.readOnly,
+        workType: row.workType,
+        acceptanceCriteria: row.acceptanceCriteria,
         status: original?.status || 'queued',
         output: original?.output || '',
         feedback: original?.feedback || '',
@@ -390,7 +412,11 @@ export class Engine extends EventEmitter {
     });
     const settings =
       collaboration === undefined ? undefined : collaborationSchema.parse(collaboration);
-    this.state.tasks = next.tasks;
+    // Preserve task objects held by workers in other projects. Validation clones them.
+    this.state.tasks = [
+      ...this.state.tasks.filter((t) => t.projectId !== id),
+      ...next.tasks.filter((t) => t.projectId === id),
+    ];
     if (settings) Object.assign(project, settings);
     if (hasProjectTools(project) && toolNetwork !== undefined) project.toolNetwork = toolNetwork;
     project.planningStatus = 'ready';
@@ -428,14 +454,14 @@ export class Engine extends EventEmitter {
   ) {
     const p = this.project(id);
     if (
-      this.conferences.size ||
+      this.projectMeetingActive(id) ||
       this.planners.has(id) ||
       p.status === 'running' ||
-      this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
+      this.state.tasks.some(
+        (t) => t.projectId === id && (t.status === 'working' || this.active.has(t.id)),
+      )
     )
       throw new AppError('Pause the project before changing its connection.');
-    if (!runtimeInfo().available[provider])
-      throw new AppError('The selected connection is not configured.');
     const selected =
       model?.trim() ||
       (provider !== 'demo' && provider !== 'external' ? runtimeInfo().models[provider] : '');
@@ -447,6 +473,8 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'Enter an exact model ID (up to 150 characters, without spaces). Model access is checked by your provider when work runs.',
       );
+    const readiness = modelReadiness(runtimeInfo(), provider, selected);
+    if (!readiness.ready) throw new AppError(readiness.message);
     const tools = p.workflow === 'software' || (workMode || p.workMode) === 'workspace';
     if (tools && provider !== 'codex')
       throw new AppError(
@@ -454,7 +482,10 @@ export class Engine extends EventEmitter {
       );
     const folder = tools ? p.workspaceFolder || workspaceFolder(p) : p.workspaceFolder;
     if (tools) projectWorkspace(this.store.path, { ...p, workspaceFolder: folder });
-    p.workMode = p.workflow === 'software' ? 'workspace' : workMode || p.workMode;
+    const nextMode = p.workflow === 'software' ? 'workspace' : workMode || p.workMode;
+    if (p.provider !== provider || p.model !== selected || p.workMode !== nextMode)
+      for (const task of this.state.tasks.filter((t) => t.projectId === id)) delete task.recovery;
+    p.workMode = nextMode;
     p.workspaceFolder = folder;
     p.provider = provider;
     p.model = provider === 'demo' || provider === 'external' ? undefined : selected;
@@ -470,14 +501,17 @@ export class Engine extends EventEmitter {
     if (
       project.status === 'running' ||
       this.planners.has(id) ||
-      this.conferences.size ||
-      this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
+      this.projectMeetingActive(id) ||
+      this.state.tasks.some(
+        (t) => t.projectId === id && (t.status === 'working' || this.active.has(t.id)),
+      )
     )
       throw new AppError('Pause the project before changing team instructions.');
     if ((project.instructionHistory?.length || 0) >= 50)
       throw new AppError(
         'This project has reached its 50 saved instruction versions. Export a backup before starting a new project.',
       );
+    for (const task of this.state.tasks.filter((t) => t.projectId === id)) delete task.recovery;
     project.instructionHistory ||= [];
     project.instructionHistory.push({ id: randomUUID(), text, reason, createdAt: Date.now() });
     this.event(
@@ -593,10 +627,8 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'This plan exceeds the task limit. Increase the limit in Workspace controls; no tasks have been discarded.',
       );
-    if (!runtimeInfo().available[project.provider])
-      throw new AppError(
-        'The project runtime is not configured. Configure it and check connections, or explicitly change this project’s connection in Workspace controls.',
-      );
+    if (!modelReadiness(runtimeInfo(), project.provider, project.model).ready)
+      throw new AppError(modelReadiness(runtimeInfo(), project.provider, project.model).message);
     project.status = this.state.approvals.some((a) => a.projectId === id && a.status === 'pending')
       ? 'needs_input'
       : 'running';
@@ -640,7 +672,10 @@ export class Engine extends EventEmitter {
             error: 'Cancelled; provider usage may already have been consumed.',
           });
       }
-      task.status = 'queued';
+      task.status = task.attemptId ? 'failed' : 'queued';
+      if (task.attemptId)
+        task.error =
+          'Cancelled work needs review. Wait for the worker to stop, then inspect Usage and existing files before retrying.';
       delete task.startedAt;
       delete task.leaseId;
       delete task.leaseExpiresAt;
@@ -648,9 +683,52 @@ export class Engine extends EventEmitter {
     this.event(id, 'system', 'Project paused. Work can resume from the saved task queue.');
     this.commit();
   }
+  recoverTask(id: string) {
+    const task = this.task(id);
+    if (this.active.has(id))
+      throw new AppError('Wait for the cancelled worker to stop before recovering.');
+    if (task.status !== 'failed' || !task.recovery)
+      throw new AppError('This task has no interrupted result to recover.');
+    const response = this.store.attemptResult(task.recovery.attemptId);
+    if (!response || response.outputLimitReached)
+      throw new AppError(
+        'A complete reply is unavailable. Inspect Usage and existing files before retrying.',
+      );
+    const parsed = workResultSchema.safeParse(jsonValue(response.text));
+    if (!parsed.success)
+      throw new AppError(
+        'The saved reply is not an accepted work result. Inspect the saved response in Live console before retrying.',
+      );
+    if (parsed.data.outcome === 'complete' && reportedAcceptanceGaps(task, parsed.data).length)
+      throw new AppError(
+        'Saved reply does not check all assigned acceptance criteria. Inspect it before retrying.',
+      );
+    if (hasProjectTools(this.project(task.projectId)) && parsed.data.outcome === 'complete') {
+      const gaps = evidenceGaps(task, response.observations || [], parsed.data);
+      if (gaps.length)
+        throw new AppError('Saved result lacks observed evidence: ' + gaps.join(' '));
+    }
+    task.observations = response.observations;
+    task.result = parsed.data;
+    task.output = parsed.data.deliverable;
+    delete task.recovery;
+    delete task.error;
+    if (task.result.outcome === 'continue') this.coordinate(task, task.result.followUps);
+    else if (task.result.outcome === 'blocked') this.fail(task, task.result.summary);
+    else this.complete(task, task.output);
+    this.event(
+      task.projectId,
+      'system',
+      'Recovered the saved model result without sending another model request.',
+      task.agentId,
+    );
+    this.commit();
+  }
   retryTask(id: string, feedback?: string) {
     const task = this.task(id);
     if (task.status !== 'failed') throw new AppError('Only failed tasks can be retried.');
+    if (this.active.has(id))
+      throw new AppError('Wait for the cancelled worker to stop before retrying.');
     if (this.store.attempts().some((a) => a.taskId === id && a.status === 'uncertain'))
       throw new AppError('Acknowledge uncertain usage in Workspace controls before retrying.');
     const target = this.project(task.projectId);
@@ -665,8 +743,9 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'Software delivery requires a ready Codex connection and coding sandbox. Check Model connections.',
       );
-    if (!runtimeInfo().available[target.provider])
-      throw new AppError('The project connection is not configured. Check Model connections.');
+    if (!modelReadiness(runtimeInfo(), target.provider, target.model).ready)
+      throw new AppError(modelReadiness(runtimeInfo(), target.provider, target.model).message);
+    delete task.recovery;
     task.status = 'queued';
     if (feedback?.trim()) task.feedback = feedback.trim();
     delete task.error;
@@ -738,13 +817,18 @@ export class Engine extends EventEmitter {
     const project = this.project(id);
     if (
       project.status === 'running' ||
-      this.active.size ||
-      this.planners.size ||
-      this.conferences.size
+      this.state.tasks.some((t) => t.projectId === id && this.active.has(t.id)) ||
+      this.planners.has(id) ||
+      this.projectMeetingActive(id)
     )
-      throw new AppError('Pause active work before changing collaboration settings.');
+      throw new AppError('Pause this project before changing collaboration settings.');
     Object.assign(project, collaborationSchema.parse(value));
     this.commit();
+  }
+  private projectMeetingActive(id: string) {
+    return (this.state.meetings || []).some(
+      (m) => m.projectId === id && this.conferences.has(m.id),
+    );
   }
   meeting(id: string) {
     const meeting = this.state.meetings?.find((m) => m.id === id);
@@ -760,9 +844,22 @@ export class Engine extends EventEmitter {
       this.state.tasks.some((t) => t.status === 'working')
     )
       throw new AppError(
-        'Wait for active work to finish, or pause it, before starting a team meeting.',
+        `Wait for active work to finish, or pause it, before starting a team meeting. Active projects: ${this.state.projects
+          .filter(
+            (p) =>
+              this.planners.has(p.id) ||
+              this.projectMeetingActive(p.id) ||
+              this.state.tasks.some(
+                (t) => t.projectId === p.id && (t.status === 'working' || this.active.has(t.id)),
+              ),
+          )
+          .map((p) => p.title)
+          .join(', ')}.`,
       );
-    if (!runtimeInfo().available[project.provider] || project.provider === 'external')
+    if (
+      !modelReadiness(runtimeInfo(), project.provider, project.model).ready ||
+      project.provider === 'external'
+    )
       throw new AppError(
         'Team meetings require a configured direct model connection. External workers retain their task protocol.',
       );
@@ -922,7 +1019,7 @@ export class Engine extends EventEmitter {
         project.status !== 'running' ||
         !project.meetingPolicy?.enabled ||
         project.provider === 'external' ||
-        !runtimeInfo().available[project.provider]
+        !modelReadiness(runtimeInfo(), project.provider, project.model).ready
       )
         continue;
       const meetings = (this.state.meetings || []).filter((m) => m.projectId === project.id);
@@ -1011,6 +1108,8 @@ export class Engine extends EventEmitter {
   private begin(task: Task) {
     task.status = 'working';
     task.startedAt = Date.now();
+    if (this.project(task.projectId).provider !== 'external') delete task.attemptId;
+    delete task.recovery;
     delete task.error;
     const project = this.project(task.projectId);
     this.consoleEvent(
@@ -1115,6 +1214,19 @@ export class Engine extends EventEmitter {
     } catch (error) {
       if (!controller.signal.aborted)
         this.fail(task, error instanceof Error ? error.message : 'The task failed. Please retry.');
+    } finally {
+      if (controller.signal.aborted && task.attemptId) {
+        const response = this.store.attemptResult(task.attemptId);
+        task.status = 'failed';
+        task.recovery = {
+          attemptId: task.attemptId,
+          hasResponse: !!response && !response.outputLimitReached,
+        };
+        task.error = response
+          ? 'A reply arrived after cancellation. Recover the saved result without another request, or inspect it before retrying.'
+          : 'Cancelled work needs review. Check Usage and existing files before explicitly retrying.';
+        this.commit();
+      }
     }
   }
   private handoff(task: Task) {

@@ -158,7 +158,7 @@ test('structured native work retains acceptance evidence, supports explicit sear
   try {
     const entries: string[] = [],
       visible: ConsoleEvent[] = [];
-    for (const withCommand of [true, false]) {
+    for (const withCommand of [true, false, 'pwd']) {
       const factory = (options: any): Pick<Codex, 'startThread'> => {
         assert.equal(options.config.web_search, 'live');
         return {
@@ -185,7 +185,7 @@ test('structured native work retains acceptance evidence, supports explicit sear
                         item: {
                           id: 'command',
                           type: 'command_execution',
-                          command: 'node --test',
+                          command: withCommand === 'pwd' ? 'pwd' : 'node --test',
                           aggregated_output: '2 passing',
                           status: 'completed',
                           exit_code: 0,
@@ -228,8 +228,8 @@ test('structured native work retains acceptance evidence, supports explicit sear
         (e) => visible.push(e),
       );
       const value = JSON.parse(answer.text);
-      assert.equal(value.outcome, withCommand ? 'complete' : 'blocked');
-      if (!withCommand) assert.equal(value.checks.at(-1).status, 'not_met');
+      assert.equal(value.outcome, withCommand === true ? 'complete' : 'blocked');
+      if (withCommand !== true) assert.equal(value.checks.at(-1).status, 'not_met');
     }
     assert.ok(entries.includes('web search'));
     assert.ok(entries.includes('command'));
@@ -593,7 +593,9 @@ test('connection checks inspect installed model metadata, and local generation h
     });
     process.env.OLLAMA_MODEL = 'missing-model';
     await refreshManagedInfo();
-    assert.equal(managedInfo.ollamaReady, false);
+    assert.equal(managedInfo.ollamaReady, true);
+    assert.deepEqual(managedInfo.ollamaModels, ['local-test:3b']);
+    assert.match(managedInfo.ollamaMessage, /missing/);
   } finally {
     globalThis.fetch = fetch;
     for (const k of Object.keys(process.env)) if (!(k in env)) delete process.env[k];

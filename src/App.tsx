@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { newerSnapshot } from '../shared/snapshots';
 import type {
   Activity,
   Agent,
@@ -64,6 +65,8 @@ import ProjectModal from './components/ProjectModal';
 import PlanEditor from './components/PlanEditor';
 import ProjectFiles from './components/ProjectFiles';
 import Collaboration from './components/Collaboration';
+import ActivityTimeline from './components/ActivityTimeline';
+import { modelReadiness } from '../shared/model-readiness';
 import LiveConsole from './components/LiveConsole';
 
 const Office = lazy(() => import('./components/Office'));
@@ -86,7 +89,8 @@ const taskLabels: Record<TaskStatus, string> = {
 };
 
 export default function App() {
-  const [data, setData] = useState<Bootstrap>();
+  const [data, updateData] = useState<Bootstrap>();
+  const setData = (next: Bootstrap) => updateData((current) => newerSnapshot(current, next));
   const [connected, setConnected] = useState(false);
   const [initialError, setInitialError] = useState('');
   const [view, setView] = useState<View>('workspace');
@@ -830,7 +834,7 @@ export default function App() {
                             : 'In a team meeting'
                           : !tasks.length
                             ? 'Add tasks to plan'
-                            : !data.runtime.available[project.provider]
+                            : !modelReadiness(data.runtime, project.provider, project.model).ready
                               ? 'Model setup needed'
                               : STATUS_LABELS[project.status]}
                       </span>
@@ -1140,20 +1144,13 @@ export default function App() {
                   <option value="error">Errors</option>
                 </select>
               </div>
-              <div className="activity-list">
-                {activities
-                  .filter((a) => activityFilter === 'all' || a.type === activityFilter)
-                  .map((a) => (
-                    <ActivityItem key={a.id} activity={a} agents={state.agents} />
-                  ))}
-                {!activities.some((a) => activityFilter === 'all' || a.type === activityFilter) && (
-                  <div className="empty-state">
-                    <MessageCircle size={32} />
-                    <h3>A quiet corner, for now.</h3>
-                    <p>Matching updates will appear as the team works.</p>
-                  </div>
-                )}
-              </div>
+              <ActivityTimeline
+                key={`${project.id}:${activityFilter}`}
+                projectId={project.id}
+                filter={activityFilter}
+                recent={activities}
+                render={(a) => <ActivityItem key={a.id} activity={a} agents={state.agents} />}
+              />
             </section>
           )}
 
@@ -1429,6 +1426,20 @@ export default function App() {
               <div className="task-error">
                 <strong>The task couldn’t finish</strong>
                 <p>{selectedTask.error}</p>
+                {selectedTask.recovery?.hasResponse && (
+                  <button
+                    className="button secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      act(
+                        () => api(`/tasks/${selectedTask.id}/recover`),
+                        'Recovered the saved result. No new model request was sent.',
+                      )
+                    }
+                  >
+                    Recover saved result · no model call
+                  </button>
+                )}
                 <label>
                   Additional direction for retry
                   <textarea
