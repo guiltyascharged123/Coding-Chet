@@ -52,7 +52,7 @@ export function runtimeIdentity(root, env = process.env) {
   const settings = Object.fromEntries(
     Object.keys(env)
       .filter((key) =>
-        /^(WORKROOM_(CODEX|ORIGIN|DEMO)|OPENAI_|GEMINI_|OLLAMA_|COMPATIBLE_|RUNNER_TOKEN$|AGENT_PROVIDER$|PORT$|HOST$)/.test(
+        /^(WORKROOM_(CODEX|ORIGIN|DEMO|SETTINGS_ROOT)|OPENAI_|GEMINI_|OLLAMA_|COMPATIBLE_|RUNNER_TOKEN$|AGENT_PROVIDER$|PORT$|HOST$)/.test(
           key,
         ),
       )

@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { codexReadiness } from './codex-readiness.js';
+import type { ConnectionInfo } from '../shared/types.js';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,11 +19,12 @@ import { DEFAULT_LOCAL_MODEL } from '../shared/defaults.js';
 
 export const managedInfo = {
   codexReady: false,
+  codexCode: 'disabled',
+  checkedAt: undefined as number | undefined,
   codingReady: false,
   codingMessage:
     'Coding sandbox has not been checked. Enable and sign in to Codex, then check connections.',
-  codexMessage:
-    'Disabled. Install Codex CLI, sign in with ChatGPT, and set WORKROOM_CODEX_ENABLED=1.',
+  codexMessage: codexReadiness(false, { output: '', available: true }, '').message,
   ollamaModels: undefined as string[] | undefined,
   compatibleModels: undefined as string[] | undefined,
   ollamaReady: false,
@@ -29,6 +33,29 @@ export const managedInfo = {
   compatibleMessage: 'Set COMPATIBLE_API_URL and COMPATIBLE_MODEL for a supported server.',
 };
 export const apiDiagnostics: Partial<Record<'openai' | 'gemini', string>> = {};
+const apiChecks = new Map<string, ConnectionInfo>();
+const apiCheckKey = (
+  provider: string,
+  model: string,
+  credential = process.env[provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY'] || '',
+) => `${provider}:${model}:${createHash('sha256').update(credential).digest('hex')}`;
+export function apiConnectionInfo(provider: 'openai' | 'gemini', model: string): ConnectionInfo {
+  if (!process.env[provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY'])
+    return {
+      state: 'disabled',
+      model,
+      message:
+        'No server-side API key configured. Open Configure connection, enter your API key, and Save connection. Manual .env edits require a restart.',
+    };
+  return (
+    apiChecks.get(apiCheckKey(provider, model)) || {
+      state: 'configured',
+      model,
+      message:
+        'API key configured; this model has not been checked. Key presence alone does not prove a working connection.',
+    }
+  );
+}
 export function codexEnvironment() {
   const env: Record<string, string> = {};
   // Deliberately exclude API keys, proxy credentials, and inherited agent settings.
@@ -50,7 +77,10 @@ export function codexEnvironment() {
     if (process.env[name]) env[name] = process.env[name]!;
   return env;
 }
-function status(command: string, args: string[]): Promise<string> {
+function status(
+  command: string,
+  args: string[],
+): Promise<{ output: string; available: boolean; timedOut?: boolean }> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       shell: false,
@@ -66,15 +96,15 @@ function status(command: string, args: string[]): Promise<string> {
     child.stderr.on('data', collect);
     const timer = setTimeout(() => {
       child.kill();
-      resolve('');
+      resolve({ output: '', available: true, timedOut: true });
     }, 4000);
     child.on('error', () => {
       clearTimeout(timer);
-      resolve('');
+      resolve({ output: '', available: false });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve(code === 0 ? output : '');
+      resolve({ output, available: true });
     });
   });
 }
@@ -95,42 +125,51 @@ export function serviceUrl(value: string, localOnly = false) {
     );
   return url;
 }
-export async function refreshManagedInfo(checkApis = false) {
-  managedInfo.codexReady = false;
-  managedInfo.codingReady = false;
-  managedInfo.codingMessage =
-    'Enable and sign in to Codex, then check connections to test coding tools without a model call.';
-  if (process.env.WORKROOM_CODEX_ENABLED === '1') {
-    let result = '';
+let refreshGeneration = 0;
+export async function refreshManagedInfo(
+  checkApis = false,
+  selected?: { provider: string; model?: string },
+) {
+  const generation = ++refreshGeneration;
+  const next = { ...managedInfo };
+  const enabled = process.env.WORKROOM_CODEX_ENABLED === '1';
+  let login = { output: '', available: true };
+  if (enabled) {
     try {
-      const entry = createRequire(import.meta.resolve('@openai/codex-sdk')).resolve(
-        '@openai/codex/bin/codex.js',
-      );
-      result = process.env.WORKROOM_CODEX_BIN
-        ? await status(process.env.WORKROOM_CODEX_BIN, ['login', 'status'])
-        : await status(process.execPath, [entry, 'login', 'status']);
+      if (process.env.WORKROOM_CODEX_BIN)
+        login = await status(process.env.WORKROOM_CODEX_BIN, ['login', 'status']);
+      else {
+        const entry = createRequire(import.meta.resolve('@openai/codex-sdk')).resolve(
+          '@openai/codex/bin/codex.js',
+        );
+        login = await status(process.execPath, [entry, 'login', 'status']);
+      }
     } catch {
-      /* Optional native CLI is not available on this installation. */
-    }
-    managedInfo.codexReady =
-      /logged in.*chatgpt/is.test(result) &&
-      !/api[- ]key/i.test(result) &&
-      !!process.env.WORKROOM_CODEX_MODEL;
-    managedInfo.codexMessage = managedInfo.codexReady
-      ? 'ChatGPT authentication detected. Subscription allowance is not known; one job can include several model turns.'
-      : 'Install Codex CLI, sign in with ChatGPT, and set WORKROOM_CODEX_MODEL to an exact model ID available to that account. API-key authentication is intentionally rejected.';
-    if (managedInfo.codexReady) {
-      const probe = await checkCodingSandbox();
-      managedInfo.codingReady = probe.ready;
-      managedInfo.codingMessage = probe.message;
+      login = { output: '', available: false };
     }
   }
+  const diagnostic = codexReadiness(enabled, login, process.env.WORKROOM_CODEX_MODEL || '');
+  const probe = diagnostic.ready
+    ? await checkCodingSandbox()
+    : {
+        ready: false,
+        message:
+          'Enable Codex and detect a ChatGPT CLI sign-in before checking managed coding tools.',
+      };
+  Object.assign(next, {
+    codexReady: diagnostic.ready,
+    codexCode: diagnostic.code,
+    codexMessage: diagnostic.message,
+    codingReady: probe.ready,
+    codingMessage: probe.message,
+    checkedAt: Date.now(),
+  });
   try {
     const url = serviceUrl(process.env.OLLAMA_URL || 'http://127.0.0.1:11434', true);
     const response = await fetch(new URL('/api/tags', url), { signal: AbortSignal.timeout(2500) });
     const data = (await response.json()) as { models?: { name: string; model?: string }[] };
     const chosen = process.env.OLLAMA_MODEL || DEFAULT_LOCAL_MODEL;
-    managedInfo.ollamaModels =
+    next.ollamaModels =
       response.ok && Array.isArray(data.models)
         ? [
             ...new Set(
@@ -140,20 +179,20 @@ export async function refreshManagedInfo(checkApis = false) {
             ),
           ]
         : [];
-    managedInfo.ollamaReady = response.ok && Array.isArray(data.models);
-    managedInfo.ollamaMessage = !managedInfo.ollamaReady
+    next.ollamaReady = response.ok && Array.isArray(data.models);
+    next.ollamaMessage = !next.ollamaReady
       ? 'Ollama did not return a valid model list. Check the local service.'
-      : managedInfo.ollamaModels.includes(chosen)
+      : next.ollamaModels.includes(chosen)
         ? 'Local service reachable; the default model is installed. Generation has not been tested.'
         : `Local service reachable. Default model ${chosen} is missing; installed project models can still run. Install the default with npm run setup:local or select an installed model.`;
   } catch {
-    managedInfo.ollamaReady = false;
-    managedInfo.ollamaModels = [];
-    managedInfo.ollamaMessage =
+    next.ollamaReady = false;
+    next.ollamaModels = [];
+    next.ollamaMessage =
       'Local Ollama is not reachable. Start it and install a suitable model yourself.';
   }
-  managedInfo.compatibleReady = false;
-  managedInfo.compatibleModels = [];
+  next.compatibleReady = false;
+  next.compatibleModels = [];
   if (process.env.COMPATIBLE_API_URL)
     try {
       const url = serviceUrl(
@@ -167,15 +206,15 @@ export async function refreshManagedInfo(checkApis = false) {
         signal: AbortSignal.timeout(2500),
       });
       const data = (await response.json()) as { data?: { id: string }[] };
-      managedInfo.compatibleReady = response.ok && Array.isArray(data.data);
-      managedInfo.compatibleModels = managedInfo.compatibleReady
+      next.compatibleReady = response.ok && Array.isArray(data.data);
+      next.compatibleModels = next.compatibleReady
         ? data.data!.map((m) => m.id).filter((id) => typeof id === 'string')
         : [];
-      managedInfo.compatibleMessage = managedInfo.compatibleReady
+      next.compatibleMessage = next.compatibleReady
         ? `${process.env.COMPATIBLE_BILLING === 'local' ? 'Local billing mode.' : 'Paid API controls apply.'} Service reachable; project model availability is checked separately. Generation compatibility is checked on the first assignment.`
         : 'The model service did not list the configured model. Check its URL, model name, and authentication.';
     } catch {
-      managedInfo.compatibleMessage =
+      next.compatibleMessage =
         'Could not reach the configured compatible server. Check its URL and authentication.';
     }
   if (checkApis)
@@ -187,9 +226,11 @@ export async function refreshManagedInfo(checkApis = false) {
           return;
         }
         const model =
-          provider === 'openai'
-            ? process.env.OPENAI_MODEL || 'gpt-4.1-mini'
-            : process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+          selected?.provider === provider && selected.model
+            ? selected.model
+            : provider === 'openai'
+              ? process.env.OPENAI_MODEL || 'gpt-4.1-mini'
+              : process.env.GEMINI_MODEL || 'gemini-2.5-flash';
         try {
           const response = await fetch(
             provider === 'openai'
@@ -203,15 +244,42 @@ export async function refreshManagedInfo(checkApis = false) {
               signal: AbortSignal.timeout(5000),
             },
           );
-          apiDiagnostics[provider] = response.ok
+          const metadata = response.ok
+            ? ((await response.json().catch(() => undefined)) as
+                { id?: string; name?: string } | undefined)
+            : undefined;
+          const metadataReady =
+            response.ok &&
+            (provider === 'openai'
+              ? typeof metadata?.id === 'string'
+              : typeof metadata?.name === 'string');
+          apiDiagnostics[provider] = metadataReady
             ? 'Model metadata responded with this key. Generation quota and billing are checked when a job runs.'
-            : `Model metadata check returned HTTP ${response.status}. Check model access and authentication. No generation was requested.`;
+            : response.ok
+              ? 'The service did not return a valid model metadata record. Check the selected model and authentication. No generation was requested.'
+              : `Model metadata check returned HTTP ${response.status}. Check model access and authentication. No generation was requested.`;
+          if (generation === refreshGeneration)
+            apiChecks.set(apiCheckKey(provider, model, key), {
+              state: metadataReady ? 'connected' : 'unavailable',
+              model,
+              checkedAt: Date.now(),
+              message: apiDiagnostics[provider]!,
+            });
+          if (apiChecks.size > 100) apiChecks.delete(apiChecks.keys().next().value!);
         } catch {
           apiDiagnostics[provider] =
             'Metadata check could not connect. No generation was requested.';
+          if (generation === refreshGeneration)
+            apiChecks.set(apiCheckKey(provider, model, key), {
+              state: 'unavailable',
+              model,
+              checkedAt: Date.now(),
+              message: apiDiagnostics[provider]!,
+            });
         }
       }),
     );
+  if (generation === refreshGeneration) Object.assign(managedInfo, next);
   return managedInfo;
 }
 export async function localGenerate(

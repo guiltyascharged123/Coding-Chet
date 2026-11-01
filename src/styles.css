@@ -5004,3 +5004,168 @@ button.connection:hover {
     flex: 1 1 180px;
   }
 }
+
+/* Connection management and editable project headers. */
+.connection-menu {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  background: #303e49;
+}
+.connection-menu:hover,
+.connection-menu:focus-visible {
+  border-color: #82b1ce;
+  color: #f0f5f8;
+}
+.connections-page {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 28px 24px 64px;
+}
+.connections-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.connections-page > h1 {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+.connections-page > p {
+  color: #bdcbd5;
+  line-height: 1.7;
+}
+.connections-page .runtime-check {
+  padding-inline: 0;
+}
+.connections-page .runtime-options {
+  padding-inline: 0;
+}
+.connections-page .runtime-option {
+  align-items: start;
+}
+.connections-page .runtime-option > div {
+  min-width: 0;
+}
+.project-connection-summary,
+.local-model-help,
+.device-login {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  background: #2a3944;
+}
+.model-connection-status,
+.server-connection-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.model-connection-status {
+  margin-block: 10px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.connection-beacon {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  background: #8c9da9;
+  flex: 0 0 10px;
+}
+.connection-beacon.connected {
+  background: #76d4a3;
+  box-shadow: 0 0 0 4px #76d4a31c;
+}
+.connection-beacon.configured {
+  background: #e0ba6f;
+}
+.connection-beacon.unavailable {
+  background: #dd8e7f;
+}
+.connection-beacon.disabled {
+  background: #8c9da9;
+}
+.connection-setup {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.connection-setup form {
+  display: grid;
+  gap: 14px;
+}
+.connection-setup label {
+  display: grid;
+  gap: 8px;
+  font-size: 16px;
+}
+.connection-setup label.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.connection-setup input:not([type='checkbox']),
+.connection-setup select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #61798b;
+  border-radius: 7px;
+}
+.connection-setup pre,
+.local-model-help pre,
+.device-login code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  background: #22313c;
+  border-radius: 6px;
+}
+.connection-setup p,
+.connection-setup li {
+  line-height: 1.65;
+}
+.connection-setup [role='alert'] {
+  color: #ffc4b3;
+}
+.local-model-help,
+.device-login {
+  margin-top: 18px;
+}
+.project-title-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.project-title-edit:hover {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+.project-title-edit svg {
+  flex-shrink: 0;
+  color: #aec3d2;
+}
+@media (max-width: 560px) {
+  .connections-page {
+    padding: 20px 16px 40px;
+  }
+  .connections-page-heading {
+    flex-wrap: wrap;
+  }
+  .connection-menu {
+    font-size: 13px;
+    padding: 8px;
+  }
+}

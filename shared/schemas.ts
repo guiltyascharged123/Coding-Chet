@@ -133,6 +133,19 @@ export const stateSchema = z
           brief: text.min(1).max(6000),
           status: z.enum(['ready', 'running', 'paused', 'needs_input', 'completed']),
           createdAt: z.number().finite(),
+          updatedAt: z.number().finite().optional(),
+          briefRevision: z.number().int().nonnegative().optional(),
+          briefHistory: z
+            .array(
+              z.object({
+                title: text.min(2).max(80),
+                brief: text.min(1).max(6000),
+                changedAt: z.number().finite(),
+                reason: text.max(1000),
+              }),
+            )
+            .max(100)
+            .optional(),
           provider: providerSchema,
           documentPack: z.enum(['studio', 'office']).optional(),
           model: text.max(150).optional(),
@@ -216,6 +229,7 @@ export const stateSchema = z
             )
             .max(100)
             .optional(),
+          briefRevision: z.number().int().nonnegative().optional(),
           readOnly: z.boolean().optional(),
           workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
           acceptanceCriteria: acceptanceListSchema.optional(),

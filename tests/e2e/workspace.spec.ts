@@ -135,8 +135,8 @@ test('project creation, role assignment, desk swapping, and mobile navigation wo
     true,
   );
   await page.getByRole('button', { name: 'Model connections', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('External workers');
-  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await expect(page.getByRole('main')).toContainText('External workers');
+  await page.getByRole('button', { name: 'Back to workspace', exact: true }).click();
 });
 
 test('runner endpoints require authentication and enforce leases', async ({ request }) => {
@@ -351,8 +351,8 @@ test('walking agents, readable surfaces, office documents, and native exports wo
     true,
   );
   await page.getByRole('button', { name: 'Model connections', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('No automatic model or paid fallback');
-  await expect(page.getByRole('dialog')).toContainText('API key');
+  await expect(page.getByRole('main')).toContainText('No automatic model or paid fallback');
+  await expect(page.getByRole('main')).toContainText('API key');
   expect(errors).toEqual([]);
 });
 
@@ -450,9 +450,9 @@ test('failed AI planning remains visible after reload and retries the saved proj
     state.projects.find((p: { title: string }) => p.title === 'Recover a failed plan').brief,
   ).toBe(brief);
   await page.getByRole('button', { name: 'Model connections', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('Codex coding tools');
+  await expect(page.getByRole('main')).toContainText('Codex coding tools');
   await page.getByRole('button', { name: 'Check connections', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('No model was run');
+  await expect(page.getByRole('main')).toContainText('No model was run');
 });
 
 test('software projects expose actual source files and ZIPs, project roles, and a saved network choice', async ({
@@ -967,7 +967,7 @@ test('navigation has real destinations, provider setup stays accessible, and man
   await page.getByRole('link', { name: 'Workroom · Workspace', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Workspace', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Model connections', exact: true }).click();
-  const dialog = page.getByRole('dialog');
+  const dialog = page.getByRole('main');
   await expect(
     dialog.getByRole('heading', { name: 'Model connections', exact: true }),
   ).toBeVisible();
@@ -981,10 +981,14 @@ test('navigation has real destinations, provider setup stays accessible, and man
     ),
   ).toBe(true);
   await expect(dialog.locator('.provider-demo')).toHaveCount(0);
+  await dialog
+    .getByRole('article', { name: 'Local model · Ollama connection', exact: true })
+    .getByRole('button', { name: 'Configure connection', exact: true })
+    .click();
   await expect(dialog).toContainText('npm run setup:local');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to workspace', exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 1050 });
   await page.screenshot({ path: '/tmp/workroom-functional-workspace.png' });
   await page.getByRole('button', { name: 'New project', exact: true }).click();
@@ -1098,4 +1102,128 @@ test('retained activity pages and interrupted-result recovery work without anoth
   } finally {
     await request.post('/api/restore', { data: backup });
   }
+});
+
+test('top-bar Connections page shows checked beacons, safely saves credentials, and offers local model setup', async ({
+  page,
+  request,
+}) => {
+  const bootstrap = await (await request.get('/api/state')).json();
+  for (const p of bootstrap.state.projects.filter((p: any) => p.status === 'running'))
+    await request.post(`/api/projects/${p.id}/pause`);
+  const original = await (await request.get('/api/connections/settings')).json();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Model connections', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const compatible = page.getByRole('article', {
+    name: 'OpenAI-compatible model connection',
+    exact: true,
+  });
+  await expect(compatible.locator('.model-connection-status')).toHaveText('Connected');
+  await expect(compatible.locator('.connection-beacon')).toHaveCSS(
+    'background-color',
+    'rgb(118, 212, 163)',
+  );
+  if (await compatible.getByRole('button', { name: 'Configure connection', exact: true }).count())
+    await compatible.getByRole('button', { name: 'Configure connection', exact: true }).click();
+  await compatible
+    .getByLabel('compatible default model ID', { exact: true })
+    .fill('workroom-browser-model-variant');
+  const secret = 'fixture-local-key-not-an-account-credential';
+  await compatible.getByLabel('compatible API key', { exact: true }).fill(secret);
+  await compatible.getByRole('button', { name: 'Save connection', exact: true }).click();
+  await expect(compatible).toContainText('Saved to .env and applied to this server');
+  await expect(compatible.getByLabel('compatible API key', { exact: true })).toHaveValue('');
+  const saved = await (await request.get('/api/connections/settings')).json();
+  expect(saved.compatible.hasKey).toBe(true);
+  expect(JSON.stringify(saved)).not.toContain(secret);
+  expect(await page.evaluate((value) => JSON.stringify(localStorage).includes(value), secret)).toBe(
+    false,
+  );
+  const after = await (await request.get('/api/state')).json();
+  expect(after.state.policy.allowPaid).toBe(false);
+  expect(after.runtime.models.compatible).toBe('workroom-browser-model-variant');
+  expect(after.state.projects.map((p: any) => [p.id, p.provider, p.model])).toEqual(
+    bootstrap.state.projects.map((p: any) => [p.id, p.provider, p.model]),
+  );
+  expect(after.attempts.length).toBe(bootstrap.attempts.length);
+  const local = page.getByRole('article', { name: 'Local model · Ollama connection', exact: true });
+  await local.getByRole('button', { name: 'Configure connection', exact: true }).click();
+  await expect(
+    local.getByRole('complementary', { name: 'Local model setup instructions' }),
+  ).toBeVisible();
+  await expect(local).toContainText('ollama pull');
+  await expect(local).toContainText('16 GB RAM');
+  const codex = page.getByRole('article', {
+    name: 'Codex · ChatGPT sign-in connection',
+    exact: true,
+  });
+  await codex.getByRole('button', { name: 'Set up / sign in', exact: true }).click();
+  await expect(
+    codex.getByRole('button', { name: 'Enable Codex & sign in with ChatGPT', exact: true }),
+  ).toBeVisible();
+  await expect(codex).toContainText('already bundled');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await request.put('/api/connections/settings', {
+    data: {
+      provider: 'compatible',
+      revision: saved.revision,
+      model: original.compatible.model,
+      url: original.compatible.url,
+      billing: original.compatible.billing,
+      clearKey: true,
+    },
+  });
+});
+
+test('clicking the current project on the task board edits a durable brief and keeps a draft and history', async ({
+  page,
+  request,
+}) => {
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const brief =
+    'Coordinate a useful office project from supplied constraints and preserve its existing work.';
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: { title: 'Editable office project', brief, planning: 'manual' },
+    })
+  ).json();
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  await page.getByRole('button', { name: 'Task board', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Edit project Editable office project', exact: true })
+    .click();
+  await page.getByLabel('Project name', { exact: true }).fill('A revised office project');
+  await page
+    .getByLabel('Project brief', { exact: true })
+    .fill(
+      'Revise the goal to compare the supplied office costs and retain prior work with its provenance.',
+    );
+  await page.getByRole('button', { name: 'Close · keep draft', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Edit project Editable office project', exact: true })
+    .click();
+  await expect(page.getByLabel('Project name', { exact: true })).toHaveValue(
+    'A revised office project',
+  );
+  await page.getByRole('button', { name: 'Save project', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'A revised office project', exact: true }),
+  ).toBeVisible();
+  const state = await (await request.get('/api/state')).json();
+  const edited = state.state.projects.find((p: any) => p.id === project.id);
+  expect(edited.briefHistory[0].brief).toBe(brief);
+  expect(edited.provider).toBe(project.provider);
+  expect(edited.model).toBe(project.model);
+  expect(edited.briefRevision).toBe(1);
+  expect(state.attempts.filter((a: any) => a.projectId === project.id)).toHaveLength(0);
+  await page.reload();
+  await page
+    .getByRole('button', { name: 'Edit project A revised office project', exact: true })
+    .click();
+  await expect(page.getByText('Previous project versions (1)', { exact: true })).toBeVisible();
 });

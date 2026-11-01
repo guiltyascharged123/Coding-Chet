@@ -1,5 +1,7 @@
 # Connecting real AI workers
 
+For the current in-app setup, see [Connections, sign-in and project editing](CONNECTIONS.md). The **Models & sign-in** button opens provider forms, official Codex sign-in and local-model setup instructions; manual configuration below remains an alternative.
+
 > **Local-first update:** Start with [the current local model/provider guide](LOCAL-MODELS.md). `npm run local` now sets up Ollama and the selected default model when needed; normal startup cannot run simulated work. Existing providers/projects are retained. New AI plans use the model; manual recovery starts empty. The sections below retain advanced account, tool and cost details.
 
 New to Workroom? Follow the [easy guide](EASY-GUIDE.md) for basic startup,

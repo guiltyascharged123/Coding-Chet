@@ -87,6 +87,7 @@ export function relevantContext(task: Task, context: Task[]) {
     .filter((t) => final || task.dependencies.includes(t.id))
     .map((t) => ({
       sourceId: `task:${t.id}`,
+      briefRevision: t.briefRevision || 0,
       title: t.title,
       output: t.result
         ? `${JSON.stringify({ summary: t.result.summary, handoff: t.result.handoff, checks: t.result.checks })}\n\n${t.output}`

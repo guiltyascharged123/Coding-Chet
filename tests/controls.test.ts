@@ -204,7 +204,12 @@ test('only human-verified, current, project-scoped memory reaches relevant task 
     assert.equal(selectedMemory(store, project.id).length, 1);
     assert.deepEqual(selectedMemory(store, 'another-project'), []);
     assert.deepEqual(relevantContext(task, [source, store.state.tasks[5]]), [
-      { sourceId: `task:${source.id}`, title: source.title, output: source.output },
+      {
+        sourceId: `task:${source.id}`,
+        briefRevision: 0,
+        title: source.title,
+        output: source.output,
+      },
     ]);
     source.output = '# Changed evidence';
     assert.equal(selectedMemory(store, project.id).length, 0);

@@ -1,5 +1,7 @@
 # Workroom: easy start guide
 
+For the current in-app setup, see [Connections, sign-in and project editing](CONNECTIONS.md). The **Models & sign-in** button opens provider forms, official Codex sign-in and local-model setup instructions; manual configuration below remains an alternative.
+
 ## 1. Understand what you have
 
 Workroom is an early open-source agent workspace. Each role sends assignments to the project's selected model, with its brief, saved work and instructions. The 3D office visualizes real task and meeting state. An idle or moving avatar does not by itself mean inference is happening.

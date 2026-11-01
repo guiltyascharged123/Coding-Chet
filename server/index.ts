@@ -4,6 +4,8 @@ import { timingSafeEqual, createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { ConnectionSettings, SettingsError } from './connection-settings.js';
+import { CodexLogin } from './codex-login.js';
 import { Engine, AppError } from './engine.js';
 import { Store } from './store.js';
 import { allowedHost, allowedOrigin, BrowserSessions } from './origin.js';
@@ -72,6 +74,18 @@ const identity = runtimeIdentity(resolve('.'));
 const store = new Store(process.env.DATABASE_PATH || resolve('.data/workroom.sqlite'));
 await refreshManagedInfo();
 const engine = new Engine(store);
+const connectionSettings = new ConnectionSettings(
+  process.env.WORKROOM_SETTINGS_ROOT || resolve('.'),
+);
+let shuttingDown = false;
+const codexLogin = new CodexLogin(undefined, () => {
+  if (!shuttingDown)
+    void refreshManagedInfo()
+      .catch(() => {})
+      .finally(() => {
+        if (!shuttingDown) engine.endConnectionChange();
+      });
+});
 const route =
   (handler: express.RequestHandler): express.RequestHandler =>
   (req, res, next) => {
@@ -196,6 +210,12 @@ app.post(
       body.collaboration,
     );
     res.status(201).json({ project });
+  }),
+);
+app.put(
+  '/api/projects/:id',
+  route((req, res) => {
+    res.json({ project: engine.updateProject(param(req, 'id'), req.body) });
   }),
 );
 app.post(
@@ -403,10 +423,55 @@ app.put(
     res.json({ ok: true });
   }),
 );
+app.get('/api/connections/settings', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(connectionSettings.view());
+});
+app.put(
+  '/api/connections/settings',
+  route(async (req, res) => {
+    engine.beginConnectionChange('Applying connection settings.');
+    try {
+      const settings = connectionSettings.save(req.body);
+      // Preserve the immutable build/database identity captured when this process started.
+      identity.configId = runtimeIdentity(resolve('.')).configId;
+      await refreshManagedInfo(true);
+      res.setHeader('Cache-Control', 'no-store');
+      engine.endConnectionChange();
+      res.json({ settings, data: engine.bootstrap() });
+    } catch (error) {
+      engine.endConnectionChange();
+      throw error;
+    }
+  }),
+);
+app.get('/api/connections/codex/login', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ login: codexLogin.state() });
+});
+app.post(
+  '/api/connections/codex/login',
+  route((_req, res) => {
+    if (!['starting', 'waiting'].includes(codexLogin.state()?.status || ''))
+      engine.beginConnectionChange('ChatGPT Codex sign-in is in progress.');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ login: codexLogin.start() });
+  }),
+);
+app.post(
+  '/api/connections/codex/login/cancel',
+  route((req, res) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.body);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ login: codexLogin.cancel(id) });
+  }),
+);
 app.post(
   '/api/connections/check',
-  route(async (_req, res) => {
-    await refreshManagedInfo(true);
+  route(async (req, res) => {
+    const { projectId } = z.object({ projectId: z.string().optional() }).parse(req.body || {});
+    const project = projectId ? engine.project(projectId) : undefined;
+    await refreshManagedInfo(true, project);
     engine.commit();
     res.json(engine.bootstrap());
   }),
@@ -483,7 +548,10 @@ app.use(
       return res.status(400).json({
         error: error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; '),
       });
-    if (error instanceof AppError) return res.status(error.status).json({ error: error.message });
+    if (error instanceof SettingsError)
+      return res.status(error.status).json({ error: error.message });
+    if (error instanceof AppError)
+      return res.status(error.status).json({ error: error.message, action: error.action });
     if (
       error &&
       typeof error === 'object' &&
@@ -511,7 +579,9 @@ const server = app.listen(Number(process.env.PORT || 3001), process.env.HOST || 
 });
 for (const signal of ['SIGINT', 'SIGTERM'])
   process.on(signal, () => {
+    shuttingDown = true;
     engine.stop();
+    codexLogin.cancel();
     server.close(() => {
       store.close();
       process.exit(0);

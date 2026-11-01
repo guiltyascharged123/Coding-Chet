@@ -13,6 +13,7 @@ import type {
   Meeting,
   ReasoningEffort,
 } from '../shared/types.js';
+import { projectUpdateSchema } from '../shared/projects.js';
 import { Store } from './store.js';
 import { planProject, runTask, runtimeInfo, meetingTurn } from './providers.js';
 import { templatePlan } from './plans.js';
@@ -34,12 +35,14 @@ export class AppError extends Error {
   constructor(
     message: string,
     public status = 400,
+    public action?: 'connections',
   ) {
     super(message);
   }
 }
 
 export class Engine extends EventEmitter {
+  private connectionChange?: string;
   private serverId = randomUUID();
   private active = new Map<string, AbortController>();
   private planners = new Map<string, AbortController>();
@@ -75,6 +78,7 @@ export class Engine extends EventEmitter {
   bootstrap(): Bootstrap {
     return {
       serverId: this.serverId,
+      connectionChange: this.connectionChange,
       revision: this.store.revision,
       state: {
         ...this.state,
@@ -83,7 +87,7 @@ export class Engine extends EventEmitter {
           stale: !memoryCurrent(m, this.state.tasks),
         })),
       },
-      runtime: runtimeInfo(),
+      runtime: runtimeInfo(this.state.projects),
       attempts: this.store
         .attempts()
         .sort((a, b) => b.createdAt - a.createdAt)
@@ -252,6 +256,87 @@ export class Engine extends EventEmitter {
       );
     return project;
   }
+  beginConnectionChange(message: string) {
+    this.assertConnectionsIdle();
+    this.connectionChange = message;
+    this.commit();
+  }
+  endConnectionChange() {
+    this.connectionChange = undefined;
+    this.commit();
+  }
+  private assertConnectionsStable() {
+    if (this.connectionChange)
+      throw new AppError(
+        this.connectionChange + ' Wait for connection setup to finish before starting work.',
+        409,
+        'connections',
+      );
+  }
+  assertConnectionsIdle() {
+    this.assertConnectionsStable();
+    if (
+      this.active.size ||
+      this.planners.size ||
+      this.conferences.size ||
+      this.state.projects.some((p) => p.status === 'running') ||
+      this.state.tasks.some((t) => t.status === 'working')
+    )
+      throw new AppError(
+        'Pause running projects and wait for their workers to stop before changing connection credentials or signing into another account.',
+        409,
+      );
+  }
+  updateProject(id: string, input: unknown) {
+    const values = projectUpdateSchema.parse(input),
+      project = this.project(id);
+    if (
+      project.status === 'running' ||
+      this.planners.has(id) ||
+      this.projectMeetingActive(id) ||
+      this.state.tasks.some(
+        (t) => t.projectId === id && (t.status === 'working' || this.active.has(t.id)),
+      )
+    )
+      throw new AppError(
+        'Pause this project and wait for its workers to stop before editing it. Your draft is retained.',
+        409,
+      );
+    if (values.expectedUpdatedAt !== (project.updatedAt ?? project.createdAt))
+      throw new AppError(
+        'This project changed since this draft was opened. Your writing is retained. Reload the saved version or copy your edits before trying again.',
+        409,
+      );
+    if (values.title === project.title && values.brief === project.brief) return project;
+    if ((project.briefHistory?.length || 0) >= 100)
+      throw new AppError(
+        'This project has 100 saved versions. Export its history before creating a new project.',
+      );
+    const briefChanged = values.brief !== project.brief;
+    const changedAt = Math.max(Date.now(), (project.updatedAt ?? project.createdAt) + 1);
+    (project.briefHistory ||= []).push({
+      title: project.title,
+      brief: project.brief,
+      changedAt,
+      reason: values.reason || 'Updated project details.',
+    });
+    project.title = values.title;
+    project.brief = values.brief;
+    project.updatedAt = changedAt;
+    if (briefChanged) {
+      project.briefRevision = (project.briefRevision || 0) + 1;
+      for (const task of this.state.tasks.filter((t) => t.projectId === id)) delete task.recovery;
+    }
+    this.event(
+      id,
+      'system',
+      briefChanged
+        ? 'Project brief updated. Earlier briefs, tasks and outputs retained; review the task plan against the new goal before resuming.'
+        : 'Project renamed. Existing tasks, outputs and managed folder retained.',
+    );
+    this.commit();
+    return project;
+  }
   private finishPlan(project: Project, tasks: Task[]) {
     this.state.tasks.push(...tasks);
     project.planningStatus = 'ready';
@@ -267,6 +352,13 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   private startPlanning(project: Project) {
+    if (this.connectionChange) {
+      project.planningStatus = 'failed';
+      project.planningError = this.connectionChange + ' Retry planning when setup finishes.';
+      project.status = 'paused';
+      this.commit();
+      return;
+    }
     if (this.planners.has(project.id)) throw new AppError('Planning is already active.', 409);
     if (this.state.tasks.some((t) => t.projectId === project.id))
       throw new AppError('Edit the existing plan instead of replacing it.');
@@ -430,6 +522,7 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   setProvider(provider: Provider) {
+    this.assertConnectionsStable();
     if (!runtimeInfo().available[provider])
       throw new AppError(
         'This runtime is not configured. Configure it on the server, restart, and check connections.',
@@ -598,6 +691,7 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   runProject(id: string) {
+    this.assertConnectionsStable();
     const project = this.project(id);
     if (project.provider === 'demo' && process.env.WORKROOM_DEMO !== '1')
       throw new AppError(
@@ -617,9 +711,18 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'Software delivery requires the Codex connection for real file and command tools. Select it in Workspace controls.',
       );
+    const readiness = modelReadiness(runtimeInfo(), project.provider, project.model);
+    if (!readiness.ready)
+      throw new AppError(
+        `This saved project uses ${project.provider}${project.model ? ' / ' + project.model : ''}. ${readiness.message}`,
+        400,
+        'connections',
+      );
     if (hasProjectTools(project) && !runtimeInfo().coding?.ready)
       throw new AppError(
         runtimeInfo().coding?.message || 'Check coding sandbox readiness in Model connections.',
+        400,
+        'connections',
       );
     if (project.status === 'completed')
       throw new AppError('This project is complete. Create a new project to run another brief.');
@@ -725,6 +828,7 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   retryTask(id: string, feedback?: string) {
+    this.assertConnectionsStable();
     const task = this.task(id);
     if (task.status !== 'failed') throw new AppError('Only failed tasks can be retried.');
     if (this.active.has(id))
@@ -760,6 +864,7 @@ export class Engine extends EventEmitter {
     this.tick();
   }
   review(id: string, decision: 'approve' | 'revise', feedback: string, choice?: string) {
+    this.assertConnectionsStable();
     const approval = this.state.approvals.find((a) => a.id === id);
     if (!approval) throw new AppError('Review not found.', 404);
     if (approval.status !== 'pending')
@@ -836,6 +941,7 @@ export class Engine extends EventEmitter {
     return meeting;
   }
   startMeeting(projectId: string, agenda: string, trigger: Meeting['trigger'] = 'manual') {
+    this.assertConnectionsStable();
     const project = this.project(projectId);
     if (
       this.active.size ||
@@ -883,6 +989,7 @@ export class Engine extends EventEmitter {
     return meeting;
   }
   retryMeeting(id: string) {
+    this.assertConnectionsStable();
     const meeting = this.meeting(id);
     if (meeting.status !== 'failed') throw new AppError('Only failed meetings can be retried.');
     if (
@@ -1067,6 +1174,7 @@ export class Engine extends EventEmitter {
     );
   }
   tick() {
+    if (this.connectionChange) return;
     let expired = false;
     for (const task of this.state.tasks)
       if (task.status === 'working' && task.leaseExpiresAt && task.leaseExpiresAt < Date.now()) {
@@ -1108,6 +1216,7 @@ export class Engine extends EventEmitter {
   private begin(task: Task) {
     task.status = 'working';
     task.startedAt = Date.now();
+    task.briefRevision = this.project(task.projectId).briefRevision || 0;
     if (this.project(task.projectId).provider !== 'external') delete task.attemptId;
     delete task.recovery;
     delete task.error;
@@ -1391,6 +1500,7 @@ export class Engine extends EventEmitter {
     }
   }
   claim(agentId?: string) {
+    if (this.connectionChange) return null;
     if (
       this.conferences.size +
         this.planners.size +

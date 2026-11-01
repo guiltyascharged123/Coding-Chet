@@ -60,6 +60,7 @@ export interface Task {
   leaseId?: string;
   leaseExpiresAt?: number;
   toolLog?: { id: string; type: string; detail: string; status?: string }[];
+  briefRevision?: number;
   readOnly?: boolean;
   workType?: 'plan' | 'implementation' | 'review' | 'tests';
   acceptanceCriteria?: {
@@ -90,6 +91,9 @@ export interface Project {
   brief: string;
   status: ProjectStatus;
   createdAt: number;
+  updatedAt?: number;
+  briefRevision?: number;
+  briefHistory?: { title: string; brief: string; changedAt: number; reason: string }[];
   provider: Provider;
   documentPack?: DocumentPack;
   model?: string;
@@ -182,7 +186,16 @@ export interface WorkspaceState {
   memory?: MemoryItem[];
   meetings?: Meeting[];
 }
+export interface ConnectionInfo {
+  state: 'connected' | 'configured' | 'unavailable' | 'disabled';
+  message: string;
+  checkedAt?: number;
+  model?: string;
+}
 export interface RuntimeInfo {
+  connections?: Partial<Record<Provider, ConnectionInfo>>;
+  modelConnections?: Partial<Record<'openai' | 'gemini', Record<string, ConnectionInfo>>>;
+  codex?: { enabled: boolean; code: string; checkedAt?: number };
   available: Record<Provider, boolean>;
   listedModels?: Partial<Record<'ollama' | 'compatible', string[]>>;
   models: { openai: string; gemini: string; codex: string; ollama: string; compatible: string };
@@ -190,6 +203,7 @@ export interface RuntimeInfo {
   coding?: { ready: boolean; message: string };
 }
 export interface Bootstrap {
+  connectionChange?: string;
   serverId?: string;
   revision?: number;
   state: WorkspaceState;

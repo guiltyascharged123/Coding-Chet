@@ -22,6 +22,7 @@ import {
   MessageCircle,
   Pause,
   Play,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -51,7 +52,7 @@ import type {
   Meeting,
 } from '../shared/types';
 import { PROVIDER_LABELS, STATUS_LABELS } from '../shared/types';
-import { api, download, getState, relativeTime } from './api';
+import { api, ApiError, download, getState, relativeTime } from './api';
 import Modal from './components/Modal';
 import Avatar from './components/Avatar';
 import DocumentActions from './components/DocumentActions';
@@ -61,6 +62,8 @@ import WorkspaceControls from './components/WorkspaceControls';
 import WorkEvidence from './components/WorkEvidence';
 import BrandMark from './components/BrandMark';
 import { hasProjectTools } from '../shared/capabilities';
+import RuntimeModal from './components/RuntimeModal';
+import EditProjectModal from './components/EditProjectModal';
 import ProjectModal from './components/ProjectModal';
 import PlanEditor from './components/PlanEditor';
 import ProjectFiles from './components/ProjectFiles';
@@ -70,7 +73,15 @@ import { modelReadiness } from '../shared/model-readiness';
 import LiveConsole from './components/LiveConsole';
 
 const Office = lazy(() => import('./components/Office'));
-type View = 'workspace' | 'team' | 'tasks' | 'activity' | 'outputs' | 'discussions' | 'console';
+type View =
+  | 'connections'
+  | 'workspace'
+  | 'team'
+  | 'tasks'
+  | 'activity'
+  | 'outputs'
+  | 'discussions'
+  | 'console';
 const nav = [
   { id: 'workspace' as View, label: 'Workspace', icon: LayoutDashboard },
   { id: 'tasks' as View, label: 'Task board', icon: ClipboardList },
@@ -102,9 +113,9 @@ export default function App() {
     }
   });
   const [projectMenu, setProjectMenu] = useState(false);
-  const [modal, setModal] = useState<'project' | 'runtime' | 'help' | 'controls' | 'plan' | null>(
-    null,
-  );
+  const [modal, setModal] = useState<
+    'project' | 'edit-project' | 'runtime' | 'help' | 'controls' | 'plan' | null
+  >(null);
   const [controlsTab, setControlsTab] = useState('limits');
   const [consoleFocus, setConsoleFocus] = useState<{
     projectId?: string;
@@ -215,6 +226,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', handle);
   }, []);
 
+  function openConnections() {
+    setModal(null);
+    setView('connections');
+  }
   async function act(action: () => Promise<unknown>, success?: string) {
     setBusy(true);
     try {
@@ -222,6 +237,10 @@ export default function App() {
       if (success) setToast(success);
     } catch (error) {
       setToast(error instanceof Error ? error.message : 'Something went wrong. Please retry.');
+      if (error instanceof ApiError && error.action === 'connections') {
+        setModal(null);
+        setView('connections');
+      }
     } finally {
       setBusy(false);
     }
@@ -270,6 +289,40 @@ export default function App() {
       </div>
     );
 
+  if (view === 'connections')
+    return (
+      <>
+        <RuntimeModal
+          inline
+          data={data}
+          project={project}
+          serverConnected={connected}
+          onRefresh={setData}
+          onClose={() => setView('workspace')}
+          onChange={(provider) =>
+            act(
+              () => api('/runtime', { provider }),
+              'Default connection updated. Existing projects keep their model.',
+            )
+          }
+          onProjectConnection={
+            project
+              ? () => {
+                  setView('workspace');
+                  setControlsTab('limits');
+                  setModal('controls');
+                }
+              : undefined
+          }
+        />
+        {toast && (
+          <p className="toast" role="status">
+            {toast}
+          </p>
+        )}
+      </>
+    );
+
   if (!project)
     return (
       <div className="welcome-workspace">
@@ -296,7 +349,7 @@ export default function App() {
           <button className="button primary" onClick={() => setModal('project')}>
             New project
           </button>
-          <button className="button secondary" onClick={() => setModal('runtime')}>
+          <button className="button secondary" onClick={() => openConnections()}>
             Model connections
           </button>
           <button
@@ -317,22 +370,13 @@ export default function App() {
                 ? data.runtime.models[state.provider]
                 : undefined
             }
-            onConfigure={() => setModal('runtime')}
+            onConfigure={() => openConnections()}
             onClose={() => setModal(null)}
             onCreated={(id) => {
               setProjectId(id);
               setModal(null);
               void getState().then(setData);
             }}
-          />
-        )}
-        {modal === 'runtime' && (
-          <RuntimeModal
-            data={data}
-            onClose={() => setModal(null)}
-            onChange={(p) =>
-              act(() => api('/runtime', { provider: p }), 'Default connection updated.')
-            }
           />
         )}
         {toast && <p role="status">{toast}</p>}
@@ -396,7 +440,7 @@ export default function App() {
           <button
             className="runtime-card"
             aria-label="Model connections"
-            onClick={() => setModal('runtime')}
+            onClick={() => openConnections()}
           >
             <span className="runtime-symbol">
               <Zap size={17} />
@@ -466,13 +510,15 @@ export default function App() {
             </div>
           </div>
           <div className="topbar-right">
-            <span
-              className={`connection ${connected ? '' : 'connection-off'}`}
-              title="Browser connection to the Workroom server. Model readiness is shown in Model connections."
+            <button
+              className={`connection connection-menu ${connected ? '' : 'connection-off'}`}
+              onClick={openConnections}
+              aria-label="Models & sign-in"
+              title="Open model connections, sign-in and local model setup"
             >
-              {connected ? <Wifi size={13} /> : <WifiOff size={13} />}
-              {connected ? 'Server connected' : 'Reconnecting'}
-            </span>
+              {connected ? <Wifi size={15} /> : <WifiOff size={15} />}
+              Models & sign-in <ChevronDown size={14} />
+            </button>
             <span className="topbar-divider" />
             <button
               className="icon-button notification-button"
@@ -544,7 +590,16 @@ export default function App() {
                   ? 'DEMO SESSION'
                   : PROVIDER_LABELS[project.provider].toUpperCase()}
               </div>
-              <h2>{project.title}</h2>
+              <h2 aria-label={project.title}>
+                <button
+                  className="project-title-edit"
+                  onClick={() => setModal('edit-project')}
+                  aria-label={`Edit project ${project.title}`}
+                >
+                  {project.title}
+                  <Pencil size={17} aria-hidden="true" />
+                </button>
+              </h2>
               <p title={project.brief}>{project.brief}</p>
               <button
                 className="project-model-control"
@@ -617,6 +672,15 @@ export default function App() {
                       : 'Run team'}
             </button>
           </section>
+          {(project.briefRevision || 0) > 0 &&
+            tasks.some(
+              (task) => task.output && (task.briefRevision || 0) < (project.briefRevision || 0),
+            ) && (
+              <div className="plan-notice" role="status">
+                The project brief has changed. Some saved outputs were produced for an earlier
+                brief; review them and update the task plan before relying on them for the new goal.
+              </div>
+            )}
           {project.provider === 'demo' && (
             <div className="plan-notice" role="status">
               <strong>Saved simulation project.</strong> Choose a real model with “Change project
@@ -679,7 +743,7 @@ export default function App() {
                 <p>{project.planningError}</p>
               </div>
               <div className="file-actions">
-                <button className="button secondary small" onClick={() => setModal('runtime')}>
+                <button className="button secondary small" onClick={() => openConnections()}>
                   Model connections
                 </button>
                 <button
@@ -976,7 +1040,7 @@ export default function App() {
                         ? 'Codex can search public sources for project tasks. Search queries and results appear in task details; meeting notes guide handoffs.'
                         : 'Each role receives its assignment, recent meeting decisions and relevant handoffs. This connection produces text.'}
                 </span>
-                <button onClick={() => setModal('runtime')}>
+                <button onClick={() => openConnections()}>
                   {project.provider === 'demo' ? 'Connect a runtime' : 'Runtime settings'}
                   <ArrowUpRight size={13} />
                 </button>
@@ -1292,13 +1356,34 @@ export default function App() {
               ? data.runtime.models[state.provider]
               : undefined
           }
-          onConfigure={() => setModal('runtime')}
+          onConfigure={() => openConnections()}
           onCreated={(id) => {
             setProjectId(id);
             setView('workspace');
             setModal(null);
             void getState().then(setData);
             setToast('Project saved. Review its plan before starting the team.');
+          }}
+        />
+      )}
+      {modal === 'edit-project' && (
+        <EditProjectModal
+          key={project.id}
+          project={project}
+          onClose={() => setModal(null)}
+          onSaved={() => {
+            setModal(null);
+            void getState().then(setData);
+            setToast('Project updated. Earlier briefs, tasks and outputs were retained.');
+          }}
+          onPlan={() => setModal('plan')}
+          onConnection={() => {
+            setControlsTab('limits');
+            setModal('controls');
+          }}
+          onTeam={() => {
+            setModal(null);
+            setView('team');
           }}
         />
       )}
@@ -1320,18 +1405,6 @@ export default function App() {
             setModal(null);
             setControlsTab('limits');
           }}
-        />
-      )}
-      {modal === 'runtime' && (
-        <RuntimeModal
-          data={data}
-          onClose={() => setModal(null)}
-          onChange={(provider) =>
-            act(
-              () => api('/runtime', { provider }),
-              `Default for new projects: ${PROVIDER_LABELS[provider]}. Existing projects keep their connection.`,
-            )
-          }
         />
       )}
       {modal === 'help' && (
@@ -1887,142 +1960,6 @@ function ReviewModal({
           </button>
         </div>
       </div>
-    </Modal>
-  );
-}
-
-function RuntimeModal({
-  data,
-  onClose,
-  onChange,
-}: {
-  data: Bootstrap;
-  onClose: () => void;
-  onChange: (provider: Provider) => Promise<void>;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const descriptions: Partial<Record<Provider, string>> = {
-    ollama:
-      'Runs on this computer. Local setup installs Ollama and downloads your selected model. Text work; no file or command tools.',
-    codex:
-      'Uses your ChatGPT Codex sign-in and allowance. Supports text work, optional search, and managed file/command tools after the sandbox check.',
-    openai:
-      'Requires an OpenAI API key, model access and separate API billing. Text work in this adapter.',
-    gemini: 'Uses a Google AI Studio / Gemini API key and its quota. Text work in this adapter.',
-    compatible:
-      'Connect LM Studio, llama.cpp or another OpenAI-compatible Chat Completions server. Tools depend on the external worker you build.',
-    external:
-      'Attach your own running worker through the authenticated task-leasing API. Its model, tools and costs are managed separately.',
-  };
-  return (
-    <Modal
-      title="Model connections"
-      subtitle="Choose the default for new projects. Existing projects keep their model."
-      onClose={onClose}
-    >
-      <div className="runtime-check">
-        <button
-          className="button secondary"
-          disabled={saving}
-          onClick={async () => {
-            setSaving(true);
-            try {
-              await api('/connections/check');
-              setMessage('Readiness refreshed. No model was run.');
-            } catch (e) {
-              setMessage((e as Error).message);
-            } finally {
-              setSaving(false);
-            }
-          }}
-        >
-          Check connections
-        </button>
-        <p role="status">{message}</p>
-        <p>
-          For the local default, run <code>npm run setup:local</code> in the Workroom terminal. Then
-          check connections here. Changing a project's model is available through its Model → Change
-          control.
-        </p>
-      </div>
-      <div className="runtime-options">
-        {(['ollama', 'codex', 'openai', 'gemini', 'compatible', 'external'] as Provider[]).map(
-          (provider) => {
-            const ready = data.runtime.available[provider];
-            const model =
-              provider !== 'demo' && provider !== 'external' ? data.runtime.models[provider] : '';
-            return (
-              <article
-                className={`runtime-option ${data.state.provider === provider ? 'chosen' : ''}`}
-                key={provider}
-              >
-                <span className={`provider-icon provider-${provider}`}>
-                  <Zap size={20} />
-                </span>
-                <div>
-                  <strong>
-                    {PROVIDER_LABELS[provider]}{' '}
-                    {data.state.provider === provider && <span className="tag">Default</span>}
-                  </strong>
-                  {model && <p className="provider-model">{model}</p>}
-                  <p>{descriptions[provider]}</p>
-                  <small>
-                    {ready ? 'Ready · ' : 'Setup needed · '}
-                    {data.runtime.diagnostics?.[provider] ||
-                      (ready
-                        ? 'Connection configured'
-                        : 'Configure this provider before selecting it.')}
-                  </small>
-                  <div className="provider-actions">
-                    <button
-                      className="button secondary small"
-                      disabled={!ready || saving || data.state.provider === provider}
-                      title={
-                        !ready
-                          ? 'Complete setup using the guide, then check connections.'
-                          : undefined
-                      }
-                      onClick={async () => {
-                        setSaving(true);
-                        try {
-                          await onChange(provider);
-                        } catch (e) {
-                          setMessage((e as Error).message);
-                        } finally {
-                          setSaving(false);
-                        }
-                      }}
-                    >
-                      {data.state.provider === provider
-                        ? 'Selected default'
-                        : 'Use for new projects'}
-                    </button>
-                    <a
-                      href={`https://github.com/guiltyascharged123/Coding-Chet/blob/workroom-starter/docs/LOCAL-MODELS.md#${provider}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Setup guide ↗
-                    </a>
-                  </div>
-                </div>
-              </article>
-            );
-          },
-        )}
-      </div>
-      <p>
-        Local models use your hardware. Paid APIs remain disabled until enabled with price estimates
-        in Workspace controls. No automatic model or paid fallback is used.
-      </p>
-      {data.runtime.coding && (
-        <p>
-          <strong>Codex coding tools: {data.runtime.coding.ready ? 'Ready' : 'Not ready'}</strong>
-          <br />
-          {data.runtime.coding.message}
-        </p>
-      )}
     </Modal>
   );
 }

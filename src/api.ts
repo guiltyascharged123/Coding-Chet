@@ -1,4 +1,12 @@
 import type { Bootstrap } from '../shared/types';
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public action?: string,
+  ) {
+    super(message);
+  }
+}
 let session: Promise<string> | undefined;
 function browserToken(refresh = false) {
   if (refresh) session = undefined;
@@ -27,7 +35,8 @@ export async function api<T = { ok: boolean }>(
     });
     const data = await response.json();
     if (response.status === 403 && data.code === 'SESSION_REQUIRED' && !refresh) return send(true);
-    if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+    if (!response.ok)
+      throw new ApiError(data.error || `Request failed (${response.status}).`, data.action);
     return data as T;
   };
   return send();

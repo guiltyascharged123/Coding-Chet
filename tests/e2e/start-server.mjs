@@ -159,6 +159,7 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
     PORT: '3107',
     HOST: '127.0.0.1',
     DATABASE_PATH: join(directory, 'test.sqlite'),
+    WORKROOM_SETTINGS_ROOT: directory,
     AGENT_PROVIDER: 'demo',
     WORKROOM_DEMO: '1',
     DEMO_STEP_MS: '2000',

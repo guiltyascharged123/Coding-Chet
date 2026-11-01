@@ -104,3 +104,5 @@ Workroom is a trusted local, single-user application. Classroom/multi-user use n
 MIT license for the application. Model weights and third-party services retain their own licenses and terms.
 
 See [Reliability, history and work evidence](docs/STABILITY.md) for activity retention, interrupted-result recovery, startup conflicts and verification limits.
+
+Use **Models & sign-in** for the full Connections page, provider configuration, official ChatGPT/Codex sign-in and local model instructions. Click the current project title to edit its brief. See [the easy Connections guide](docs/CONNECTIONS.md).

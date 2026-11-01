@@ -1,5 +1,7 @@
 # Connect a model and run Workroom
 
+For the current in-app setup, see [Connections, sign-in and project editing](CONNECTIONS.md). The **Models & sign-in** button opens provider forms, official Codex sign-in and local-model setup instructions; manual configuration below remains an alternative.
+
 Workroom runs in your browser, with a Node.js server on your computer. The default model runs locally through Ollama. A model generates each new AI plan and work result; the office shows saved task and meeting events. An idle avatar makes no model requests. Text-only connections cannot edit files, run tests, browse or take external actions.
 
 ## Ollama

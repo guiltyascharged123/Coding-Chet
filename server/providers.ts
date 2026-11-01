@@ -33,11 +33,63 @@ import {
   codexWork,
   managedInfo,
   apiDiagnostics,
+  apiConnectionInfo,
   serviceUrl,
 } from './managed.js';
 
-export function runtimeInfo(): RuntimeInfo {
+export function runtimeInfo(projects: Pick<Project, 'provider' | 'model'>[] = []): RuntimeInfo {
+  const openaiModel = process.env.OPENAI_MODEL || 'gpt-4.1-mini',
+    geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   return {
+    modelConnections: Object.fromEntries(
+      (['openai', 'gemini'] as const).map((provider) => [
+        provider,
+        Object.fromEntries(
+          [
+            ...new Set([
+              provider === 'openai' ? openaiModel : geminiModel,
+              ...projects
+                .filter((p) => p.provider === provider)
+                .map((p) => p.model)
+                .filter((m): m is string => !!m),
+            ]),
+          ].map((model) => [model, apiConnectionInfo(provider, model)]),
+        ),
+      ]),
+    ),
+    codex: {
+      enabled: process.env.WORKROOM_CODEX_ENABLED === '1',
+      code: managedInfo.codexCode,
+      checkedAt: managedInfo.checkedAt,
+    },
+    connections: {
+      openai: apiConnectionInfo('openai', openaiModel),
+      gemini: apiConnectionInfo('gemini', geminiModel),
+      codex: {
+        state: managedInfo.codexReady
+          ? 'connected'
+          : process.env.WORKROOM_CODEX_ENABLED === '1'
+            ? 'unavailable'
+            : 'disabled',
+        message: managedInfo.codexMessage,
+        checkedAt: managedInfo.checkedAt,
+      },
+      ollama: {
+        state: managedInfo.ollamaReady ? 'connected' : 'unavailable',
+        message: managedInfo.ollamaMessage,
+        checkedAt: managedInfo.checkedAt,
+      },
+      compatible: {
+        state: managedInfo.compatibleReady ? 'connected' : 'unavailable',
+        message: managedInfo.compatibleMessage,
+        checkedAt: managedInfo.checkedAt,
+      },
+      external: {
+        state: 'configured',
+        message:
+          'A runner token permits authenticated workers; it does not prove a worker is running or that its model is connected.',
+      },
+    },
     listedModels: { ollama: managedInfo.ollamaModels, compatible: managedInfo.compatibleModels },
     coding: { ready: managedInfo.codingReady, message: managedInfo.codingMessage },
     available: {
@@ -50,12 +102,8 @@ export function runtimeInfo(): RuntimeInfo {
       compatible: managedInfo.compatibleReady,
     },
     diagnostics: {
-      openai:
-        apiDiagnostics.openai ||
-        'Key presence only; use Check connections to query model metadata without generation.',
-      gemini:
-        apiDiagnostics.gemini ||
-        'Key presence only; use Check connections to query model metadata without generation.',
+      openai: apiConnectionInfo('openai', openaiModel).message,
+      gemini: apiConnectionInfo('gemini', geminiModel).message,
       codex: managedInfo.codexMessage,
       ollama: managedInfo.ollamaMessage,
       compatible: managedInfo.compatibleMessage,
@@ -420,6 +468,7 @@ export async function runTask(
     task: {
       title: task.title,
       description: task.description,
+      briefRevision: project.briefRevision || 0,
       documentKind: task.documentKind || 'notes',
       workType: task.workType,
       acceptanceCriteria: task.acceptanceCriteria,

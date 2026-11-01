@@ -20,6 +20,7 @@ test('HTTP rejects untrusted authority and missing session before parsing bodies
     env: {
       ...process.env,
       DATABASE_PATH: join(directory, 'state.sqlite'),
+      WORKROOM_SETTINGS_ROOT: directory,
       PORT: String(port),
       HOST: '127.0.0.1',
       WORKROOM_DEMO: '0',
@@ -113,6 +114,61 @@ test('HTTP rejects untrusted authority and missing session before parsing bodies
         .status,
       401,
     );
+    assert.equal((await http('/api/connections/settings', 'GET', bad)).status, 403);
+    assert.equal(
+      (
+        await http(
+          '/api/connections/settings',
+          'PUT',
+          { 'Content-Type': 'application/json' },
+          '{invalid',
+        )
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await http(
+          '/api/connections/codex/login',
+          'POST',
+          { 'Content-Type': 'application/json' },
+          '{}',
+        )
+      ).status,
+      403,
+    );
+    const beforeIdentity = (await http('/api/health')).data;
+    const settings = (await http('/api/connections/settings')).data;
+    const secret = 'fixture-only-local-key';
+    const saved = await http(
+      '/api/connections/settings',
+      'PUT',
+      headers,
+      JSON.stringify({
+        provider: 'compatible',
+        revision: settings.revision,
+        model: 'local-fixture',
+        url: 'http://127.0.0.1:1/v1',
+        billing: 'local',
+        apiKey: secret,
+      }),
+    );
+    assert.equal(saved.status, 200);
+    assert.equal(saved.data.settings.compatible.hasKey, true);
+    assert.equal(JSON.stringify(saved.data).includes(secret), false);
+    assert.equal((await http('/api/connections/settings')).headers['cache-control'], 'no-store');
+    assert.equal(JSON.stringify((await http('/api/backup')).data).includes(secret), false);
+    assert.equal((await http('/api/state')).data.state.policy.allowPaid, false);
+    assert.equal((await http('/api/state')).data.connectionChange, undefined);
+    assert.notEqual((await http('/api/health')).data.configId, beforeIdentity.configId);
+    const conflict = await http(
+      '/api/connections/settings',
+      'PUT',
+      headers,
+      JSON.stringify({ provider: 'codex', revision: settings.revision, model: '', enabled: false }),
+    );
+    assert.equal(conflict.status, 409);
+    assert.equal((await http('/api/state')).data.connectionChange, undefined);
     const health = (await http('/api/health')).data;
     for (const field of ['buildId', 'configId', 'databaseId'])
       assert.match(health[field], /^[a-f0-9]{64}$/);
