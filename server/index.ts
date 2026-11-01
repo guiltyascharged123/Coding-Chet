@@ -78,13 +78,11 @@ const connectionSettings = new ConnectionSettings(
   process.env.WORKROOM_SETTINGS_ROOT || resolve('.'),
 );
 let shuttingDown = false;
-const codexLogin = new CodexLogin(undefined, () => {
-  if (!shuttingDown)
-    void refreshManagedInfo()
-      .catch(() => {})
-      .finally(() => {
-        if (!shuttingDown) engine.endConnectionChange();
-      });
+const codexLogin = new CodexLogin({
+  acquire: () => engine.beginConnectionChange('ChatGPT sign-in is pending.'),
+  release: (owner) => {
+    if (!shuttingDown) engine.endConnectionChange(owner);
+  },
 });
 const route =
   (handler: express.RequestHandler): express.RequestHandler =>
@@ -95,6 +93,13 @@ const route =
   };
 const param = (req: express.Request, key: string) => String(req.params[key]);
 
+async function reconcileSignIn() {
+  const login = codexLogin.state().login;
+  if (login && ['starting', 'waiting', 'stopping'].includes(login.status)) {
+    const checked = await codexLogin.check();
+    if (checked.login?.status === 'completed') await refreshManagedInfo();
+  }
+}
 app.get('/api/health', (_req, res) =>
   res.json({
     ok: true,
@@ -220,7 +225,8 @@ app.put(
 );
 app.post(
   '/api/projects/:id/retry-planning',
-  route((req, res) => {
+  route(async (req, res) => {
+    await reconcileSignIn();
     engine.retryPlanning(param(req, 'id'));
     res.json({ ok: true });
   }),
@@ -313,7 +319,8 @@ app.get(
 );
 app.post(
   '/api/projects/:id/run',
-  route((req, res) => {
+  route(async (req, res) => {
+    await reconcileSignIn();
     engine.runProject(param(req, 'id'));
     res.json({ ok: true });
   }),
@@ -327,7 +334,8 @@ app.post(
 );
 app.post(
   '/api/tasks/:id/retry',
-  route((req, res) => {
+  route(async (req, res) => {
+    await reconcileSignIn();
     engine.retryTask(param(req, 'id'), z.string().max(4000).optional().parse(req.body.feedback));
     res.json({ ok: true });
   }),
@@ -430,47 +438,75 @@ app.get('/api/connections/settings', (_req, res) => {
 app.put(
   '/api/connections/settings',
   route(async (req, res) => {
-    engine.beginConnectionChange('Applying connection settings.');
+    const owner = engine.beginConnectionChange('Applying connection settings.');
     try {
       const settings = connectionSettings.save(req.body);
       // Preserve the immutable build/database identity captured when this process started.
       identity.configId = runtimeIdentity(resolve('.')).configId;
       await refreshManagedInfo(true);
       res.setHeader('Cache-Control', 'no-store');
-      engine.endConnectionChange();
+      engine.endConnectionChange(owner);
       res.json({ settings, data: engine.bootstrap() });
     } catch (error) {
-      engine.endConnectionChange();
+      engine.endConnectionChange(owner);
       throw error;
     }
   }),
 );
-app.get('/api/connections/codex/login', (_req, res) => {
+async function loginSnapshot(
+  res: express.Response,
+  operation: Promise<import('../shared/codex-connection.js').CodexConnectionState>,
+  refresh = false,
+) {
+  const state = await operation;
+  if (refresh || state.login?.status === 'completed') await refreshManagedInfo();
+  engine.commit();
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ login: codexLogin.state() });
-});
+  res.json({ ...state, data: engine.bootstrap() });
+}
+app.get(
+  '/api/connections/codex/login',
+  route((_req, res) => loginSnapshot(res, codexLogin.check())),
+);
 app.post(
   '/api/connections/codex/login',
-  route((_req, res) => {
-    if (!['starting', 'waiting'].includes(codexLogin.state()?.status || ''))
-      engine.beginConnectionChange('ChatGPT Codex sign-in is in progress.');
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ login: codexLogin.start() });
+  route((req, res) => {
+    const options = z
+      .object({
+        mode: z.enum(['browser', 'device']).default('browser'),
+        reconnect: z.boolean().default(false),
+      })
+      .parse(req.body || {});
+    return loginSnapshot(res, codexLogin.start(options.mode, options.reconnect));
   }),
 );
+app.post(
+  '/api/connections/codex/login/check',
+  route((_req, res) => loginSnapshot(res, codexLogin.check(true), true)),
+);
+app.post(
+  '/api/connections/codex/login/reset',
+  route((req, res) => {
+    const { id } = z.object({ id: z.string().uuid().optional() }).parse(req.body || {});
+    return loginSnapshot(res, codexLogin.reset(id), true);
+  }),
+);
+// Keep old clients' cancel button functional after an update.
 app.post(
   '/api/connections/codex/login/cancel',
   route((req, res) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.body);
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ login: codexLogin.cancel(id) });
+    return loginSnapshot(res, codexLogin.reset(id), true);
   }),
 );
 app.post(
   '/api/connections/check',
   route(async (req, res) => {
-    const { projectId } = z.object({ projectId: z.string().optional() }).parse(req.body || {});
+    const { projectId, useCurrentSignIn } = z
+      .object({ projectId: z.string().optional(), useCurrentSignIn: z.boolean().default(false) })
+      .parse(req.body || {});
     const project = projectId ? engine.project(projectId) : undefined;
+    await codexLogin.check(useCurrentSignIn);
     await refreshManagedInfo(true, project);
     engine.commit();
     res.json(engine.bootstrap());
@@ -581,7 +617,7 @@ for (const signal of ['SIGINT', 'SIGTERM'])
   process.on(signal, () => {
     shuttingDown = true;
     engine.stop();
-    codexLogin.cancel();
+    void codexLogin.shutdown();
     server.close(() => {
       store.close();
       process.exit(0);

@@ -16,10 +16,14 @@ The Workroom server being online is separate from model access. None of these ch
 If a saved project says Codex is disabled, its project records are still there. The project remembers its selected model, but the running Workroom server also needs Codex enabled. Signing into ChatGPT in Chrome alone does not sign the Codex CLI in.
 
 1. Open **Models & sign-in → Codex → Set up / sign in**.
-2. If you already signed into the CLI on this computer, check **Enable Codex on this computer**, choose a default model ID if desired, and click **Save connection**. Workroom checks the existing CLI sign-in. A separate Codex installation is normally unnecessary; the official CLI is bundled.
-3. If sign-in is needed, click **Sign in with ChatGPT** (or **Enable Codex & sign in with ChatGPT**). Open the official OpenAI page shown and enter its one-time code. Enter your account password only on OpenAI's page, never in Workroom.
-4. Finish that flow and check the connection indicator. Workroom refreshes status when the official CLI completes. If the account does not permit device sign-in, use the terminal fallback below.
-5. Return to the workspace and run your saved project. Its own model ID has been retained. Use **Change this project's connection** if you intend to change it.
+2. If you already ran `npx --no-install codex login`, click **Check status**. Workroom verifies the CLI sign-in and clears a stale attempt. Enable Codex and save if it is disabled.
+3. Otherwise click **Sign in with ChatGPT**. Workroom uses the bundled CLI's normal browser login, equivalent to `npx --no-install codex login`. Finish in the browser tab it opens, or use **Open ChatGPT sign-in**.
+4. Read **Codex CLI status** for the checked command, result, exit code and check time. This verifies authentication, not model quota or generation.
+5. **Reconnect ChatGPT** stops the old attempt before opening a fresh browser login. **Reset sign-in** stops the attempt, releases its work hold and reloads saved form settings. It keeps CLI credentials, API keys, models and projects.
+
+If you saw “Enable device code sign-in for Codex,” that was the optional device flow. Normal browser login does not require enabling it. Device login remains under **Terminal or remote sign-in** for remote machines. Unsupported device login, process failures and timeouts clear their hold instead of leaving the team blocked.
+
+If you signed in successfully in another terminal while an attempt was pending, Workroom recognizes the new sign-in when status is refreshed or a project is started. An intentional reconnect from an already signed-in account stays pending until it finishes, is reset, or you explicitly accept the current account with **Check status**.
 
 Terminal fallback, from Coding-Chet under the same OS user running Workroom:
 
@@ -28,7 +32,7 @@ npx --no-install codex login
 npx --no-install codex login status
 ```
 
-Choose **Sign in with ChatGPT**. Then return to Connections and check again. For exact model IDs, use the bundled CLI's `/model` picker. A detected sign-in is separate from the managed coding sandbox check. If coding tools fail that check, the page reports the sandbox blocker; it does not bypass restrictions or fall back to a paid API.
+Choose **Sign in with ChatGPT**. Then return to Connections and click **Check status**. For exact model IDs, use the bundled CLI's `/model` picker. A detected sign-in is separate from the managed coding sandbox check. If coding tools fail that check, the page reports the sandbox blocker; it does not bypass restrictions or fall back to a paid API.
 
 ## OpenAI or Gemini / Google AI Studio
 
@@ -66,7 +70,7 @@ For LM Studio or llama.cpp, open **OpenAI-compatible model → Configure connect
 
 ## Saving settings without configuration conflicts
 
-**Save connection** writes only that provider's allowed fields into the server's `.env`, preserving unrelated settings and comments. Duplicate assignments for edited keys are consolidated. Saves use a file revision check and an atomic replacement, and are serialized across Workroom processes. Conflicting changes made in another tab or editor are rejected with the form retained. Reload saved settings deliberately after reviewing the conflict.
+**Save connection** writes only that provider's allowed fields into the server's `.env`, preserving unrelated settings and comments. Duplicate assignments for edited keys are consolidated. Saves use a file revision check and an atomic replacement, and are serialized across Workroom processes. Conflicting changes made in another tab or editor are rejected with the form retained. For Codex, **Reset sign-in** also reloads saved form settings. Other provider forms use **Reload settings**. Review conflicts before discarding unsaved inputs.
 
 Normal UI saves apply to the running server immediately, so restarting is not normally necessary. If you edit `.env` manually, restart Workroom to load those edits. Shell-exported variables can override `.env` at the next startup; the page identifies mismatches with the running server when detectable. Keep keys in the ignored `.env`, not in briefs, Git commits or screenshots. Official Codex credentials stay in the CLI's normal credential storage, not in Workroom's `.env`.
 

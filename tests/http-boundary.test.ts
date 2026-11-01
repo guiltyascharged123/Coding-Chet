@@ -21,6 +21,8 @@ test('HTTP rejects untrusted authority and missing session before parsing bodies
       ...process.env,
       DATABASE_PATH: join(directory, 'state.sqlite'),
       WORKROOM_SETTINGS_ROOT: directory,
+      HOME: directory,
+      USERPROFILE: directory,
       PORT: String(port),
       HOST: '127.0.0.1',
       WORKROOM_DEMO: '0',

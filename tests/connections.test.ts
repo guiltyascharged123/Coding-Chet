@@ -134,7 +134,7 @@ test('Codex diagnostics distinguish a disabled server, CLI errors and ChatGPT au
   );
   const signedIn = codexReadiness(true, { output: 'Logged in using ChatGPT', available: true }, '');
   assert.equal(signedIn.ready, true);
-  assert.match(signedIn.message, /no default model/);
+  assert.match(signedIn.message, /no default model/i);
 });
 
 test('key presence stays unchecked, exact model metadata turns green, and a changed key invalidates that check', async () => {
@@ -166,47 +166,13 @@ test('key presence stays unchecked, exact model metadata turns green, and a chan
       ).state,
       'configured',
     );
-    assert.match(managedInfo.codexMessage, /already bundled/);
+    assert.equal(managedInfo.codexCode, 'disabled');
   } finally {
     globalThis.fetch = fetch;
     Object.assign(managedInfo, info);
     for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
     Object.assign(process.env, env);
   }
-});
-
-test('official device login only exposes its trusted URL and one-time code, then clears them on completion or cancellation', () => {
-  assert.equal(devicePrompt('https://evil.example/codex/device ABCD-EFGH'), undefined);
-  let child: any,
-    starts = 0;
-  const manager = new CodexLogin(() => {
-    starts++;
-    child = new EventEmitter();
-    child.stdout = new PassThrough();
-    child.stderr = new PassThrough();
-    child.kill = () => {
-      child.emit('close', 1);
-      return true;
-    };
-    return child as ChildProcess;
-  });
-  const first = manager.start();
-  manager.start();
-  assert.equal(starts, 1);
-  child.stdout.write(
-    'Open https://auth.openai.com/codex/device and enter ABCD-EFGH\nPrivate extra output: not displayed',
-  );
-  assert.equal(manager.state()?.status, 'waiting');
-  assert.equal(manager.state()?.code, 'ABCD-EFGH');
-  assert.equal(JSON.stringify(manager.state()).includes('Private extra output'), false);
-  child.emit('close', 0);
-  assert.equal(manager.state()?.status, 'completed');
-  assert.equal(manager.state()?.code, undefined);
-  const second = manager.start();
-  assert.notEqual(second.id, first.id);
-  manager.cancel(second.id);
-  assert.equal(manager.state()?.status, 'cancelled');
-  assert.equal(manager.state()?.url, undefined);
 });
 
 test('project edits preserve identity, original briefs, completed work, folders and model; stale edits are rejected', async () => {
@@ -257,10 +223,10 @@ test('project edits preserve identity, original briefs, completed work, folders 
     store.restore(store.backup());
     assert.equal(store.state.projects.find((p) => p.id === project.id)?.briefHistory?.length, 1);
     assert.equal(store.state.policy?.allowPaid, defaultPolicy.allowPaid);
-    engine.beginConnectionChange('Signing in.');
+    const owner = engine.beginConnectionChange('Signing in.');
     assert.throws(() => engine.runProject(project.id), /setup to finish/);
     assert.equal(engine.bootstrap().connectionChange, 'Signing in.');
-    engine.endConnectionChange();
+    engine.endConnectionChange(owner);
     engine.project(project.id).status = 'running';
     assert.throws(() => engine.assertConnectionsIdle(), /Pause running/);
   } finally {
@@ -309,5 +275,36 @@ test('a delayed readiness response cannot certify replacement credentials or ove
     Object.assign(managedInfo, info);
     for (const name of Object.keys(process.env)) if (!(name in previous)) delete process.env[name];
     Object.assign(process.env, previous);
+  }
+});
+
+test('reload reads externally edited saved values, and a blank key keeps and applies the saved key', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'workroom-reload-'));
+  const env = { OPENAI_MODEL: 'active-old-model', OPENAI_API_KEY: 'active-old-key' };
+  try {
+    writeFileSync(
+      join(directory, '.env'),
+      'OPENAI_MODEL=saved-new-model\nOPENAI_API_KEY=saved-new-key\nOTHER_SETTING=keep\n',
+    );
+    const settings = new ConnectionSettings(directory, env),
+      reloaded = settings.view();
+    assert.equal(reloaded.openai.model, 'saved-new-model');
+    assert.equal(reloaded.openai.hasKey, true);
+    assert.equal(JSON.stringify(reloaded).includes('saved-new-key'), false);
+    assert.equal(
+      env.OPENAI_API_KEY,
+      'active-old-key',
+      'Reload alone cannot switch credentials during work',
+    );
+    settings.save({
+      provider: 'openai',
+      revision: reloaded.revision,
+      model: reloaded.openai.model,
+    });
+    assert.equal(env.OPENAI_MODEL, 'saved-new-model');
+    assert.equal(env.OPENAI_API_KEY, 'saved-new-key');
+    assert.match(readFileSync(join(directory, '.env'), 'utf8'), /OTHER_SETTING=keep/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });

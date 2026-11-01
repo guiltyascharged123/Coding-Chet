@@ -1,13 +1,41 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const directory = mkdtempSync(join(tmpdir(), 'workroom-browser-'));
+// Offline CLI protocol fixture. It never contacts OpenAI or uses a real login.
+const authFile = join(directory, 'codex-auth-state.json');
+const fakeCodex = join(directory, 'codex-fixture.mjs');
+writeFileSync(authFile, JSON.stringify({ authenticated: false, deviceBlocked: false }));
+writeFileSync(
+  fakeCodex,
+  `#!${process.execPath}
+import { readFileSync } from 'node:fs';
+const state = () => JSON.parse(readFileSync(${JSON.stringify(authFile)}, 'utf8'));
+const args = process.argv.slice(2);
+if (args[0] !== 'login') process.exit(1);
+if (args.includes('status')) { console.log(state().authenticated ? 'Logged in using ChatGPT' : 'Not logged in'); process.exit(state().authenticated ? 0 : 1); }
+if (args.includes('--device-auth')) console.log(state().deviceBlocked ? 'Enable device code sign-in for Codex' : 'https://auth.openai.com/codex/device ABCD-EFGH');
+else console.log('https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=fixture');
+setInterval(() => {}, 1000);
+`,
+);
+chmodSync(fakeCodex, 0o700);
 // Local deterministic model protocol fixture; no real accounts or inference.
 const seen = new Set();
 const modelServer = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
+  if (req.url === '/__codex-fixture') {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    writeFileSync(
+      authFile,
+      JSON.stringify({ ...JSON.parse(readFileSync(authFile, 'utf8')), ...JSON.parse(raw || '{}') }),
+    );
+    res.end('{}');
+    return;
+  }
   if (req.url === '/v1/models') {
     res.end(
       JSON.stringify({
@@ -167,6 +195,9 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
     OPENAI_API_KEY: '',
     GEMINI_API_KEY: '',
     WORKROOM_CODEX_ENABLED: '',
+    WORKROOM_CODEX_BIN: fakeCodex,
+    HOME: directory,
+    USERPROFILE: directory,
     OLLAMA_MODEL: '',
     COMPATIBLE_API_URL: `http://127.0.0.1:${modelPort}/v1`,
     COMPATIBLE_MODEL: 'workroom-browser-model',

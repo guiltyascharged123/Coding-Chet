@@ -83,14 +83,17 @@ export default function RuntimeModal({
   const Shell = inline ? ConnectionPage : Modal;
   const [saving, setSaving] = useState(true);
   useEffect(() => {
-    void check();
+    void check(true);
   }, []);
-  async function check() {
+  async function check(automatic = false) {
     setSaving(true);
     try {
-      const updated = await api<Bootstrap>('/connections/check', { projectId: project?.id });
+      const updated = await api<Bootstrap>('/connections/check', {
+        projectId: project?.id,
+        useCurrentSignIn: !automatic,
+      });
       onRefresh(updated);
-      setMessage('Connection checks finished. No model was run; generation quota is not tested.');
+      setMessage('Connections checked.');
     } catch (e) {
       setMessage((e as Error).message);
     } finally {
@@ -102,22 +105,17 @@ export default function RuntimeModal({
     : undefined;
   const [message, setMessage] = useState('');
   const descriptions: Partial<Record<Provider, string>> = {
-    ollama:
-      'Runs on this computer. Local setup installs Ollama and downloads your selected model. Text work; no file or command tools.',
-    codex:
-      'Uses your ChatGPT Codex sign-in and allowance. Supports text work, optional search, and managed file/command tools after the sandbox check.',
-    openai:
-      'Requires an OpenAI API key, model access and separate API billing. Text work in this adapter.',
-    gemini: 'Uses a Google AI Studio / Gemini API key and its quota. Text work in this adapter.',
-    compatible:
-      'Connect LM Studio, llama.cpp or another OpenAI-compatible Chat Completions server. Tools depend on the external worker you build.',
-    external:
-      'Attach your own running worker through the authenticated task-leasing API. Its model, tools and costs are managed separately.',
+    ollama: 'Local text models.',
+    codex: 'ChatGPT sign-in and Codex allowance.',
+    openai: 'API key · separate API billing.',
+    gemini: 'Google AI Studio API key.',
+    compatible: 'LM Studio, llama.cpp and compatible servers.',
+    external: 'Your own task worker.',
   };
   return (
     <Shell
       title="Model connections"
-      subtitle="Check model services and ChatGPT sign-in. Defaults apply to new projects; each saved project keeps its selected model."
+      subtitle="Connect a model or manage sign-in."
       onClose={onClose}
     >
       <div className="runtime-check">
@@ -126,13 +124,12 @@ export default function RuntimeModal({
             className={`connection-beacon ${serverConnected ? 'connected' : 'unavailable'}`}
             aria-hidden="true"
           />
-          Workroom server: {serverConnected ? 'connected' : 'reconnecting'}. This is separate from
-          model access.
+          Workroom server: {serverConnected ? 'connected' : 'reconnecting'}.
         </p>
         {data.connectionChange && <p role="status">{data.connectionChange}</p>}
         <p className="field-hint">
-          Green means the service or sign-in check succeeded. Amber means configured but unchecked.
-          These checks do not generate work or prove remaining allowance.
+          Green: connection checked. Amber: not checked. Checks do not test generation or remaining
+          quota.
         </p>
         {project && projectConnection && (
           <section className="project-connection-summary" aria-label="Current project connection">
@@ -154,11 +151,6 @@ export default function RuntimeModal({
           {saving ? 'Checking connections…' : 'Check connections'}
         </button>
         <p role="status">{message}</p>
-        <p>
-          For local models, open Configure connection under Ollama for installation and download
-          instructions. Then check connections here. Changing a project's model is available through
-          its Model → Change control.
-        </p>
       </div>
       <div className="runtime-options">
         {(['ollama', 'codex', 'openai', 'gemini', 'compatible', 'external'] as Provider[]).map(
@@ -184,7 +176,7 @@ export default function RuntimeModal({
                   {model && <p className="provider-model">{model}</p>}
                   <p>{descriptions[provider]}</p>
                   <ConnectionStatus info={status} />
-                  <small>{status.message}</small>
+                  {status.state !== 'connected' && <small>{status.message}</small>}
                   {status.checkedAt && (
                     <small>Checked {new Date(status.checkedAt).toLocaleTimeString()}</small>
                   )}
@@ -262,17 +254,16 @@ export default function RuntimeModal({
           },
         )}
       </div>
-      <p>
-        Local models use your hardware. Paid APIs remain disabled until enabled with price estimates
-        in Workspace controls. No automatic model or paid fallback is used.
-      </p>
-      {data.runtime.coding && (
-        <p>
-          <strong>Codex coding tools: {data.runtime.coding.ready ? 'Ready' : 'Not ready'}</strong>
-          <br />
-          {data.runtime.coding.message}
-        </p>
-      )}
+      <details className="connection-notes">
+        <summary>Limits and coding tools</summary>
+        <p>Saved projects keep their model. API spending stays controlled in Workspace controls.</p>
+        {data.runtime.coding && (
+          <p>
+            Codex coding tools: {data.runtime.coding.ready ? 'Ready' : 'Not ready'}.{' '}
+            {data.runtime.coding.message}
+          </p>
+        )}
+      </details>
     </Shell>
   );
 }

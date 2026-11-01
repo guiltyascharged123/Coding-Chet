@@ -281,3 +281,7 @@ Demo entries explicitly say that no AI ran. External workers show assignment sta
 ## Saved history and interrupted tasks
 
 Activity keeps older events: use **Load older activity**. This does not consume model tokens. For a task interrupted during a restart, open it and use **Recover saved result · no model call** if available. Review Usage and existing work before choosing Retry. After updating, stop the old Workroom terminal with Ctrl+C, then run `npm run local` again. See [Reliability and work evidence](STABILITY.md) for details.
+
+## A sign-in attempt is stuck
+
+If terminal Codex login succeeded but Workroom still says sign-in is pending, use **Models & sign-in → Codex → Check status**. **Reset sign-in** cancels the pending attempt and reloads its form without signing you out. **Reconnect ChatGPT** starts a fresh browser login. The CLI status panel shows the checked result.

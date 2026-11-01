@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { Bootstrap, Provider } from '../../shared/types';
 import { DEFAULT_LOCAL_MODEL } from '../../shared/defaults';
 import { api } from '../api';
+import CodexSignIn from './CodexSignIn';
 
 type Settings = {
   revision: string;
@@ -12,7 +13,6 @@ type Settings = {
   ollama: { model: string; url: string };
   compatible: { model: string; url: string; billing: 'local' | 'api'; hasKey: boolean };
 };
-type Login = { id: string; status: string; message: string; url?: string; code?: string };
 export default function ConnectionSetup({
   provider,
   onRefresh,
@@ -34,7 +34,6 @@ export default function ConnectionSetup({
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
     [error, setError] = useState('');
-  const [login, setLogin] = useState<Login | null>(null);
   const hasKey =
     settings && 'hasKey' in settings[provider]
       ? (settings[provider] as { hasKey: boolean }).hasKey
@@ -50,43 +49,14 @@ export default function ConnectionSetup({
       setKey('');
       setClearKey(false);
       setError('');
+      setMessage('');
     } catch (e) {
       setError((e as Error).message);
     }
   }
   useEffect(() => {
     void load();
-    if (provider === 'codex')
-      void api<{ login: Login | null }>('/connections/codex/login', undefined, 'GET')
-        .then((value) => setLogin(value.login))
-        .catch(() => {});
   }, []);
-  const waiting = login && ['starting', 'waiting'].includes(login.status);
-  useEffect(() => {
-    if (!waiting) return;
-    let stopped = false;
-    const timer = setInterval(async () => {
-      try {
-        const value = await api<{ login: Login | null }>(
-          '/connections/codex/login',
-          undefined,
-          'GET',
-        );
-        if (stopped) return;
-        setLogin(value.login);
-        if (value.login?.status === 'completed') {
-          const data = await api<Bootstrap>('/connections/check');
-          onRefresh(data);
-        }
-      } catch (e) {
-        if (!stopped) setError((e as Error).message);
-      }
-    }, 2000);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
-  }, [!!waiting]);
   async function save(enableCodex = enabled) {
     if (!settings) throw new Error('Load connection settings first.');
     const body = {
@@ -110,9 +80,7 @@ export default function ConnectionSetup({
     setClearKey(false);
     setEnabled(value.settings.codex.enabled);
     onRefresh(value.data);
-    setMessage(
-      'Saved to .env and applied to this server. Existing project models and spending permissions were retained.',
-    );
+    setMessage('Connection saved.');
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -132,10 +100,6 @@ export default function ConnectionSetup({
       {!settings && !error && <p role="status">Loading saved settings…</p>}
       {settings && (
         <form onSubmit={submit}>
-          <p>
-            Saved keys stay on the Workroom computer. They are never sent back into this form.
-            Passwords for your Google or ChatGPT account are not used here.
-          </p>
           {provider === 'codex' && (
             <label className="checkbox-label">
               <input
@@ -156,10 +120,7 @@ export default function ConnectionSetup({
               required={provider !== 'codex'}
             />
           </label>
-          <p className="field-hint">
-            This sets the provider default. Saved projects keep their own model; use Change this
-            project's connection to update one.
-          </p>
+          <p className="field-hint">Saved projects keep their own model.</p>
           {(provider === 'ollama' || provider === 'compatible') && (
             <label>
               Server URL
@@ -230,75 +191,26 @@ export default function ConnectionSetup({
           )}
           {settings.environmentOverrides.length > 0 && (
             <p className="field-hint">
-              The running server differs from .env for: {settings.environmentOverrides.join(', ')}.
-              Shell exports can override .env at the next start; remove conflicting exports if
-              needed.
+              Saved values differ from the running server for:{' '}
+              {settings.environmentOverrides.join(', ')}. Save to apply them.
             </p>
           )}
-          {blocked && (
-            <p role="status">
-              Pause running projects before saving credentials or starting sign-in.
-            </p>
-          )}
-          <button className="button secondary small" disabled={busy || blocked || !!waiting}>
+          <button className="button secondary small" disabled={busy || blocked}>
             Save connection
           </button>
-          {provider === 'codex' && (
-            <button
-              className="button primary small"
-              type="button"
-              disabled={busy || blocked || !!waiting}
-              onClick={async () => {
-                setBusy(true);
-                setError('');
-                try {
-                  await save(true);
-                  const value = await api<{ login: Login }>('/connections/codex/login');
-                  setLogin(value.login);
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              {enabled ? 'Sign in with ChatGPT' : 'Enable Codex & sign in with ChatGPT'}
-            </button>
-          )}
         </form>
       )}
-      {provider === 'codex' && login && (
-        <div className="device-login" role="status">
-          <p>{login.message}</p>
-          {login.url && (
-            <a href={login.url} target="_blank" rel="noopener noreferrer">
-              Open official OpenAI sign-in ↗
-            </a>
-          )}
-          {login.code && (
-            <p>
-              One-time code: <code>{login.code}</code>
-            </p>
-          )}
-          {waiting && (
-            <button
-              type="button"
-              className="text-button"
-              onClick={async () => {
-                const value = await api<{ login: Login }>('/connections/codex/login/cancel', {
-                  id: login.id,
-                });
-                setLogin(value.login);
-              }}
-            >
-              Cancel this sign-in
-            </button>
-          )}
-        </div>
+      {provider === 'codex' && (
+        <CodexSignIn
+          blocked={blocked || busy}
+          ensureEnabled={() => save(true)}
+          reloadSettings={load}
+          onRefresh={onRefresh}
+        />
       )}
       {provider === 'ollama' && (
-        <aside className="local-model-help" aria-label="Local model setup instructions">
-          <strong>Install or connect a local model</strong>
+        <details className="local-model-help" aria-label="Local model setup instructions">
+          <summary>Install or connect a local model</summary>
           <ol>
             <li>
               Install Ollama for Ubuntu or Windows from{' '}
@@ -336,11 +248,11 @@ export default function ConnectionSetup({
             ))}
           </ul>
           <p>Choosing an ID does not download weights or change an existing project's model.</p>
-        </aside>
+        </details>
       )}
       {provider === 'compatible' && (
-        <aside className="local-model-help" aria-label="Other local model server instructions">
-          <strong>LM Studio or llama.cpp</strong>
+        <details className="local-model-help" aria-label="Other local model server instructions">
+          <summary>LM Studio or llama.cpp setup</summary>
           <p>
             In{' '}
             <a href="https://lmstudio.ai/" target="_blank" rel="noreferrer">
@@ -360,13 +272,27 @@ export default function ConnectionSetup({
             <code>/v1/models</code> endpoint. Then save and Check connections. Local servers
             generate text in this adapter; coding tools require Codex.
           </p>
-        </aside>
+        </details>
       )}
       {message && <p role="status">{message}</p>}
       {error && <p role="alert">{error}</p>}
-      <button type="button" className="text-button" disabled={busy} onClick={() => void load()}>
-        Reload saved settings · discard unsaved connection inputs
-      </button>
+      {provider !== 'codex' && (
+        <button
+          type="button"
+          className="text-button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await load();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Reload settings
+        </button>
+      )}
     </section>
   );
 }

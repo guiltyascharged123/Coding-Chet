@@ -149,10 +149,13 @@ export class ConnectionSettings {
     return createHmac('sha256', this.secret).update(source).digest('hex');
   }
   view() {
-    const source = this.read();
+    const source = this.read(),
+      persisted = parse(source);
+    const saved = (name: string) =>
+      Object.hasOwn(persisted, name) ? persisted[name] : this.env[name];
     return {
       revision: this.revision(source),
-      environmentOverrides: Object.entries(parse(source))
+      environmentOverrides: Object.entries(persisted)
         .filter(
           ([name, value]) =>
             /^(WORKROOM_CODEX_|OPENAI_|GEMINI_|OLLAMA_|COMPATIBLE_)/.test(name) &&
@@ -161,23 +164,23 @@ export class ConnectionSettings {
         )
         .map(([name]) => name),
       codex: {
-        enabled: this.env.WORKROOM_CODEX_ENABLED === '1',
-        model: this.env.WORKROOM_CODEX_MODEL || '',
+        enabled: saved('WORKROOM_CODEX_ENABLED') === '1',
+        model: saved('WORKROOM_CODEX_MODEL') || '',
       },
-      openai: { model: this.env.OPENAI_MODEL || 'gpt-4.1-mini', hasKey: !!this.env.OPENAI_API_KEY },
+      openai: { model: saved('OPENAI_MODEL') || 'gpt-4.1-mini', hasKey: !!saved('OPENAI_API_KEY') },
       gemini: {
-        model: this.env.GEMINI_MODEL || 'gemini-2.5-flash',
-        hasKey: !!this.env.GEMINI_API_KEY,
+        model: saved('GEMINI_MODEL') || 'gemini-2.5-flash',
+        hasKey: !!saved('GEMINI_API_KEY'),
       },
       ollama: {
-        model: this.env.OLLAMA_MODEL || DEFAULT_LOCAL_MODEL,
-        url: publicEndpoint(this.env.OLLAMA_URL || 'http://127.0.0.1:11434'),
+        model: saved('OLLAMA_MODEL') || DEFAULT_LOCAL_MODEL,
+        url: publicEndpoint(saved('OLLAMA_URL') || 'http://127.0.0.1:11434'),
       },
       compatible: {
-        model: this.env.COMPATIBLE_MODEL || '',
-        url: publicEndpoint(this.env.COMPATIBLE_API_URL || 'http://127.0.0.1:1234/v1'),
-        billing: this.env.COMPATIBLE_BILLING === 'local' ? ('local' as const) : ('api' as const),
-        hasKey: !!this.env.COMPATIBLE_API_KEY,
+        model: saved('COMPATIBLE_MODEL') || '',
+        url: publicEndpoint(saved('COMPATIBLE_API_URL') || 'http://127.0.0.1:1234/v1'),
+        billing: saved('COMPATIBLE_BILLING') === 'local' ? ('local' as const) : ('api' as const),
+        hasKey: !!saved('COMPATIBLE_API_KEY'),
       },
     };
   }
@@ -265,7 +268,22 @@ export class ConnectionSettings {
           409,
         );
       renameSync(temp, this.file);
-      Object.assign(this.env, changes);
+      const persisted = parse(next);
+      const owned =
+        data.provider === 'codex'
+          ? ['WORKROOM_CODEX_ENABLED', 'WORKROOM_CODEX_MODEL']
+          : data.provider === 'ollama'
+            ? ['OLLAMA_MODEL', 'OLLAMA_URL']
+            : data.provider === 'compatible'
+              ? [
+                  'COMPATIBLE_MODEL',
+                  'COMPATIBLE_API_URL',
+                  'COMPATIBLE_BILLING',
+                  'COMPATIBLE_API_KEY',
+                ]
+              : [`${data.provider.toUpperCase()}_MODEL`, `${data.provider.toUpperCase()}_API_KEY`];
+      for (const name of owned)
+        if (Object.hasOwn(persisted, name)) this.env[name] = persisted[name];
       return this.view();
     } finally {
       closeSync(fd);

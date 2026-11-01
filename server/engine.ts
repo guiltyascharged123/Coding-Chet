@@ -43,6 +43,7 @@ export class AppError extends Error {
 
 export class Engine extends EventEmitter {
   private connectionChange?: string;
+  private connectionChangeOwner?: string;
   private serverId = randomUUID();
   private active = new Map<string, AbortController>();
   private planners = new Map<string, AbortController>();
@@ -258,10 +259,15 @@ export class Engine extends EventEmitter {
   }
   beginConnectionChange(message: string) {
     this.assertConnectionsIdle();
+    const owner = randomUUID();
+    this.connectionChangeOwner = owner;
     this.connectionChange = message;
     this.commit();
+    return owner;
   }
-  endConnectionChange() {
+  endConnectionChange(owner: string) {
+    if (owner !== this.connectionChangeOwner) return;
+    this.connectionChangeOwner = undefined;
     this.connectionChange = undefined;
     this.commit();
   }

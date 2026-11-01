@@ -351,7 +351,7 @@ test('walking agents, readable surfaces, office documents, and native exports wo
     true,
   );
   await page.getByRole('button', { name: 'Model connections', exact: true }).click();
-  await expect(page.getByRole('main')).toContainText('No automatic model or paid fallback');
+  await expect(page.getByRole('main')).toContainText('API spending stays controlled');
   await expect(page.getByRole('main')).toContainText('API key');
   expect(errors).toEqual([]);
 });
@@ -450,9 +450,10 @@ test('failed AI planning remains visible after reload and retries the saved proj
     state.projects.find((p: { title: string }) => p.title === 'Recover a failed plan').brief,
   ).toBe(brief);
   await page.getByRole('button', { name: 'Model connections', exact: true }).click();
+  await page.getByText('Limits and coding tools', { exact: true }).click();
   await expect(page.getByRole('main')).toContainText('Codex coding tools');
   await page.getByRole('button', { name: 'Check connections', exact: true }).click();
-  await expect(page.getByRole('main')).toContainText('No model was run');
+  await expect(page.getByRole('main')).toContainText('Connections checked.');
 });
 
 test('software projects expose actual source files and ZIPs, project roles, and a saved network choice', async ({
@@ -985,6 +986,7 @@ test('navigation has real destinations, provider setup stays accessible, and man
     .getByRole('article', { name: 'Local model · Ollama connection', exact: true })
     .getByRole('button', { name: 'Configure connection', exact: true })
     .click();
+  await dialog.getByText('Install or connect a local model', { exact: true }).click();
   await expect(dialog).toContainText('npm run setup:local');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -1133,7 +1135,7 @@ test('top-bar Connections page shows checked beacons, safely saves credentials, 
   const secret = 'fixture-local-key-not-an-account-credential';
   await compatible.getByLabel('compatible API key', { exact: true }).fill(secret);
   await compatible.getByRole('button', { name: 'Save connection', exact: true }).click();
-  await expect(compatible).toContainText('Saved to .env and applied to this server');
+  await expect(compatible).toContainText('Connection saved.');
   await expect(compatible.getByLabel('compatible API key', { exact: true })).toHaveValue('');
   const saved = await (await request.get('/api/connections/settings')).json();
   expect(saved.compatible.hasKey).toBe(true);
@@ -1150,9 +1152,8 @@ test('top-bar Connections page shows checked beacons, safely saves credentials, 
   expect(after.attempts.length).toBe(bootstrap.attempts.length);
   const local = page.getByRole('article', { name: 'Local model · Ollama connection', exact: true });
   await local.getByRole('button', { name: 'Configure connection', exact: true }).click();
-  await expect(
-    local.getByRole('complementary', { name: 'Local model setup instructions' }),
-  ).toBeVisible();
+  await expect(local.getByText('Install or connect a local model', { exact: true })).toBeVisible();
+  await local.getByText('Install or connect a local model', { exact: true }).click();
   await expect(local).toContainText('ollama pull');
   await expect(local).toContainText('16 GB RAM');
   const codex = page.getByRole('article', {
@@ -1161,9 +1162,9 @@ test('top-bar Connections page shows checked beacons, safely saves credentials, 
   });
   await codex.getByRole('button', { name: 'Set up / sign in', exact: true }).click();
   await expect(
-    codex.getByRole('button', { name: 'Enable Codex & sign in with ChatGPT', exact: true }),
+    codex.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }),
   ).toBeVisible();
-  await expect(codex).toContainText('already bundled');
+  await expect(codex.getByRole('button', { name: 'Check status', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await request.put('/api/connections/settings', {
@@ -1226,4 +1227,135 @@ test('clicking the current project on the task board edits a durable brief and k
     .getByRole('button', { name: 'Edit project A revised office project', exact: true })
     .click();
   await expect(page.getByText('Previous project versions (1)', { exact: true })).toBeVisible();
+});
+
+test('terminal ChatGPT sign-in clears an old attempt and lets the project run; reset and reconnect remain usable', async ({
+  page,
+  request,
+}) => {
+  const original = await (await request.get('/api/connections/settings')).json();
+  const initial = await (await request.get('/api/state')).json();
+  for (const project of initial.state.projects.filter((p: any) => p.status === 'running'))
+    await request.post(`/api/projects/${project.id}/pause`);
+  const fixtureUrl = new URL('/__codex-fixture', original.compatible.url).href;
+  await request.post(fixtureUrl, { data: { authenticated: false, deviceBlocked: false } });
+  await request.post('/api/policy', { data: { ...initial.state.policy, maxRequests24h: 1000 } });
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'Recovered sign-in project',
+        brief: 'Compare supplied costs A at $20 and B at $35, without claiming external actions.',
+        planning: 'manual',
+      },
+    })
+  ).json();
+  await request.put(`/api/projects/${project.id}/plan`, {
+    data: {
+      tasks: [
+        {
+          id: crypto.randomUUID(),
+          title: 'Compare the supplied costs',
+          description: 'Calculate the difference and report the supplied evidence.',
+          agentId: 'mira',
+          dependencies: [],
+          requiresApproval: false,
+        },
+      ],
+    },
+  });
+  try {
+    await page.goto('/');
+    await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+    await page.reload();
+    await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
+    const codex = page.getByRole('article', {
+      name: 'Codex · ChatGPT sign-in connection',
+      exact: true,
+    });
+    await codex.getByRole('button', { name: 'Set up / sign in', exact: true }).click();
+    await codex.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).click();
+    await expect(
+      codex.getByRole('link', { name: 'Open ChatGPT sign-in ↗', exact: true }),
+    ).toBeVisible();
+    expect((await request.post(`/api/projects/${project.id}/run`)).status()).toBe(409);
+    // Emulate successful npx login in another terminal, without contacting OpenAI.
+    await request.post(fixtureUrl, { data: { authenticated: true } });
+    await codex.getByRole('button', { name: 'Check status', exact: true }).click();
+    await expect(codex.getByLabel('Codex CLI status')).toContainText('Signed in with ChatGPT');
+    await expect(codex.getByLabel('Codex CLI status')).toContainText('Exit: 0');
+    expect((await (await request.get('/api/state')).json()).connectionChange).toBeUndefined();
+    await page.getByRole('button', { name: 'Back to workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Resume team', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
+    await codex.getByRole('button', { name: 'Set up / sign in', exact: true }).click();
+    await codex.getByRole('button', { name: 'Reconnect ChatGPT', exact: true }).click();
+    await expect(
+      codex.getByRole('link', { name: 'Open ChatGPT sign-in ↗', exact: true }),
+    ).toBeVisible();
+    await codex.getByLabel('codex default model ID').fill('unsaved-model');
+    await codex.getByRole('button', { name: 'Reset sign-in', exact: true }).click();
+    await expect(codex).toContainText('Attempt cleared.');
+    await expect(codex.getByLabel('codex default model ID')).toHaveValue('');
+    await expect(codex.getByLabel('Codex CLI status')).toContainText('Signed in with ChatGPT');
+    expect((await (await request.get('/api/state')).json()).connectionChange).toBeUndefined();
+    await codex.getByRole('button', { name: 'Reconnect ChatGPT', exact: true }).click();
+    await expect(
+      codex.getByRole('link', { name: 'Open ChatGPT sign-in ↗', exact: true }),
+    ).toBeVisible();
+    await codex.getByRole('button', { name: 'Reset sign-in', exact: true }).click();
+  } finally {
+    await request.post('/api/connections/codex/login/reset');
+    await request.post(fixtureUrl, { data: { authenticated: false, deviceBlocked: false } });
+    const latest = await (await request.get('/api/connections/settings')).json();
+    await request.put('/api/connections/settings', {
+      data: {
+        provider: 'codex',
+        revision: latest.revision,
+        enabled: original.codex.enabled,
+        model: original.codex.model,
+      },
+    });
+    await request.post('/api/policy', { data: initial.state.policy });
+  }
+});
+
+test('unsupported device sign-in fails cleanly and browser reconnect remains available', async ({
+  page,
+  request,
+}) => {
+  const settings = await (await request.get('/api/connections/settings')).json();
+  const fixtureUrl = new URL('/__codex-fixture', settings.compatible.url).href;
+  await request.post(fixtureUrl, { data: { authenticated: false, deviceBlocked: true } });
+  try {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
+    const codex = page.getByRole('article', {
+      name: 'Codex · ChatGPT sign-in connection',
+      exact: true,
+    });
+    await codex.getByRole('button', { name: 'Set up / sign in', exact: true }).click();
+    await codex.getByText('Terminal or remote sign-in', { exact: true }).click();
+    await codex.getByRole('button', { name: 'Use device code instead', exact: true }).click();
+    await expect(codex).toContainText('Device sign-in is disabled');
+    expect((await (await request.get('/api/state')).json()).connectionChange).toBeUndefined();
+    await codex.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).click();
+    await expect(
+      codex.getByRole('link', { name: 'Open ChatGPT sign-in ↗', exact: true }),
+    ).toBeVisible();
+    await codex.getByRole('button', { name: 'Reset sign-in', exact: true }).click();
+  } finally {
+    await request.post('/api/connections/codex/login/reset');
+    await request.post(fixtureUrl, { data: { authenticated: false, deviceBlocked: false } });
+    const latest = await (await request.get('/api/connections/settings')).json();
+    await request.put('/api/connections/settings', {
+      data: {
+        provider: 'codex',
+        revision: latest.revision,
+        enabled: settings.codex.enabled,
+        model: settings.codex.model,
+      },
+    });
+  }
 });

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { codexReadiness } from './codex-readiness.js';
+import type { CodexAuthProof } from '../shared/codex-connection.js';
 import type { ConnectionInfo } from '../shared/types.js';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
@@ -80,7 +81,7 @@ export function codexEnvironment() {
 function status(
   command: string,
   args: string[],
-): Promise<{ output: string; available: boolean; timedOut?: boolean }> {
+): Promise<{ output: string; available: boolean; timedOut?: boolean; exitCode: number | null }> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       shell: false,
@@ -96,15 +97,15 @@ function status(
     child.stderr.on('data', collect);
     const timer = setTimeout(() => {
       child.kill();
-      resolve({ output: '', available: true, timedOut: true });
+      resolve({ output: '', available: true, timedOut: true, exitCode: null });
     }, 4000);
     child.on('error', () => {
       clearTimeout(timer);
-      resolve({ output: '', available: false });
+      resolve({ output: '', available: false, exitCode: null });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ output, available: true });
+      resolve({ output, available: true, exitCode: code });
     });
   });
 }
@@ -125,6 +126,37 @@ export function serviceUrl(value: string, localOnly = false) {
     );
   return url;
 }
+export async function checkCodexSignIn(): Promise<CodexAuthProof> {
+  let login = { output: '', available: false, exitCode: null as number | null };
+  try {
+    if (process.env.WORKROOM_CODEX_BIN)
+      login = await status(process.env.WORKROOM_CODEX_BIN, ['login', 'status']);
+    else {
+      const entry = createRequire(import.meta.resolve('@openai/codex-sdk')).resolve(
+        '@openai/codex/bin/codex.js',
+      );
+      login = await status(process.execPath, [entry, 'login', 'status']);
+    }
+  } catch {
+    /* Return the checked failure, never private CLI output. */
+  }
+  const diagnostic = codexReadiness(true, login, process.env.WORKROOM_CODEX_MODEL || '');
+  if (diagnostic.ready && login.exitCode !== 0)
+    return {
+      command: 'npx --no-install codex login status',
+      checkedAt: Date.now(),
+      code: 'check_failed',
+      message: 'The CLI status check did not finish successfully.',
+      exitCode: login.exitCode,
+    };
+  return {
+    command: 'npx --no-install codex login status',
+    checkedAt: Date.now(),
+    code: diagnostic.code === 'disabled' ? 'check_failed' : diagnostic.code,
+    message: diagnostic.message,
+    exitCode: login.exitCode,
+  };
+}
 let refreshGeneration = 0;
 export async function refreshManagedInfo(
   checkApis = false,
@@ -133,22 +165,10 @@ export async function refreshManagedInfo(
   const generation = ++refreshGeneration;
   const next = { ...managedInfo };
   const enabled = process.env.WORKROOM_CODEX_ENABLED === '1';
-  let login = { output: '', available: true };
-  if (enabled) {
-    try {
-      if (process.env.WORKROOM_CODEX_BIN)
-        login = await status(process.env.WORKROOM_CODEX_BIN, ['login', 'status']);
-      else {
-        const entry = createRequire(import.meta.resolve('@openai/codex-sdk')).resolve(
-          '@openai/codex/bin/codex.js',
-        );
-        login = await status(process.execPath, [entry, 'login', 'status']);
-      }
-    } catch {
-      login = { output: '', available: false };
-    }
-  }
-  const diagnostic = codexReadiness(enabled, login, process.env.WORKROOM_CODEX_MODEL || '');
+  const proof = enabled ? await checkCodexSignIn() : undefined;
+  const diagnostic = proof
+    ? { ready: proof.code === 'authenticated', code: proof.code, message: proof.message }
+    : codexReadiness(false, { output: '', available: true }, '');
   const probe = diagnostic.ready
     ? await checkCodingSandbox()
     : {
