@@ -192,3 +192,45 @@ test('a real meeting brings all four agents through the room entrance and keeps 
     assert.ok(p.path.length === 0);
   }
 });
+
+test('all directed handoffs reach the recipient desk promptly without clipping furniture or losing queued transfers', () => {
+  for (const sender of agents)
+    for (const recipient of agents) {
+      if (sender.id === recipient.id) continue;
+      const office = new OfficeSimulation();
+      const makeEvent = (id: string, a: string, b: string) => ({
+        id,
+        projectId: 'project',
+        agentId: a,
+        targetAgentId: b,
+        type: 'message' as const,
+        taskId: `to-${b}`,
+        sourceTaskId: `from-${a}`,
+        message: 'Saved dependency result is available to this assignment.',
+        createdAt: Date.now(),
+      });
+      const first = makeEvent('one', sender.id, recipient.id);
+      office.update(agents, [], [first]);
+      office.update(agents, [], [makeEvent('two', recipient.id, sender.id), first]);
+      const visited = new Set<string>();
+      let arrival = 0;
+      for (let frame = 0; frame < 2100; frame++) {
+        office.step(1 / 60);
+        for (const person of office.people.values())
+          assert.ok(walkable(person), `${sender.id} → ${recipient.id} crossed furniture`);
+        if (office.encounter?.settled) {
+          visited.add(office.encounter.event.id);
+          if (office.encounter.event.id === 'one' && !arrival) arrival = office.time;
+        }
+      }
+      assert.ok(
+        arrival > 0 && arrival < 7,
+        `handoff ${sender.id} → ${recipient.id} took ${arrival || 'forever'} seconds`,
+      );
+      assert.deepEqual([...visited].sort(), ['one', 'two']);
+      assert.equal(office.encounter, undefined);
+      assert.ok(
+        [...office.people.values()].every((p) => p.goal.action === 'desk' && !p.path.length),
+      );
+    }
+});

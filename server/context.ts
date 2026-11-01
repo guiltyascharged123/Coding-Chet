@@ -4,7 +4,13 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 type Data = Record<string, any>;
-export type SavedSource = { id: string; text: string; label: string };
+export type SavedSource = {
+  id: string;
+  text: string;
+  label: string;
+  offset?: number;
+  totalCharacters?: number;
+};
 const fields = [
   'humanDirection',
   'verifiedMemory',
@@ -28,6 +34,9 @@ export function contextSources(data: Data): SavedSource[] {
           id: entry.sourceId || `${field}:${entry.id || index}`,
           text: entry[key],
           label: entry.title || entry.agenda || entry.role || field,
+          ...(entry.originalSourceId
+            ? { offset: entry.offset, totalCharacters: entry.totalCharacters }
+            : {}),
         });
     }
   if (data.task?.previousOutput)
@@ -80,17 +89,26 @@ export function assembleContext(system: string, data: Data, limit: number) {
         if (!included.has(source.id)) continue;
         const chars = source.chars;
         const text = chars.slice(0, cap).join('');
+        const shown = Math.min(cap, chars.length);
         result[field].push({
           ...entry,
           sourceId: source.id,
           [key]: text,
-          ...(text.length < source.text.length
+          ...(source.offset !== undefined
             ? {
-                excerpt: true,
-                totalCharacters: chars.length,
-                nextOffset: Math.min(cap, chars.length),
+                passage: true,
+                offset: source.offset,
+                totalCharacters: source.totalCharacters,
+                nextOffset: source.offset + shown,
+                excerpt: source.offset > 0 || source.offset + shown < source.totalCharacters!,
               }
-            : {}),
+            : text.length < source.text.length
+              ? {
+                  excerpt: true,
+                  totalCharacters: chars.length,
+                  nextOffset: Math.min(cap, chars.length),
+                }
+              : {}),
         });
       }
     }
@@ -110,7 +128,7 @@ export function assembleContext(system: string, data: Data, limit: number) {
         omittedSources: sources.length - included.size,
         indexSourceId: 'source-index',
         instruction:
-          'Excerpts only. Retrieve source-index for omitted source IDs, then retrieve needed evidence. Originals are saved; teammate claims are not verification.',
+          'Excerpts only. Use sourceCatalog IDs and absolute nextOffset values for essential missing evidence. Do not reread supplied ranges. Originals are saved; teammate claims are not verification.',
       };
     return result;
   }
@@ -134,8 +152,9 @@ export function assembleContext(system: string, data: Data, limit: number) {
     sources: sources.map((s) => ({
       id: s.id,
       label: s.label.slice(0, 100),
-      totalCharacters: s.chars.length,
+      totalCharacters: s.totalCharacters ?? s.chars.length,
       includedCharacters: included.has(s.id) ? Math.min(lo, s.chars.length) : 0,
+      ...(s.offset !== undefined ? { offset: s.offset } : {}),
     })),
   };
   return { user, report };
@@ -172,6 +191,45 @@ export function retrieveSources(
       text: chars.slice(request.offset, request.offset + pageSize).join(''),
     };
   });
+}
+
+/** Union overlapping/repeated requests, retaining original Unicode offsets and exact source text. */
+export function mergePassages(
+  sources: SavedSource[],
+  prior: ReturnType<typeof retrieveSources>,
+  fresh: ReturnType<typeof retrieveSources>,
+) {
+  const result: ReturnType<typeof retrieveSources> = [];
+  for (const page of [...prior, ...fresh]) {
+    if (!page.originalSourceId) {
+      if (!result.some((p) => p.sourceId === page.sourceId)) result.push(page);
+      continue;
+    }
+    const same = result.filter(
+      (p) =>
+        'originalSourceId' in p &&
+        p.originalSourceId === page.originalSourceId &&
+        p.offset! <= page.nextOffset! &&
+        p.nextOffset! >= page.offset!,
+    );
+    const start = Math.min(page.offset!, ...same.map((p) => p.offset!));
+    const end = Math.max(page.nextOffset!, ...same.map((p) => p.nextOffset!));
+    const source = sources.find((s) => s.id === page.originalSourceId);
+    if (!source) {
+      if (!result.some((p) => p.sourceId === page.sourceId)) result.push(page);
+      continue;
+    }
+    for (const old of same) result.splice(result.indexOf(old), 1);
+    result.push({
+      ...page,
+      sourceId: `requested:${source.id}:${start}`,
+      offset: start,
+      nextOffset: end,
+      title: `${source.label} · passage at ${start}`,
+      text: Array.from(source.text).slice(start, end).join(''),
+    });
+  }
+  return result;
 }
 
 export function writeSourceBundle(directory: string, data: Data) {

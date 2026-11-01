@@ -49,6 +49,19 @@ test('task dependencies, human revision, approval, and final handoff work end to
     assert.ok(tasks.every((t) => t.status === 'done' && t.output.length > 500));
     assert.equal(engine.state.approvals.filter((a) => a.status === 'pending').length, 0);
     assert.ok(engine.state.activities.some((a) => a.targetAgentId && a.type === 'completed'));
+    const transfers = engine.state.activities.filter((a) => a.sourceTaskId && a.taskId);
+    assert.ok(transfers.length > 0);
+    for (const transfer of transfers) {
+      const from = tasks.find((t) => t.id === transfer.sourceTaskId)!;
+      const to = tasks.find((t) => t.id === transfer.taskId)!;
+      assert.equal(transfer.agentId, from.agentId, 'handoff sender must be the evidence author');
+      assert.equal(
+        transfer.targetAgentId,
+        to.agentId,
+        'handoff receiver must own the dependent task',
+      );
+      assert.ok(to.dependencies.includes(from.id));
+    }
   } finally {
     engine.stop();
     await delay(25);

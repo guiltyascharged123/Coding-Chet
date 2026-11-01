@@ -101,6 +101,8 @@ export const activitySchema = z.object({
   projectId: id,
   agentId: id.optional(),
   targetAgentId: id.optional(),
+  taskId: id.optional(),
+  sourceTaskId: id.optional(),
   type: z.enum(['system', 'started', 'message', 'completed', 'approval', 'error']),
   message: text.max(5000),
   createdAt: z.number().finite(),
@@ -257,6 +259,7 @@ export const stateSchema = z
                     label: text.max(100),
                     totalCharacters: z.number().int().min(0),
                     includedCharacters: z.number().int().min(0),
+                    offset: z.number().int().min(0).optional(),
                   }),
                 )
                 .max(20000),

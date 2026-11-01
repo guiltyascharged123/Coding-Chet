@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Download, TerminalSquare } from 'lucide-react';
 import type { Agent, Project, Task } from '../../shared/types';
 import type { ConsoleEntry } from '../../shared/console';
+import { useProjectConsole } from '../useProjectConsole';
 import { saveBlob } from '../api';
 
 function readable(entry: ConsoleEntry, raw: boolean) {
@@ -29,9 +30,6 @@ export default function LiveConsole({
   focus?: { agentId?: string; taskId?: string };
   meetingActive?: boolean;
 }) {
-  const [entries, setEntries] = useState<ConsoleEntry[]>([]);
-  const [connected, setConnected] = useState(false);
-  const [message, setMessage] = useState('');
   const [agent, setAgent] = useState(focus.agentId || '');
   const [task, setTask] = useState(focus.taskId || '');
   const [phase, setPhase] = useState('');
@@ -40,47 +38,9 @@ export default function LiveConsole({
   const [follow, setFollow] = useState(true);
   const [reconnect, setReconnect] = useState(0);
   const viewport = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    setConnected(false);
-    const source = new EventSource(
-      `/api/projects/${encodeURIComponent(project.id)}/console/events`,
-    );
-    const snapshot = (event: MessageEvent) => {
-      try {
-        setEntries(JSON.parse(event.data).entries);
-      } catch {
-        setMessage('The console snapshot could not be read. Reconnect to reload it.');
-      }
-    };
-    const update = (event: MessageEvent) => {
-      try {
-        const value = JSON.parse(event.data) as { entry?: ConsoleEntry; removed: string[] };
-        setEntries((prior) =>
-          [
-            ...prior.filter((e) => e.id !== value.entry?.id && !value.removed.includes(e.id)),
-            ...(value.entry ? [value.entry] : []),
-          ].sort((a, b) => a.sequence - b.sequence),
-        );
-      } catch {
-        setMessage('A console update could not be read. Reconnect to reload history.');
-      }
-    };
-    source.addEventListener('snapshot', snapshot);
-    source.addEventListener('update', update);
-    source.addEventListener('warning', (event) => {
-      try {
-        setMessage(JSON.parse(event.data).message);
-      } catch {
-        setMessage('Console history could not be saved.');
-      }
-    });
-    source.onopen = () => {
-      setConnected(true);
-      setMessage('');
-    };
-    source.onerror = () => setConnected(false);
-    return () => source.close();
-  }, [project.id, reconnect]);
+  const { entries, connected, message: streamMessage } = useProjectConsole(project.id, reconnect);
+  const [feedback, setMessage] = useState('');
+  const message = streamMessage || feedback;
   const filtered = entries.filter(
     (e) =>
       (!agent || e.agentId === agent) &&
@@ -188,7 +148,13 @@ export default function LiveConsole({
           {connected ? 'Console connected' : 'Console disconnected · reconnecting'} ·{' '}
           {active ? 'Project work active' : 'No project work running'} · {filtered.length} entries
         </span>
-        <button className="button secondary small" onClick={() => setReconnect((n) => n + 1)}>
+        <button
+          className="button secondary small"
+          onClick={() => {
+            setMessage('');
+            setReconnect((n) => n + 1);
+          }}
+        >
           Reconnect
         </button>
       </div>

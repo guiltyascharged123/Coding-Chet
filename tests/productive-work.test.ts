@@ -11,6 +11,7 @@ import {
   assembleContext,
   contextSources,
   retrieveSources,
+  mergePassages,
   writeSourceBundle,
 } from '../server/context.js';
 import { workResultSchema } from '../shared/work.js';
@@ -281,7 +282,15 @@ test('a review can request the missing saved passage and finish without a human 
           requests: [{ sourceId: `task:${source.id}`, offset }],
         });
       }
-      assert.match(input.requestedSources[0].text, /\$35 minus \$20 equals \$15/);
+      assert.ok(
+        input.requestedSources.some((p: { text: string }) =>
+          /\$35 minus \$20 equals \$15/.test(p.text),
+        ),
+      );
+      assert.ok(
+        input.requestedSources.some((p: { offset: number }) => p.offset === 0),
+        'initial supplied evidence was dropped',
+      );
       return response(result());
     }) as typeof fetch;
     const output = await runTask(
@@ -828,6 +837,148 @@ test('bounded coordination refuses extra work without corrupting the saved task 
     assert.equal(tasks[0].result!.followUps.length, 1, 'proposed work is preserved for review');
     assert.equal(h.store.attempts().length, 1);
     assert.ok(backupSchema.safeParse(h.store.backup()).success);
+  } finally {
+    h.close();
+  }
+});
+
+test('retrieved Unicode ranges preserve absolute offsets after packing and repeated/overlapping reads are merged', () => {
+  const sources = [
+    { id: 'task:large', label: 'Sales evidence', text: '🧑🏽‍💻 evidence '.repeat(4000) },
+  ];
+  const first = retrieveSources(sources, [{ sourceId: 'task:large', offset: 4800 }], 2000);
+  const fresh = retrieveSources(
+    sources,
+    [
+      { sourceId: 'task:large', offset: 4800 },
+      { sourceId: 'task:large', offset: 6000 },
+    ],
+    2000,
+  );
+  const merged = mergePassages(sources, first, fresh);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].offset, 4800);
+  assert.equal(merged[0].nextOffset, 8000);
+  const packed = assembleContext(
+    'Review without inventing facts.',
+    { requestedSources: merged },
+    1600,
+  );
+  const page = JSON.parse(packed.user).requestedSources[0];
+  assert.equal(page.offset, 4800);
+  assert.equal(page.totalCharacters, Array.from(sources[0].text).length);
+  assert.equal(page.nextOffset, 4800 + Array.from(page.text).length);
+  assert.ok(page.nextOffset < 8000, 'fixture must exercise an actual truncated passage');
+  assert.equal(page.text, Array.from(sources[0].text).slice(4800, page.nextOffset).join(''));
+  assert.ok(!page.text.includes('\uFFFD'));
+  assert.equal(packed.report.sources[0].offset, 4800);
+  assert.equal(packed.report.sources[0].totalCharacters, page.totalCharacters);
+});
+
+test('two source reads lead to an explicit final work result with role procedures and the real team roster', async () => {
+  const h = harness();
+  try {
+    const project = await h.engine.createProject(
+      'Review source ranges',
+      brief,
+      'office',
+      'template',
+      randomUUID(),
+      'office',
+    );
+    const task = h.store.state.tasks.filter((t) => t.projectId === project.id).at(-1)!;
+    task.workType = 'review';
+    const source = h.store.state.tasks.find((t) => t.projectId === project.id)!;
+    source.status = 'done';
+    source.output = 'Supplied material. '.repeat(3000);
+    let calls = 0;
+    globalThis.fetch = (async (_url, options) => {
+      const request = JSON.parse(String(options?.body)),
+        input = JSON.parse(request.messages[1].content);
+      calls++;
+      assert.match(request.messages[0].content, /Review independently/);
+      assert.deepEqual(
+        input.availableTeammates.map((a: { agentId: string }) => a.agentId),
+        agents.map((a) => a.id),
+      );
+      assert.ok(
+        input.availableTeammates.every((a: { role: string; goal: string }) => a.role && a.goal),
+      );
+      assert.ok(
+        Buffer.byteLength(request.messages.map((m: { content: string }) => m.content).join('')) <=
+          24000,
+      );
+      if (calls <= 2) {
+        assert.equal(input.retrievalState.remainingRounds, 3 - calls);
+        return response({
+          outcome: 'retrieve',
+          requests: [{ sourceId: `task:${source.id}`, offset: calls * 9000 }],
+        });
+      }
+      assert.equal(input.retrievalState.remainingRounds, 0);
+      assert.equal(input.retrievalState.finalResponseRequired, true);
+      assert.match(input.retrievalState.instruction, /blocked.*exact missing source/);
+      assert.ok(input.requestedSources.some((p: { offset: number }) => p.offset === 0));
+      return response(
+        result({
+          outcome: 'blocked',
+          summary: 'The full pricing source is still required.',
+          checks: [
+            {
+              criterion: 'Complete evidence review',
+              status: 'unverified',
+              evidence: 'Some source passages remain unread; no sale or demand is verified.',
+            },
+          ],
+        }),
+      );
+    }) as typeof fetch;
+    await runTask('openai', project, task, agents[3], [source], new AbortController().signal, {
+      store: h.store,
+      project,
+      task,
+    });
+    assert.equal(calls, 3);
+    assert.equal(task.result?.outcome, 'blocked');
+    assert.equal(task.responseIssue, undefined);
+    assert.equal(h.store.attempts().length, 3);
+  } finally {
+    h.close();
+  }
+});
+
+test('a model ignoring the final-result instruction cannot trigger unbounded retrieval calls or overwrite earlier work', async () => {
+  const h = harness();
+  try {
+    const project = await h.engine.createProject(
+      'Bounded evidence reads',
+      brief,
+      'office',
+      'template',
+      randomUUID(),
+      'office',
+    );
+    const task = h.store.state.tasks.find((t) => t.projectId === project.id)!;
+    task.output = 'Earlier saved work.';
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return response({ outcome: 'retrieve', requests: [{ sourceId: 'unknown', offset: 0 }] });
+    }) as typeof fetch;
+    await assert.rejects(
+      () =>
+        runTask('openai', project, task, agents[0], [], new AbortController().signal, {
+          store: h.store,
+          project,
+          task,
+        }),
+      /final response cannot request more sources/,
+    );
+    assert.equal(calls, 4);
+    assert.equal(task.output, 'Earlier saved work.');
+    assert.equal(task.result, undefined);
+    assert.match(task.responseIssue!.response, /retrieve/);
+    assert.ok(h.store.attempts().every((a) => a.provider === 'openai'));
   } finally {
     h.close();
   }

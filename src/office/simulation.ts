@@ -29,6 +29,7 @@ export type Person = Point & {
   status?: string;
   peer?: string;
 };
+export const WALK_SPEED = 2.8;
 
 // Footprints include clearance for a character. Rugs are walkable. The chairs,
 // shelves, equipment, walls, and meeting table are not.
@@ -239,14 +240,20 @@ export class OfficeSimulation {
   private team: Agent[] = [];
   private seen = new Set<string>();
   private meetingId?: string;
-  private encounter?: { a: string; b: string; started: number; settled?: number };
+  private pending: Activity[] = [];
+  encounter?: { a: string; b: string; event: Activity; started: number; settled?: number };
   update(agents: Agent[], tasks: Task[], activities: Activity[], meeting?: Meeting) {
     const activeMeeting =
       meeting && ['gathering', 'running'].includes(meeting.status) ? meeting : undefined;
     const changedMeeting = this.meetingId !== activeMeeting?.id;
     this.meetingId = activeMeeting?.id;
-    if (activeMeeting) this.encounter = undefined;
+    if (activeMeeting) {
+      this.encounter = undefined;
+      this.pending = [];
+    }
     this.team = agents;
+    for (const id of this.people.keys())
+      if (!agents.some((agent) => agent.id === id)) this.people.delete(id);
     for (const [index, agent] of agents.entries()) {
       let person = this.people.get(agent.id);
       if (!person) {
@@ -303,22 +310,52 @@ export class OfficeSimulation {
       this.seen.add(event.id);
       if (
         activeMeeting ||
-        this.encounter ||
         !event.agentId ||
         !event.targetAgentId ||
         event.agentId === event.targetAgentId ||
-        Date.now() - event.createdAt > 10_000
+        Date.now() - event.createdAt > 10_000 ||
+        // Completion makes work available. The referenced dependency event
+        // records the actual transfer when the receiving assignment starts.
+        event.type === 'completed' ||
+        (event.taskId && !event.sourceTaskId)
       )
         continue;
       const a = this.people.get(event.agentId),
         b = this.people.get(event.targetAgentId);
       if (!a || !b) continue;
-      this.encounter = { a: a.id, b: b.id, started: this.time };
-      a.peer = b.id;
-      b.peer = a.id;
-      this.send(a, station('handoff', 0));
-      this.send(b, station('handoff', 1));
+      this.pending.push(event);
     }
+    this.pending = this.pending.slice(-8);
+    // Keep the replay guard bounded, retaining every event in the current snapshot.
+    if (this.seen.size > 1000) this.seen = new Set(activities.map((event) => event.id));
+    if (!activeMeeting) this.nextHandoff();
+  }
+  private nextHandoff() {
+    if (this.encounter) return;
+    const event = this.pending.shift();
+    if (!event) return;
+    const a = this.people.get(event.agentId!),
+      b = this.people.get(event.targetAgentId!);
+    const recipient = this.team.find((agent) => agent.id === b?.id);
+    if (!a || !b || !recipient) return;
+    this.encounter = { a: a.id, b: b.id, event, started: this.time };
+    a.peer = b.id;
+    b.peer = a.id;
+    const at = desk(recipient),
+      side = at.x < 0 ? 1 : -1;
+    this.send(a, {
+      ...at,
+      x: at.x + side * 1.15,
+      action: 'handoff',
+      label: `${recipient.name}’s desk`,
+      facing: (-side * Math.PI) / 2,
+    });
+    this.send(b, {
+      ...at,
+      action: 'handoff',
+      label: 'the incoming handoff',
+      facing: (side * Math.PI) / 2,
+    });
   }
   private send(person: Person, goal: Goal) {
     person.goal = goal;
@@ -345,10 +382,10 @@ export class OfficeSimulation {
       if (distance(pa, pa.goal) < 0.08 && distance(pb, pb.goal) < 0.08)
         this.encounter.settled ??= this.time;
       if (
-        this.time - started > 30 ||
-        (this.encounter.settled !== undefined && this.time - this.encounter.settled > 3.5)
+        this.time - started > 14 ||
+        (this.encounter.settled !== undefined && this.time - this.encounter.settled > 2)
       ) {
-        for (const p of [pa, pb]) {
+        for (const p of [pa, pb].filter((p): p is Person => !!p)) {
           p.peer = undefined;
           const agent = this.team.find((a) => a.id === p.id)!;
           this.send(
@@ -357,6 +394,7 @@ export class OfficeSimulation {
           );
         }
         this.encounter = undefined;
+        this.nextHandoff();
       }
     }
     for (const [index, agent] of this.team.entries()) {
@@ -385,8 +423,7 @@ export class OfficeSimulation {
         continue;
       }
       const length = distance(p, next),
-        speed = 1.35,
-        step = Math.min(length, speed * dt);
+        step = Math.min(length, WALK_SPEED * dt);
       const candidate = {
         x: p.x + ((next.x - p.x) / Math.max(length, 0.001)) * step,
         z: p.z + ((next.z - p.z) / Math.max(length, 0.001)) * step,

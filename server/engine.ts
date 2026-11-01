@@ -162,12 +162,14 @@ export class Engine extends EventEmitter {
     message: string,
     agentId?: string,
     targetAgentId?: string,
+    references?: Pick<Activity, 'taskId' | 'sourceTaskId'>,
   ) {
     const activity: Activity = {
       id: randomUUID(),
       projectId,
       agentId,
       targetAgentId,
+      ...references,
       type,
       message,
       createdAt: Date.now(),
@@ -1244,14 +1246,14 @@ export class Engine extends EventEmitter {
       task.agentId,
     );
     this.event(task.projectId, 'started', `Started “${task.title}”.`, task.agentId);
-    const previous = task.dependencies.map((id) => this.task(id)).at(-1);
-    if (previous)
+    for (const previous of task.dependencies.map((id) => this.task(id)))
       this.event(
         task.projectId,
         'message',
         `Dependency completed: “${previous.title}”. Its saved result is available to this assignment.`,
-        task.agentId,
         previous.agentId,
+        task.agentId,
+        { taskId: task.id, sourceTaskId: previous.id },
       );
     this.commit();
   }

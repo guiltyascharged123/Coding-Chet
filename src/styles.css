@@ -5192,3 +5192,121 @@ button.connection:hover {
   cursor: pointer;
   font-weight: 600;
 }
+
+/* Observable model work and saved-result handoffs in the office. */
+.scene-agent-label[data-active='true'] {
+  border-color: #a9bdc8;
+  box-shadow:
+    0 0 0 2px #90b4c629,
+    0 3px 14px #15212b50;
+}
+.scene-agent-label .scene-task-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  font-style: normal;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #e3c798;
+}
+.scene-handoff {
+  pointer-events: auto;
+  background: #3b403f;
+  color: #f0d1a2;
+  border: 1px solid #ab8c60;
+  border-radius: 5px;
+  padding: 6px 9px;
+  white-space: nowrap;
+  font-size: 13px;
+  cursor: pointer;
+}
+.scene-handoff:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.office-work-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.office-work-agent {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #303d49;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.office-work-agent.active {
+  border-color: #8ca8b6;
+  background: #344652;
+}
+.office-work-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.office-work-heading i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.office-work-heading span {
+  width: 100%;
+  font-size: 13px;
+  color: #c3ced7;
+}
+.office-work-agent > b {
+  font-size: 14px;
+  color: #e4c895;
+}
+.office-work-agent p {
+  margin: 0;
+  font-size: 14px;
+  color: #d0d9df;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.office-work-agent .office-work-detail {
+  font-family: monospace;
+  font-size: 13px;
+}
+.office-work-task {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  text-align: left;
+  line-height: 1.5;
+  font-size: 15px;
+  color: #e7edf0;
+}
+.office-work-task svg {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.office-work-task:hover {
+  text-decoration: underline;
+}
+.office-work-console {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #b5d5e4;
+  font-size: 14px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+@media (max-width: 1200px) {
+  .office-work-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 620px) {
+  .office-work-grid {
+    grid-template-columns: 1fr;
+  }
+}

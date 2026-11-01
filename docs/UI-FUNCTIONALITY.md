@@ -12,14 +12,14 @@ The main flow is **connect model → describe goal → review plan → run → i
 | Workspace                         | Project state, model, plan, real task/meeting activity and the 3D office.                                                                                       |
 | Task board / task card            | Assignments, dependencies, actual results, checks, failures, saved rejected replies and retry.                                                                  |
 | Outputs / View results            | Read and export deliverables; source files appear only when the project has a managed folder.                                                                   |
-| Your team / avatar / profile      | Edit project-specific role instructions and desk assignment.                                                                                                    |
+| Your team / profile               | Edit project-specific role instructions and desk assignment; inspect role procedures.                                                                           |
 | Team discussions                  | Start/read actual model-backed meetings; retry unfinished contributions or explicitly skip a failed meeting.                                                    |
 | Activity                          | Saved engine events, decisions, model-result summaries and errors. No timer-generated motivation in normal work.                                                |
 | Live console                      | Observe public requests, replies and tool receipts; filter, reconnect and export bounded retained logs.                                                         |
 | Model → Change                    | Change the existing project's provider/model and optional Codex tools after pausing.                                                                            |
 | Model connections                 | Check readiness, choose a default for future projects, and open a working setup guide for each provider. Unconfigured providers retain accessible instructions. |
 | Workspace controls                | Limits, usage, project memory/instructions, and backup/restore. Backup import is also available before the first project.                                       |
-| Server connected                  | A non-clickable browser/server status indicator; model readiness is a separate state.                                                                           |
+| Models & sign-in                  | Open Connections to check actual readiness, sign in or reconnect, and edit saved provider settings.                                                             |
 | Notification bell                 | Open pending review or request browser notification permission; report unsupported/denied permission.                                                           |
 | Run / Pause / Resume              | Start/stop actual model-backed task scheduling. Disabled while planning or without tasks; the planning error and edit-plan action explain the next step.        |
 | Office movement / camera controls | Affect visualization only. Task scheduling continues when animation is paused.                                                                                  |
@@ -47,3 +47,7 @@ Saved projects, briefs, task outputs, approvals, draft autosave, source folders,
 Regression checks cover browser navigation, project creation, real model-protocol fixtures, reviews, retries, exports, backup import, connection settings, office movement and the Live console. Local setup tests exercise installer/start/download ordering, installed-model reuse, explicit tag choice, environment preservation and failure behavior without modifying the host OS. Production build/type checks are required.
 
 Fixtures establish protocol behavior, not model quality. This development environment cannot reach Ollama's download site, so the requested model still needs a live download and a useful end-to-end task on the user's machine. Native Windows/macOS installation and live Codex account access are not represented as verified on this Linux host. The classroom idea is deferred; it needs a separate privacy, permissions and model-policy design.
+
+## Observable office work
+
+Workspace now shows live assignment and public tool/reply activity, rather than a generic progress label. Characters open their agent console; task links open saved work. Recorded dependency transfers visit the receiving desk and link to the source result, while actual model-backed meetings use the meeting room. Animation does not create extra model calls. See [AGENT-WORK.md](AGENT-WORK.md) for roles, source retrieval and the limits of autonomous business experiments.

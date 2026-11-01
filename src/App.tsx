@@ -71,6 +71,10 @@ import Collaboration from './components/Collaboration';
 import ActivityTimeline from './components/ActivityTimeline';
 import { modelReadiness } from '../shared/model-readiness';
 import LiveConsole from './components/LiveConsole';
+import OfficeWork from './components/OfficeWork';
+import { useProjectConsole } from './useProjectConsole';
+import { officeWork } from './office/work';
+import { roleProcedure } from '../shared/role-protocol';
 
 const Office = lazy(() => import('./components/Office'));
 type View =
@@ -154,6 +158,17 @@ export default function App() {
   const selectedTask = state?.tasks.find((t) => t.id === taskId);
   const selectedAgent = state?.agents.find((a) => a.id === agentId);
   const selectedReview = state?.approvals.find((a) => a.id === reviewId && a.status === 'pending');
+  const officeConsole = useProjectConsole(view === 'workspace' ? project?.id : undefined);
+  const work = Object.fromEntries(
+    (project ? state?.agents || [] : []).map((agent) => [
+      agent.id,
+      officeWork(agent, project!, tasks, officeConsole.entries, currentMeeting),
+    ]),
+  );
+  const openAgentConsole = (id?: string) => {
+    setConsoleFocus({ projectId: project?.id, agentId: id });
+    setView('console');
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -848,9 +863,11 @@ export default function App() {
                         <i />
                         {currentMeeting
                           ? 'TEAM MEETING'
-                          : working
-                            ? `${working} WORKING`
-                            : 'OFFICE VIEW'}
+                          : project.planningStatus === 'planning'
+                            ? 'PLANNING'
+                            : working
+                              ? `${working} WORKING`
+                              : 'OFFICE VIEW'}
                       </span>
                     </div>
                     <div className="view-toggle" aria-label="Camera view">
@@ -878,15 +895,18 @@ export default function App() {
                       }
                     >
                       <Office
+                        key={project.id}
                         agents={state.agents}
                         tasks={tasks}
                         activities={activities}
                         meeting={currentMeeting}
+                        work={work}
                         mode={cameraMode}
                         zoom={zoom}
                         reset={resetCamera}
                         moving={officeMoving}
-                        onAgentClick={setAgentId}
+                        onAgentClick={openAgentConsole}
+                        onTaskClick={setTaskId}
                       />
                     </Suspense>
                     <div className="scene-top">
@@ -958,16 +978,22 @@ export default function App() {
                   <div className="office-footer">
                     <span>
                       <span className="status-dot" />
-                      {working
-                        ? `${working} model ${working === 1 ? 'assignment' : 'assignments'} running`
-                        : projectApprovals.length
-                          ? 'Waiting for your decision'
-                          : project.status === 'completed'
-                            ? 'All planned tasks finished. Review the results.'
-                            : 'No model assignment is running.'}
+                      {currentMeeting
+                        ? currentMeeting.status === 'gathering'
+                          ? 'Preparing the team discussion.'
+                          : 'Team discussion in progress.'
+                        : project.planningStatus === 'planning'
+                          ? 'Planning model request in progress.'
+                          : working
+                            ? `${working} model ${working === 1 ? 'assignment' : 'assignments'} running`
+                            : projectApprovals.length
+                              ? 'Waiting for your decision'
+                              : project.status === 'completed'
+                                ? 'All planned tasks finished. Review the results.'
+                                : 'No model assignment is running.'}
                     </span>
                     <button onClick={() => setView('team')}>
-                      Meet the team <ArrowUpRight size={14} />
+                      Edit team <ArrowUpRight size={14} />
                     </button>
                   </div>
                 </section>
@@ -1008,27 +1034,19 @@ export default function App() {
                 </aside>
               </div>
               <div className="team-section-heading">
-                <h2>
-                  Your people<span>Well, your agents.</span>
-                </h2>
+                <h2>Team at work</h2>
                 <button onClick={() => setView('team')}>
                   Manage team <ArrowRight size={15} />
                 </button>
               </div>
-              <div className="agent-strip">
-                {state.agents.map((agent) => (
-                  <AgentCard
-                    key={agent.id}
-                    agent={agent}
-                    meeting={currentMeeting}
-                    task={tasks.find(
-                      (t) =>
-                        t.agentId === agent.id && (t.status === 'working' || t.status === 'review'),
-                    )}
-                    onClick={() => setAgentId(agent.id)}
-                  />
-                ))}
-              </div>
+              <OfficeWork
+                agents={state.agents}
+                work={work}
+                connected={officeConsole.connected}
+                message={officeConsole.message}
+                onTask={(task) => setTaskId(task.id)}
+                onConsole={openAgentConsole}
+              />
               <div className="bottom-note">
                 <Sparkles size={14} />
                 <span>
@@ -1723,6 +1741,10 @@ function AgentModal({
       onClose={onClose}
     >
       <form className="modal-form" onSubmit={submit}>
+        <details>
+          <summary>How this role works</summary>
+          <p className="field-hint">{roleProcedure({ role })}</p>
+        </details>
         <div className="form-agent-intro">
           <Avatar color={agent.color} size={60} />
           <div>

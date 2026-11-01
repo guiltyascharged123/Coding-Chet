@@ -15,16 +15,19 @@ import type { Activity, Agent, Task, Meeting } from '../../shared/types';
 import { DESKS, MEETING_SEATS, OfficeSimulation } from '../office/simulation';
 import { placeLabels } from '../office/labels';
 import { DESK_CHAIR, seatedPose } from '../office/pose';
+import type { OfficeWork } from '../office/work';
 type Props = {
   agents: Agent[];
   tasks: Task[];
   activities: Activity[];
   meeting?: Meeting;
+  work: Record<string, OfficeWork>;
   mode: 'orbit' | 'top';
   zoom: number;
   reset: number;
   moving: boolean;
   onAgentClick: (id: string) => void;
+  onTaskClick: (id: string) => void;
 };
 
 class SceneBoundary extends Component<
@@ -66,6 +69,7 @@ export default function Office(props: Props) {
             <span className="fallback-desk" />
             <strong>{agent.name}</strong>
             <small>{agent.role}</small>
+            <small>{props.work[agent.id]?.label}</small>
           </button>
         ))}
       </div>
@@ -186,10 +190,15 @@ function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
         return (
           <group key={agent.id}>
             <group position={DESKS[agent.desk]}>
-              <Desk color={agent.color} active={task?.status === 'working'} />
+              <Desk
+                color={agent.color}
+                active={!!props.work[agent.id]?.active}
+                moving={props.moving}
+              />
             </group>
             <AgentFigure
               agent={agent}
+              work={props.work[agent.id]}
               status={
                 props.meeting
                   ? props.meeting.speakerId === agent.id
@@ -206,6 +215,13 @@ function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
         );
       })}
       <MeetingTable />
+      <HandoffLink
+        simulation={simulation}
+        agents={props.agents}
+        moving={props.moving}
+        labelPortal={props.labelPortal}
+        onTask={props.onTaskClick}
+      />
       <MeetingRoom active={!!props.meeting} />
       <Plant position={[-7.5, 0, -5.3]} scale={1.2} />
       <Plant position={[7.6, 0, -5.2]} scale={1.1} />
@@ -419,7 +435,99 @@ function Room() {
   );
 }
 
-function Desk({ color, active }: { color: string; active: boolean }) {
+function HandoffLink({
+  simulation,
+  agents,
+  moving,
+  labelPortal,
+  onTask,
+}: {
+  simulation: OfficeSimulation;
+  agents: Agent[];
+  moving: boolean;
+  labelPortal: RefObject<HTMLDivElement>;
+  onTask: (id: string) => void;
+}) {
+  const root = useRef<THREE.Group>(null);
+  const beam = useRef<THREE.Mesh>(null);
+  const packet = useRef<THREE.Mesh>(null);
+  const caption = useRef<THREE.Group>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const vectors = useMemo(
+    () => ({
+      a: new THREE.Vector3(),
+      b: new THREE.Vector3(),
+      direction: new THREE.Vector3(),
+      up: new THREE.Vector3(0, 1, 0),
+    }),
+    [],
+  );
+  useFrame(() => {
+    const encounter = simulation.encounter;
+    if (!root.current || !button.current) return;
+    root.current.visible = !!encounter;
+    button.current.style.display = encounter ? '' : 'none';
+    if (!encounter) return;
+    const a = simulation.people.get(encounter.a)!,
+      b = simulation.people.get(encounter.b)!;
+    vectors.a.set(a.x, 2.5, a.z);
+    vectors.b.set(b.x, 2.5, b.z);
+    vectors.direction.subVectors(vectors.b, vectors.a);
+    if (beam.current) {
+      beam.current.position.copy(vectors.a).add(vectors.b).multiplyScalar(0.5);
+      beam.current.scale.set(1, vectors.direction.length(), 1);
+      beam.current.quaternion.setFromUnitVectors(vectors.up, vectors.direction.normalize());
+    }
+    packet.current?.position.lerpVectors(
+      vectors.a,
+      vectors.b,
+      moving ? (simulation.time - encounter.started) % 1 : 0.5,
+    );
+    if (caption.current) {
+      // Keep the action above the receiving desk so it can be clicked while
+      // the characters travel; a moving midpoint made the link hard to select.
+      caption.current.position.set(b.goal.x, 4, b.goal.z);
+    }
+    const text = `${agents.find((agent) => agent.id === a.id)?.name} → ${agents.find((agent) => agent.id === b.id)?.name} · saved work`;
+    if (button.current.textContent !== text) button.current.textContent = text;
+    button.current.disabled = !encounter.event.sourceTaskId;
+    button.current.title = encounter.event.message;
+  });
+  return (
+    <group ref={root} visible={false}>
+      <mesh ref={beam}>
+        <cylinderGeometry args={[0.018, 0.018, 1, 6]} />
+        <meshBasicMaterial color="#d5ad73" transparent opacity={0.65} />
+      </mesh>
+      <mesh ref={packet}>
+        <boxGeometry args={[0.22, 0.16, 0.06]} />
+        <meshBasicMaterial color="#f0d1a2" />
+      </mesh>
+      <group ref={caption}>
+        <Html portal={labelPortal} center zIndexRange={[12, 11]}>
+          <button
+            ref={button}
+            className="scene-handoff"
+            style={{ display: 'none' }}
+            onClick={() => {
+              const id = simulation.encounter?.event.sourceTaskId;
+              if (id) onTask(id);
+            }}
+          />
+        </Html>
+      </group>
+    </group>
+  );
+}
+
+function Desk({ color, active, moving }: { color: string; active: boolean; moving: boolean }) {
+  const screen = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    screen.current?.children.forEach((line, index) => {
+      line.scale.x =
+        active && moving ? 0.7 + (Math.sin(clock.elapsedTime * 3 + index) + 1) * 0.15 : 1;
+    });
+  });
   return (
     <>
       <RoundedBox args={[3.4, 0.035, 3.2]} radius={0.18} position={[0, 0.135, 0.45]} receiveShadow>
@@ -481,12 +589,14 @@ function Desk({ color, active }: { color: string; active: boolean }) {
           emissiveIntensity={active ? 0.45 : 0.08}
         />
       </mesh>
-      {[0, 1, 2, 3].map((i) => (
-        <mesh key={i} position={[-0.37 + (i % 2) * 0.1, 2.16 - i * 0.1, -0.32]}>
-          <planeGeometry args={[i === 0 ? 0.58 : 0.68, 0.025]} />
-          <meshStandardMaterial color={active ? '#354f58' : '#839ba3'} />
-        </mesh>
-      ))}
+      <group ref={screen}>
+        {[0, 1, 2, 3].map((i) => (
+          <mesh key={i} position={[-0.37 + (i % 2) * 0.1, 2.16 - i * 0.1, -0.32]}>
+            <planeGeometry args={[i === 0 ? 0.58 : 0.68, 0.025]} />
+            <meshStandardMaterial color={active ? '#354f58' : '#839ba3'} />
+          </mesh>
+        ))}
+      </group>
       <RoundedBox args={[0.87, 0.035, 0.29]} radius={0.02} position={[-0.25, 1.33, 0.27]}>
         <meshStandardMaterial color="#657079" />
       </RoundedBox>
@@ -532,6 +642,7 @@ function Desk({ color, active }: { color: string; active: boolean }) {
 
 function AgentFigure({
   agent,
+  work,
   status,
   onClick,
   moving,
@@ -539,6 +650,7 @@ function AgentFigure({
   labelPortal,
 }: {
   agent: Agent;
+  work?: OfficeWork;
   status?: string;
   onClick: () => void;
   moving: boolean;
@@ -571,6 +683,8 @@ function AgentFigure({
       Math.hypot(person.x - person.goal.x, person.z - person.goal.z) < 0.12;
     const pose = seatedPose(person, agent.desk);
     const seated = !!pose;
+    const typing = seated && action === 'desk' && work?.active && work.animation === 'typing';
+    const reading = seated && action === 'desk' && work?.active && !typing;
     const blend = 1 - Math.exp(-Math.min(delta, 0.1) * 12);
     body.current.rotation.y = pose?.facing ?? person.heading;
     body.current.position.y = walking ? Math.abs(stride) * 0.065 : (pose?.y ?? 0);
@@ -588,21 +702,25 @@ function AgentFigure({
     if (leftArm.current)
       leftArm.current.rotation.x = walking
         ? -stride * 0.5
-        : interacting && (action === 'whiteboard' || action === 'handoff' || status === 'speaking')
+        : interacting && (action === 'handoff' || status === 'speaking')
           ? -1.1 + (moving ? Math.sin(clock.elapsedTime * 2.5) * 0.15 : 0)
-          : seated && action === 'desk' && status === 'working'
-            ? -1.35 + (moving ? Math.sin(clock.elapsedTime * 7 + 1) * 0.06 : 0)
-            : 0;
+          : typing
+            ? -1.35 + (moving ? Math.sin(clock.elapsedTime * 12 + 1) * 0.1 : 0)
+            : reading
+              ? -0.8
+              : 0;
     if (rightArm.current)
       rightArm.current.rotation.x = walking
         ? stride * 0.5
         : interacting && action === 'coffee'
           ? -1.8
-          : interacting && action === 'desk' && status === 'working'
-            ? -1.35 + (moving ? Math.sin(clock.elapsedTime * 7) * 0.06 : 0)
-            : 0;
+          : typing
+            ? -1.35 + (moving ? Math.sin(clock.elapsedTime * 12) * 0.1 : 0)
+            : reading
+              ? -1.05
+              : 0;
     for (const arm of [leftArm.current, rightArm.current]) {
-      if (arm) arm.scale.y = seated && action === 'desk' && status === 'working' ? 1.5 : 1;
+      if (arm) arm.scale.y = typing ? 1.5 : 1;
     }
     if (folder.current) folder.current.visible = action === 'handoff' || action === 'printer';
     if (cup.current) cup.current.visible = interacting && action === 'coffee';
@@ -611,11 +729,21 @@ function AgentFigure({
       label.current.dataset.z = person.z.toFixed(2);
       label.current.dataset.walking = String(walking);
       label.current.dataset.action = action;
+      label.current.dataset.active = String(!!work?.active);
+      label.current.dataset.behavior = walking
+        ? 'walking'
+        : typing
+          ? 'typing'
+          : reading
+            ? 'reading'
+            : seated
+              ? 'seated'
+              : 'standing';
       label.current.dataset.seated = String(seated);
       label.current.dataset.bodyX = (person.x + body.current.position.x).toFixed(2);
       label.current.dataset.bodyZ = (person.z + body.current.position.z).toFixed(2);
       const text = !moving
-        ? 'Movement paused'
+        ? `${work?.label || 'At desk'} · motion paused`
         : walking
           ? `To ${person.goal.label}`
           : action === 'meeting'
@@ -623,13 +751,13 @@ function AgentFigure({
               ? 'Contributing to the meeting'
               : 'Listening to the team'
             : action === 'handoff'
-              ? 'Sharing a handoff'
+              ? simulation.encounter?.a === agent.id
+                ? 'Delivering saved work'
+                : 'Receiving saved work'
               : status === 'review'
                 ? 'Waiting for your review'
                 : action === 'desk'
-                  ? status === 'working'
-                    ? 'Working at desk'
-                    : 'At desk'
+                  ? work?.label || 'At desk'
                   : action === 'coffee'
                     ? 'Coffee break'
                     : action === 'whiteboard'
@@ -745,6 +873,9 @@ function AgentFigure({
         <button
           ref={label}
           data-agent-id={agent.id}
+          title={[agent.role, work?.task?.title, work?.detail, 'Open live output']
+            .filter(Boolean)
+            .join('\n')}
           className="scene-agent-label"
           onClick={(e) => {
             e.stopPropagation();
@@ -755,6 +886,7 @@ function AgentFigure({
           <span>
             {agent.name}
             <small ref={actionLabel}>At desk</small>
+            {work?.active && work.task && <em className="scene-task-title">{work.task.title}</em>}
           </span>
           {status === 'review' && <b className="scene-needs-review">!</b>}
         </button>

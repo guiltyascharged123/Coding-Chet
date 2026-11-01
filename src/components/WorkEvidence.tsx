@@ -126,11 +126,13 @@ export default function WorkEvidence({ task }: { task: Task }) {
             {task.contextReport.sources.map((s, i) => (
               <li key={`${s.id}-${i}`}>
                 {s.label} ·{' '}
-                {s.includedCharacters === s.totalCharacters
-                  ? 'full source'
-                  : s.includedCharacters
-                    ? 'excerpt'
-                    : 'not included'}{' '}
+                {s.offset !== undefined
+                  ? `characters ${s.offset.toLocaleString()}–${(s.offset + s.includedCharacters).toLocaleString()}`
+                  : s.includedCharacters === s.totalCharacters
+                    ? 'full source'
+                    : s.includedCharacters
+                      ? 'excerpt'
+                      : 'not included'}{' '}
                 ({s.includedCharacters.toLocaleString()} / {s.totalCharacters.toLocaleString()}{' '}
                 characters)
               </li>

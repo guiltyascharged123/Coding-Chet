@@ -2,6 +2,7 @@ import { test, expect } from './fixtures';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { unzipSync, strFromU8 } from 'fflate';
 
 test('workspace limits, verified memory, backup downloads and validated restore work in the browser', async ({
@@ -96,7 +97,10 @@ test('the studio stays usable when WebGL is unavailable', async ({ page }) => {
   await expect(page.locator('.office-fallback')).toBeVisible();
   await expect(page.locator('.fallback-desks button')).toHaveCount(4);
   await page.locator('.fallback-desks button').first().click();
-  await expect(page.getByRole('dialog')).toContainText('Your studio teammate');
+  await expect(
+    page.getByRole('region', { name: 'Project live console', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Console agent', { exact: true })).toHaveValue('mira');
 });
 
 test('project creation, role assignment, desk swapping, and mobile navigation work', async ({
@@ -895,7 +899,7 @@ test('agents sit at their chairs and rejected replies survive reload until a cor
     .toBe(true);
   await page.getByRole('button', { name: 'Run team', exact: true }).click();
   await expect(
-    page.locator('.scene-agent-label[data-seated="true"]').filter({ hasText: 'Working at desk' }),
+    page.locator('.scene-agent-label[data-seated="true"][data-active="true"]'),
   ).toHaveCount(1);
   await page.screenshot({ path: '/tmp/workroom-seated-agents.png' });
   await page.getByRole('button', { name: 'Task board', exact: true }).click();
@@ -1358,4 +1362,83 @@ test('unsupported device sign-in fails cleanly and browser reconnect remains ava
       },
     });
   }
+});
+
+test('office shows real assignment activity, opens the agent console and depicts a saved dependency handoff', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60000);
+  await request.post('/api/runtime', { data: { provider: 'compatible' } });
+  const { project } = await (
+    await request.post('/api/projects', {
+      data: {
+        title: 'Office collaboration fixture',
+        workflow: 'custom',
+        planning: 'manual',
+        brief:
+          'Compare supplied A at $20 and B at $35, then independently review the comparison. Do not claim a sale.',
+      },
+    })
+  ).json();
+  const ids = [randomUUID(), randomUUID()];
+  expect(
+    (
+      await request.put(`/api/projects/${project.id}/plan`, {
+        data: {
+          tasks: [
+            {
+              id: ids[0],
+              title: 'Compare supplied costs',
+              description:
+                'Calculate the difference between $20 and $35. Acceptance: report the arithmetic.',
+              agentId: 'mira',
+              dependencies: [],
+              requiresApproval: false,
+            },
+            {
+              id: ids[1],
+              title: 'Independently review the comparison',
+              description:
+                'Review the saved comparison and check its arithmetic. Acceptance: state the evidence and limitations.',
+              agentId: 'sol',
+              dependencies: [ids[0]],
+              requiresApproval: false,
+              workType: 'review',
+            },
+          ],
+        },
+      })
+    ).ok(),
+  ).toBe(true);
+  await page.goto('/');
+  await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);
+  await page.reload();
+  const office = page.getByRole('region', { name: 'Team at work', exact: true });
+  await expect(office).toContainText('Waiting for Mira');
+  await expect(page.locator('.scene-agent-label[data-active="true"]')).toHaveCount(0);
+  await page.getByRole('button', { name: /^(Run|Resume) team$/ }).click();
+  await expect(office.locator('[data-agent-id="mira"]')).toContainText('model processing');
+  await expect(page.locator('.scene-agent-label[data-agent-id="mira"]')).toHaveAttribute(
+    'data-behavior',
+    'reading',
+  );
+  await page.screenshot({ path: '/tmp/workroom-active-office.png' });
+  await page.locator('.scene-agent-label[data-agent-id="mira"]').click();
+  await expect(page.getByLabel('Console agent', { exact: true })).toHaveValue('mira');
+  await page.getByLabel('Show instructions & context', { exact: true }).check();
+  await expect(page.locator('.console-request')).toContainText('availableTeammates');
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const handoff = page.locator('.scene-handoff');
+  await expect(handoff).toBeVisible({ timeout: 18000 });
+  await expect(handoff).toContainText('Mira → Sol');
+  await expect(page.locator('.scene-agent-label[data-action="handoff"]')).toHaveCount(2);
+  await page.screenshot({ path: '/tmp/workroom-desk-handoff.png' });
+  await handoff.click();
+  await expect(page.getByRole('dialog')).toContainText('Compare supplied costs');
+  await expect(page.getByRole('dialog')).toContainText('Cost comparison');
+  const state = await (await request.get('/api/state')).json();
+  expect(
+    state.attempts.filter((a: { projectId: string }) => a.projectId === project.id).length,
+  ).toBeLessThanOrEqual(2);
 });

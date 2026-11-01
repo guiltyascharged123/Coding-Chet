@@ -98,6 +98,8 @@ const modelServer = createServer(async (req, res) => {
     return;
   }
   if (input.task) {
+    if (input.project.title.includes('Office collaboration fixture'))
+      await new Promise((resolve) => setTimeout(resolve, 7000));
     if (input.project.title.includes('Live console fixture'))
       await new Promise((resolve) => setTimeout(resolve, 4000));
     if (input.project.title.includes('Response recovery fixture'))

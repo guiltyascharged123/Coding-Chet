@@ -82,7 +82,13 @@ export interface Task {
     inputBytes: number;
     originalBytes: number;
     limit: number;
-    sources: { id: string; label: string; totalCharacters: number; includedCharacters: number }[];
+    sources: {
+      id: string;
+      label: string;
+      totalCharacters: number;
+      includedCharacters: number;
+      offset?: number;
+    }[];
   };
 }
 export interface Project {
@@ -159,6 +165,8 @@ export interface Activity {
   projectId: string;
   agentId?: string;
   targetAgentId?: string;
+  taskId?: string;
+  sourceTaskId?: string;
   type: 'system' | 'started' | 'message' | 'completed' | 'approval' | 'error';
   message: string;
   createdAt: number;
