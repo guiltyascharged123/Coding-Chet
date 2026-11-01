@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { AGENT_IDS, expandTeam, type OfficeCapacity } from '../shared/team.js';
+import type { IdeaProposal, ProjectIdea } from '../shared/ideas.js';
+import { agentContext } from '../shared/agent-context.js';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type {
@@ -205,9 +208,13 @@ export class Engine extends EventEmitter {
     workflow?: Workflow,
     collaboration?: {
       researchEnabled?: boolean;
+      exploration?: 'focused' | 'expansive';
+      requestTimeoutSeconds?: number;
       reasoningEffort: ReasoningEffort;
       meetingPolicy: { enabled: boolean; everyTasks: number };
     },
+    officeCapacity: OfficeCapacity = 4,
+    selectedTeam?: Agent[],
   ) {
     const existing = requestId && this.state.projects.find((p) => p.id === requestId);
     if (existing) {
@@ -216,7 +223,8 @@ export class Engine extends EventEmitter {
         existing.brief !== brief ||
         existing.workflow !== workflow ||
         existing.documentPack !== documentPack ||
-        existing.planning !== planning
+        existing.planning !== planning ||
+        (existing.officeCapacity || 4) !== officeCapacity
       )
         throw new AppError(
           'This submission ID already belongs to a different brief. Your draft has been retained.',
@@ -237,12 +245,19 @@ export class Engine extends EventEmitter {
       reasoningEffort: collaboration?.reasoningEffort || 'medium',
       meetingPolicy: collaboration?.meetingPolicy,
       researchEnabled: !!collaboration?.researchEnabled,
+      exploration: collaboration?.exploration || 'focused',
+      requestTimeoutSeconds: collaboration?.requestTimeoutSeconds || 900,
+      officeCapacity,
       team: workflow ? projectTeam(workflow, this.state.agents) : undefined,
       model:
         this.state.provider === 'demo' || this.state.provider === 'external'
           ? undefined
           : runtimeInfo().models[this.state.provider],
     };
+    if (officeCapacity > 4)
+      project.team = expandTeam(project.team || this.state.agents, officeCapacity, workflow);
+    if (selectedTeam) project.team = structuredClone(selectedTeam);
+    stateSchema.parse({ ...this.state, projects: [...this.state.projects, project] });
     if (workflow === 'software') {
       project.workspaceFolder = workspaceFolder(project);
       projectWorkspace(this.store.path, project);
@@ -257,6 +272,141 @@ export class Engine extends EventEmitter {
         project,
         planning === 'manual' ? [] : templatePlan(project, project.team || this.state.agents),
       );
+    return project;
+  }
+  async restartProject(
+    id: string,
+    requestId: string,
+    title: string,
+    mode: 'replan' | 'reuse',
+    officeCapacity?: OfficeCapacity,
+  ) {
+    this.assertConnectionsStable();
+    const source = this.project(id);
+    const capacity = officeCapacity || source.officeCapacity || 4;
+    const previousTeam = structuredClone(source.team || this.state.agents);
+    const team =
+      capacity === (source.officeCapacity || 4)
+        ? previousTeam
+        : expandTeam(
+            previousTeam.slice(0, capacity).map((agent, index) => ({ ...agent, desk: index })),
+            capacity,
+            source.workflow,
+          );
+    const existing = this.state.projects.find((p) => p.id === requestId);
+    if (existing) {
+      if (
+        existing.restartedFrom !== id ||
+        existing.title !== title ||
+        existing.planning !== (mode === 'replan' ? 'ai' : 'manual') ||
+        (existing.officeCapacity || 4) !== capacity
+      )
+        throw new AppError('This restart ID already belongs to another project.', 409);
+      return existing;
+    }
+    if (mode === 'replan' && source.provider === 'external')
+      throw new AppError('External workers require a saved task plan. Choose reuse current plan.');
+    const sourceTasks = this.state.tasks.filter((t) => t.projectId === id);
+    const priorTasks = sourceTasks.filter((t) => !t.conversationMessageId);
+    if (
+      mode === 'reuse' &&
+      priorTasks.some((task) => !team.some((agent) => agent.id === task.agentId))
+    )
+      throw new AppError(
+        'Choose a new model-generated plan when the smaller team removes an assignment owner.',
+      );
+    if (mode === 'reuse' && (!priorTasks.length || priorTasks.length > policy(this.store).maxTasks))
+      throw new AppError(
+        'The saved plan must contain tasks and fit the task limit. Choose a new plan or adjust the limit.',
+      );
+    for (const task of sourceTasks.filter((t) => t.conversationPending)) {
+      task.conversationPending = false;
+      task.status = 'failed';
+      task.error = 'Conversation response stopped for a fresh project run.';
+    }
+    if (source.status !== 'completed' || sourceTasks.some((t) => t.status === 'working'))
+      this.pauseProject(id);
+    const stillStopping = () =>
+      this.planners.has(id) ||
+      (this.state.meetings || []).some(
+        (meeting) => meeting.projectId === id && this.conferences.has(meeting.id),
+      ) ||
+      sourceTasks.some((t) => this.active.has(t.id));
+    for (let wait = 0; wait < 100 && stillStopping(); wait++) await delay(50);
+    if (stillStopping())
+      throw new AppError(
+        'The previous worker is still stopping. Its work is saved. Retry restart after it stops.',
+        409,
+      );
+    // Check idempotency again after draining: a lost response or double click
+    // must not create a second run or dispatch another planner request.
+    const raced = this.state.projects.find((p) => p.id === requestId);
+    if (raced) {
+      if (
+        raced.restartedFrom !== id ||
+        raced.title !== title ||
+        raced.planning !== (mode === 'replan' ? 'ai' : 'manual') ||
+        (raced.officeCapacity || 4) !== capacity
+      )
+        throw new AppError('This restart ID already belongs to another request.', 409);
+      return raced;
+    }
+    const project: Project = {
+      id: requestId,
+      title,
+      brief: source.brief,
+      provider: source.provider,
+      model: source.model,
+      status: 'ready',
+      createdAt: Date.now(),
+      documentPack: source.documentPack,
+      workflow: source.workflow,
+      planning: mode === 'replan' ? 'ai' : 'manual',
+      team,
+      reasoningEffort: source.reasoningEffort,
+      meetingPolicy: structuredClone(source.meetingPolicy),
+      researchEnabled: source.researchEnabled,
+      workMode: source.workMode,
+      toolNetwork: source.toolNetwork,
+      exploration: source.exploration,
+      requestTimeoutSeconds: source.requestTimeoutSeconds,
+      officeCapacity: capacity,
+      instructionHistory: structuredClone(source.instructionHistory),
+      restartedFrom: id,
+    };
+    if (hasProjectTools(project)) {
+      project.workspaceFolder = workspaceFolder(project);
+      projectWorkspace(this.store.path, project);
+    }
+    this.state.projects.unshift(project);
+    this.event(
+      project.id,
+      'system',
+      `Fresh run created from “${source.title}”. Earlier work, files and usage remain in the previous project. Rolling workspace request and spending limits still apply.`,
+    );
+    this.commit();
+    if (mode === 'replan') this.startPlanning(project);
+    else {
+      const ids = new Map(priorTasks.map((task) => [task.id, randomUUID()]));
+      this.finishPlan(
+        project,
+        priorTasks.map((task) => ({
+          id: ids.get(task.id)!,
+          projectId: project.id,
+          title: task.title,
+          description: task.description,
+          agentId: task.agentId,
+          dependencies: task.dependencies.map((dependency) => ids.get(dependency)!),
+          requiresApproval: task.requiresApproval,
+          readOnly: task.readOnly,
+          workType: task.workType,
+          acceptanceCriteria: structuredClone(task.acceptanceCriteria),
+          status: 'queued',
+          output: '',
+          feedback: '',
+        })),
+      );
+    }
     return project;
   }
   beginConnectionChange(message: string) {
@@ -451,7 +601,7 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'Keep at least one task and stay within the task limit in Workspace controls.',
       );
-    const old = this.state.tasks.filter((t) => t.projectId === id);
+    const old = this.state.tasks.filter((t) => t.projectId === id && !t.conversationMessageId);
     const merged = rows.map((row) => {
       const original = old.find((t) => t.id === row.id);
       if (original && original.status !== 'queued' && original.status !== 'failed') {
@@ -494,6 +644,9 @@ export class Engine extends EventEmitter {
         agentId: row.agentId,
         dependencies: row.dependencies,
         requiresApproval: row.requiresApproval,
+        conversationMessageId: original?.conversationMessageId,
+        conversationPending: original?.conversationPending,
+        requestedByTaskId: original?.requestedByTaskId,
         readOnly: row.readOnly,
         workType: row.workType,
         acceptanceCriteria: row.acceptanceCriteria,
@@ -508,14 +661,17 @@ export class Engine extends EventEmitter {
       );
     const next = stateSchema.parse({
       ...this.state,
-      tasks: [...this.state.tasks.filter((t) => t.projectId !== id), ...merged],
+      tasks: [
+        ...this.state.tasks.filter((t) => t.projectId !== id || t.conversationMessageId),
+        ...merged,
+      ],
     });
     const settings =
       collaboration === undefined ? undefined : collaborationSchema.parse(collaboration);
     // Preserve task objects held by workers in other projects. Validation clones them.
     this.state.tasks = [
-      ...this.state.tasks.filter((t) => t.projectId !== id),
-      ...next.tasks.filter((t) => t.projectId === id),
+      ...this.state.tasks.filter((t) => t.projectId !== id || t.conversationMessageId),
+      ...next.tasks.filter((t) => t.projectId === id && !t.conversationMessageId),
     ];
     if (settings) Object.assign(project, settings);
     if (hasProjectTools(project) && toolNetwork !== undefined) project.toolNetwork = toolNetwork;
@@ -681,6 +837,11 @@ export class Engine extends EventEmitter {
     values: Pick<Agent, 'name' | 'role' | 'specialty' | 'desk'> & { goal?: string },
     projectId?: string,
   ) {
+    if (
+      values.desk >=
+      (projectId ? this.project(projectId).officeCapacity || 4 : this.state.agents.length)
+    )
+      throw new AppError('Choose a desk in this project’s selected office.');
     const team = projectId
       ? (this.project(projectId).team ||= structuredClone(this.state.agents))
       : this.state.agents;
@@ -688,6 +849,10 @@ export class Engine extends EventEmitter {
       projectId &&
       (this.project(projectId).status === 'running' ||
         this.planners.has(projectId) ||
+        this.state.tasks.some(
+          (task) =>
+            task.projectId === projectId && (task.status === 'working' || this.active.has(task.id)),
+        ) ||
         this.conferences.size)
     )
       throw new AppError('Pause the project before editing its team.');
@@ -697,6 +862,226 @@ export class Engine extends EventEmitter {
     if (other) other.desk = agent.desk;
     Object.assign(agent, values);
     this.commit();
+  }
+  configureTeam(id: string, capacity: OfficeCapacity, members: Agent[]) {
+    const project = this.project(id);
+    if (
+      project.status === 'running' ||
+      this.planners.has(id) ||
+      this.projectMeetingActive(id) ||
+      this.state.tasks.some((t) => t.projectId === id && this.active.has(t.id))
+    )
+      throw new AppError('Pause this project before changing its office or team.');
+    const referenced = new Set([
+      ...this.state.tasks.filter((t) => t.projectId === id).map((t) => t.agentId),
+      ...(this.state.meetings || [])
+        .filter((m) => m.projectId === id)
+        .flatMap((m) => m.participants.map((a) => a.id)),
+    ]);
+    if ([...referenced].some((agentId) => !members.some((a) => a.id === agentId)))
+      throw new AppError(
+        'Keep teammates with saved assignments or meeting history. You can change their specialist role, or restart with a fresh team.',
+      );
+    stateSchema.parse({
+      ...this.state,
+      projects: this.state.projects.map((p) =>
+        p.id === id ? { ...p, officeCapacity: capacity, team: members } : p,
+      ),
+    });
+    project.officeCapacity = capacity;
+    project.team = structuredClone(members);
+    this.event(
+      id,
+      'system',
+      `Saved a ${capacity}-desk office with ${members.length} specialists. Existing assignments are retained; new requests use their saved roles.`,
+    );
+    this.commit();
+  }
+  postProjectMessage(
+    id: string,
+    messageId: string,
+    content: string,
+    askCoordinator: boolean,
+    options?: { respondAsAgentId?: string; kind?: 'direction' | 'question' | 'idea' },
+  ) {
+    const project = this.project(id);
+    const responseAgent = (project.team || this.state.agents).find(
+      (agent) =>
+        agent.id === (options?.respondAsAgentId || (project.team || this.state.agents)[0].id),
+    );
+    if (!responseAgent) throw new AppError('Choose a teammate in this project.');
+    const messages = (this.state.projectMessages ||= []);
+    const existing = messages.find((message) => message.id === messageId);
+    if (existing) {
+      if (
+        existing.projectId !== id ||
+        existing.content !== content ||
+        !!existing.responseTaskId !== askCoordinator ||
+        (options?.kind && existing.kind !== options.kind) ||
+        (options?.respondAsAgentId &&
+          existing.responseTaskId &&
+          this.task(existing.responseTaskId).agentId !== options.respondAsAgentId)
+      )
+        throw new AppError('This message ID belongs to different content.', 409);
+      return existing;
+    }
+    if (
+      messages.length >= 500 ||
+      messages.filter((message) => message.projectId === id).length >= 100
+    )
+      throw new AppError(
+        messages.length >= 500
+          ? 'Workspace conversation storage is full (500 messages). Earlier messages are retained. Export a backup and use a separate workspace database to continue conversations.'
+          : 'This project conversation is full (100 messages). Earlier messages are retained; start a new run for a fresh conversation.',
+      );
+    if (askCoordinator) {
+      this.assertConnectionsStable();
+      if (project.provider === 'external')
+        throw new AppError(
+          'Use Save direction for external workers; coordinator replies need a direct model connection.',
+        );
+      if (this.state.tasks.filter((t) => t.projectId === id).length >= policy(this.store).maxTasks)
+        throw new AppError(
+          'A coordinator response needs a task slot. Increase Tasks allowed per project, or save direction without requesting a reply.',
+        );
+    }
+    const taskId = askCoordinator ? randomUUID() : undefined;
+    const message = {
+      id: messageId,
+      projectId: id,
+      content,
+      createdAt: Date.now(),
+      responseTaskId: taskId,
+      kind: options?.kind || (askCoordinator ? 'question' : 'direction'),
+    };
+    messages.push(message);
+    if (taskId) {
+      const agent = responseAgent;
+      this.state.tasks.unshift({
+        id: taskId,
+        projectId: id,
+        agentId: agent.id,
+        title: 'Respond to project conversation',
+        description: `Answer the user's project message directly using this project's saved evidence. Provide a useful answer or a focused internal action, distinguish actual work from assumptions, and do not restart unrelated assignments. Message: ${content}\nAcceptance: address the message, cite relevant saved evidence when available, and state a concrete next step.`,
+        dependencies: [],
+        requiresApproval: false,
+        status: 'queued',
+        output: '',
+        feedback: '',
+        workType: 'plan',
+        readOnly: true,
+        conversationMessageId: messageId,
+        conversationPending: true,
+      });
+    }
+    this.event(
+      id,
+      'message',
+      askCoordinator
+        ? 'Project message saved; a coordinator response is queued.'
+        : 'Project direction saved for upcoming agent requests.',
+    );
+    this.commit();
+    if (askCoordinator) this.tick();
+    return message;
+  }
+  private recordIdeas(
+    project: Project,
+    agent: Agent,
+    proposals: IdeaProposal[],
+    source: { sourceTaskId?: string; sourceMeetingId?: string },
+  ) {
+    const ideas = (this.state.ideas ||= []);
+    for (const proposal of proposals) {
+      if (
+        ideas.some(
+          (idea) =>
+            idea.projectId === project.id &&
+            idea.proposal.replace(/\s+/g, ' ').trim().toLowerCase() ===
+              proposal.proposal.replace(/\s+/g, ' ').trim().toLowerCase(),
+        )
+      )
+        continue;
+      if (
+        ideas.length >= 500 ||
+        ideas.filter((idea) => idea.projectId === project.id).length >= 100
+      ) {
+        this.event(
+          project.id,
+          'system',
+          'The idea board is full. Additional proposals remain in their saved source results.',
+        );
+        break;
+      }
+      ideas.push({
+        ...proposal,
+        ...source,
+        id: randomUUID(),
+        projectId: project.id,
+        status: 'proposed',
+        authorAgentId: agent.id,
+        authorName: agent.name,
+        authorRole: agent.role,
+        createdBy: 'model',
+        createdAt: Date.now(),
+      });
+    }
+  }
+  addIdea(id: string, ideaId: string, proposal: IdeaProposal) {
+    this.project(id);
+    const ideas = (this.state.ideas ||= []);
+    const existing = ideas.find((idea) => idea.id === ideaId);
+    if (existing) {
+      if (existing.projectId !== id || existing.proposal !== proposal.proposal)
+        throw new AppError('This idea ID belongs to another proposal.', 409);
+      return existing;
+    }
+    if (ideas.length >= 500 || ideas.filter((idea) => idea.projectId === id).length >= 100)
+      throw new AppError(
+        ideas.length >= 500
+          ? 'Workspace idea storage is full (500 cards). Existing ideas are retained. Export a backup and use a separate workspace database for a new board.'
+          : 'This board is full (100 cards). Existing ideas are retained; start a new run to create another board.',
+      );
+    const idea: ProjectIdea = {
+      ...proposal,
+      id: ideaId,
+      projectId: id,
+      status: 'proposed',
+      authorName: 'You',
+      authorRole: 'Project owner',
+      createdBy: 'user',
+      createdAt: Date.now(),
+    };
+    ideas.push(idea);
+    this.commit();
+    return idea;
+  }
+  decideIdea(projectId: string, id: string, status: 'selected' | 'rejected' | 'proposed') {
+    const idea = this.state.ideas?.find((idea) => idea.id === id && idea.projectId === projectId);
+    if (!idea) throw new AppError('Idea not found.', 404);
+    idea.status = status;
+    this.event(
+      projectId,
+      'system',
+      `Idea ${status}: “${idea.title}”. This decision will be supplied to upcoming agent requests.`,
+    );
+    this.commit();
+  }
+  investigateIdea(projectId: string, id: string, requestId: string, agentId: string) {
+    const idea = this.state.ideas?.find((idea) => idea.id === id && idea.projectId === projectId);
+    if (!idea) throw new AppError('Idea not found.', 404);
+    if (idea.investigationTaskId) return this.task(idea.investigationTaskId);
+    const message = this.postProjectMessage(
+      projectId,
+      requestId,
+      `Investigate the idea “${idea.title}”. Proposal: ${idea.proposal.slice(0, 1000)}\nRationale: ${idea.rationale.slice(0, 250)}\nSuggested next step: ${idea.nextStep.slice(0, 200)}\nAssess feasibility, evidence gaps and a useful bounded next action. Do not treat this proposed idea as approved implementation or verified demand.`,
+      true,
+      { respondAsAgentId: agentId, kind: 'idea' },
+    );
+    if (idea.status !== 'selected' && idea.status !== 'rejected') idea.status = 'investigating';
+    idea.investigationTaskId = message.responseTaskId;
+    this.commit();
+    return this.task(message.responseTaskId!);
   }
   runProject(id: string) {
     this.assertConnectionsStable();
@@ -710,7 +1095,7 @@ export class Engine extends EventEmitter {
         'Retry or skip the failed meeting before continuing. Saved contributions are retained.',
       );
     if (
-      !this.state.tasks.some((t) => t.projectId === id) ||
+      !this.state.tasks.some((t) => t.projectId === id && !t.conversationMessageId) ||
       project.planningStatus === 'planning' ||
       project.planningStatus === 'failed'
     )
@@ -734,6 +1119,21 @@ export class Engine extends EventEmitter {
       );
     if (project.status === 'completed')
       throw new AppError('This project is complete. Create a new project to run another brief.');
+    if (
+      this.state.tasks.some(
+        (t) => t.projectId === id && !t.conversationMessageId && t.status === 'failed',
+      ) &&
+      !this.state.tasks.some(
+        (t) =>
+          t.projectId === id &&
+          (t.status === 'working' ||
+            (t.status === 'queued' &&
+              t.dependencies.every((dep) => this.task(dep).status === 'done'))),
+      )
+    )
+      throw new AppError(
+        'A saved task needs attention before this project can progress. Retry that task, recover its saved result, or use Restart project for a fresh run.',
+      );
     if (this.state.tasks.filter((t) => t.projectId === id).length > policy(this.store).maxTasks)
       throw new AppError(
         'This plan exceeds the task limit. Increase the limit in Workspace controls; no tasks have been discarded.',
@@ -758,8 +1158,19 @@ export class Engine extends EventEmitter {
     for (const meeting of this.state.meetings || [])
       if (meeting.projectId === id && this.conferences.has(meeting.id))
         this.stopMeeting(meeting.id);
-    if (project.status === 'completed') throw new AppError('This project is already complete.');
+    if (
+      project.status === 'completed' &&
+      !this.state.tasks.some((t) => t.projectId === id && t.status === 'working')
+    )
+      throw new AppError('This project is already complete.');
     project.status = 'paused';
+    for (const task of this.state.tasks.filter(
+      (t) => t.projectId === id && t.conversationPending,
+    )) {
+      task.conversationPending = false;
+      task.status = 'failed';
+      task.error = 'Coordinator response paused. Retry this saved task when ready.';
+    }
     const planner = this.planners.get(id);
     if (planner) {
       planner.abort();
@@ -844,7 +1255,10 @@ export class Engine extends EventEmitter {
     if (this.store.attempts().some((a) => a.taskId === id && a.status === 'uncertain'))
       throw new AppError('Acknowledge uncertain usage in Workspace controls before retrying.');
     const target = this.project(task.projectId);
-    if ((this.state.meetings || []).some((m) => m.projectId === target.id && m.status === 'failed'))
+    if (
+      !task.conversationMessageId &&
+      (this.state.meetings || []).some((m) => m.projectId === target.id && m.status === 'failed')
+    )
       throw new AppError('Retry or skip the failed meeting before retrying work.');
     if (
       hasProjectTools(target) &&
@@ -862,11 +1276,13 @@ export class Engine extends EventEmitter {
     if (feedback?.trim()) task.feedback = feedback.trim();
     delete task.error;
     const project = this.project(task.projectId);
-    project.status = this.state.approvals.some(
-      (a) => a.projectId === project.id && a.status === 'pending',
-    )
-      ? 'needs_input'
-      : 'running';
+    if (task.conversationMessageId) task.conversationPending = true;
+    else
+      project.status = this.state.approvals.some(
+        (a) => a.projectId === project.id && a.status === 'pending',
+      )
+        ? 'needs_input'
+        : 'running';
     this.event(task.projectId, 'system', `Queued “${task.title}” for another attempt.`);
     this.commit();
     this.tick();
@@ -909,7 +1325,8 @@ export class Engine extends EventEmitter {
       delete task.startedAt;
     }
     const project = this.project(approval.projectId);
-    if (project.status !== 'paused')
+    if (task.conversationMessageId && task.status === 'queued') task.conversationPending = true;
+    if (!task.conversationMessageId && project.status !== 'paused')
       project.status = this.state.approvals.some(
         (a) => a.projectId === project.id && a.status === 'pending',
       )
@@ -1057,7 +1474,9 @@ export class Engine extends EventEmitter {
     this.commit();
     void (async () => {
       try {
-        await delay(this.gatherMs, undefined, { signal: controller.signal });
+        await delay(this.gatherMs * Math.max(1, meeting.participants.length / 4), undefined, {
+          signal: controller.signal,
+        });
         meeting.status = 'running';
         this.commit();
         for (const agent of meeting.participants) {
@@ -1066,13 +1485,16 @@ export class Engine extends EventEmitter {
           this.commit();
           if (project.provider === 'demo')
             await delay(Math.min(1500, this.stepMs / 2), undefined, { signal: controller.signal });
+          const proposals: IdeaProposal[] = [];
           const content = await this.discuss(project, meeting, agent, false, {
             store: this.store,
             project,
             signal: controller.signal,
+            onIdea: (idea) => proposals.push(idea),
             ...this.tracing(project, 'meeting', undefined, agent.id, meeting.id),
           });
           if (controller.signal.aborted) return;
+          this.recordIdeas(project, agent, proposals, { sourceMeetingId: meeting.id });
           meeting.contributions.push({
             agentId: agent.id,
             role: agent.role,
@@ -1168,17 +1590,21 @@ export class Engine extends EventEmitter {
   private runnable(task: Task) {
     return (
       !this.conferences.size &&
-      !(this.state.meetings || []).some(
-        (m) => m.projectId === task.projectId && m.status === 'failed',
-      ) &&
+      (!!task.conversationMessageId ||
+        !(this.state.meetings || []).some(
+          (m) => m.projectId === task.projectId && m.status === 'failed',
+        )) &&
       task.status === 'queued' &&
       !(
         hasProjectTools(this.project(task.projectId)) &&
         this.state.tasks.some((t) => t.projectId === task.projectId && t.status === 'working')
       ) &&
-      this.project(task.projectId).status === 'running' &&
+      (this.project(task.projectId).status === 'running' || !!task.conversationPending) &&
       task.dependencies.every((id) => this.task(id).status === 'done') &&
-      !this.state.tasks.some((t) => t.agentId === task.agentId && t.status === 'working')
+      !this.state.tasks.some(
+        (t) =>
+          t.projectId === task.projectId && t.agentId === task.agentId && t.status === 'working',
+      )
     );
   }
   tick() {
@@ -1222,8 +1648,10 @@ export class Engine extends EventEmitter {
     }
   }
   private begin(task: Task) {
+    task.conversationPending = false;
     task.status = 'working';
     task.startedAt = Date.now();
+    task.lastAttemptStartedAt = task.startedAt;
     task.briefRevision = this.project(task.projectId).briefRevision || 0;
     if (this.project(task.projectId).provider !== 'external') delete task.attemptId;
     delete task.recovery;
@@ -1275,7 +1703,8 @@ export class Engine extends EventEmitter {
         await delay(this.stepMs / 2, undefined, { signal: controller.signal });
       }
       const context = this.state.tasks.filter(
-        (t) => t.projectId === project.id && t.status === 'done',
+        (t) =>
+          t.projectId === project.id && (t.status === 'done' || t.id === task.requestedByTaskId),
       );
       const output = await this.worker(
         project.provider,
@@ -1310,6 +1739,7 @@ export class Engine extends EventEmitter {
         },
       );
       if (!controller.signal.aborted) {
+        this.recordIdeas(project, agent, task.result?.ideas || [], { sourceTaskId: task.id });
         if (hasProjectTools(project) && !task.result) {
           // Keep compatibility for injected/older worker adapters; production Codex uses the work contract.
           const result = JSON.parse(output) as { outcome: 'complete' | 'blocked'; summary: string };
@@ -1359,6 +1789,11 @@ export class Engine extends EventEmitter {
     );
   }
   private coordinate(task: Task, followUps: FollowUp[]) {
+    const team = this.project(task.projectId).team || this.state.agents;
+    if (followUps.some((followUp) => !team.some((agent) => agent.id === followUp.agentId)))
+      throw new AppError(
+        'A specialist follow-up named an agent outside this project’s team. The proposed work is saved; correct the owner before retrying.',
+      );
     const limits = policy(this.store);
     if ((task.coordinationRounds || 0) >= limits.maxRevisions)
       throw new AppError(
@@ -1377,6 +1812,10 @@ export class Engine extends EventEmitter {
         ...f,
         id: randomUUID(),
         projectId: task.projectId,
+        requestedByTaskId: task.id,
+        conversationMessageId: task.conversationMessageId,
+        conversationPending: !!task.conversationMessageId,
+        readOnly: task.readOnly,
         dependencies,
         status: 'queued',
         requiresApproval: false,
@@ -1389,6 +1828,7 @@ export class Engine extends EventEmitter {
     task.dependencies = [...new Set([...task.dependencies, ...dependencies])];
     task.coordinationRounds = (task.coordinationRounds || 0) + 1;
     task.status = 'queued';
+    if (task.conversationMessageId) task.conversationPending = true;
     this.consoleEvent(
       this.project(task.projectId),
       'task',
@@ -1417,6 +1857,14 @@ export class Engine extends EventEmitter {
     delete task.leaseId;
     delete task.leaseExpiresAt;
     const project = this.project(task.projectId);
+    const author = (project.team || this.state.agents).find((agent) => agent.id === task.agentId)!;
+    this.recordIdeas(project, author, task.result?.ideas || [], { sourceTaskId: task.id });
+    for (const idea of (this.state.ideas || []).filter(
+      (idea) => idea.investigationTaskId === task.id,
+    )) {
+      if (idea.status === 'investigating') idea.status = 'evaluated';
+      idea.evaluation = (task.result?.summary || output).slice(0, 1200);
+    }
     const decision = task.result?.outcome === 'needs_input' ? task.result.decision : undefined;
     if (
       decision &&
@@ -1439,7 +1887,8 @@ export class Engine extends EventEmitter {
         status: 'pending',
         createdAt: Date.now(),
       });
-      if (project.status !== 'paused') project.status = 'needs_input';
+      if (!task.conversationMessageId && project.status !== 'paused')
+        project.status = 'needs_input';
       this.event(
         project.id,
         'approval',
@@ -1485,7 +1934,7 @@ export class Engine extends EventEmitter {
     task.error = message;
     delete task.leaseId;
     delete task.leaseExpiresAt;
-    this.project(task.projectId).status = 'paused';
+    if (!task.conversationMessageId) this.project(task.projectId).status = 'paused';
     this.consoleEvent(
       this.project(task.projectId),
       'task',
@@ -1497,7 +1946,9 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   private checkCompletion(project: Project) {
-    const tasks = this.state.tasks.filter((t) => t.projectId === project.id);
+    const tasks = this.state.tasks.filter(
+      (t) => t.projectId === project.id && !t.conversationMessageId,
+    );
     if (tasks.length && tasks.every((t) => t.status === 'done')) {
       project.status = 'completed';
       this.event(
@@ -1538,13 +1989,30 @@ export class Engine extends EventEmitter {
     this.begin(task);
     return {
       task: structuredClone(task),
+      agentContext: agentContext(
+        this.project(task.projectId),
+        (this.project(task.projectId).team || this.state.agents).find(
+          (agent) => agent.id === task.agentId,
+        )!,
+        task,
+      ),
+      projectConversation: (this.state.projectMessages || [])
+        .filter((message) => message.projectId === task.projectId)
+        .slice(-12),
+      ideaBoard: (this.state.ideas || [])
+        .filter((idea) => idea.projectId === task.projectId)
+        .slice(-12),
       agent: (this.project(task.projectId).team || this.state.agents).find(
         (a) => a.id === task.agentId,
       ),
       project: this.project(task.projectId),
       context: relevantContext(
         task,
-        this.state.tasks.filter((t) => t.projectId === task.projectId && t.status === 'done'),
+        this.state.tasks.filter(
+          (t) =>
+            t.projectId === task.projectId &&
+            (t.status === 'done' || t.id === task.requestedByTaskId),
+        ),
       ),
       memory: selectedMemory(this.store, task.projectId),
       limits: {

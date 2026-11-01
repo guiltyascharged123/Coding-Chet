@@ -7,6 +7,7 @@ import type { ConsoleEvent } from '../shared/console.js';
 import { saveResponseIssue } from './work-results.js';
 
 export type GenerationContext = {
+  onIdea?: (idea: import('../shared/ideas.js').IdeaProposal) => void;
   store?: Store;
   project?: Project;
   task?: Task;
@@ -84,10 +85,18 @@ export function relevantContext(task: Task, context: Task[]) {
       task.title,
     );
   return context
-    .filter((t) => final || task.dependencies.includes(t.id))
+    .filter(
+      (t) =>
+        final ||
+        !!task.conversationMessageId ||
+        task.dependencies.includes(t.id) ||
+        t.id === task.requestedByTaskId,
+    )
     .map((t) => ({
       sourceId: `task:${t.id}`,
       briefRevision: t.briefRevision || 0,
+      accepted: t.status === 'done',
+      sourceStatus: t.status,
       title: t.title,
       output: t.result
         ? `${JSON.stringify({ summary: t.result.summary, handoff: t.result.handoff, checks: t.result.checks })}\n\n${t.output}`

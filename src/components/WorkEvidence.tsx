@@ -1,11 +1,24 @@
 import type { Task } from '../../shared/types';
 
 export default function WorkEvidence({ task }: { task: Task }) {
+  const previousIssue =
+    !!task.responseIssue &&
+    task.responseIssue.receivedAt < (task.lastAttemptStartedAt || task.startedAt || 0);
   return (
     <>
       {task.responseIssue && (
         <details className="control-section" open aria-label="Saved response details">
-          <summary>Response needs correction · saved details</summary>
+          <summary>
+            {previousIssue
+              ? 'Previous rejected reply · saved details'
+              : 'Response needs correction · saved details'}
+          </summary>
+          {previousIssue && (
+            <p className="field-hint">
+              This reply belongs to an earlier attempt. The current attempt’s error or status is
+              shown separately.
+            </p>
+          )}
           <p>
             This reply has not been accepted as completed work. Your assignment and earlier outputs
             are retained. Review the issues below before retrying; the Live console also shows the

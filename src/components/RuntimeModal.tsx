@@ -8,6 +8,7 @@ import { api } from '../api';
 import Modal from './Modal';
 import BrandMark from './BrandMark';
 import ConnectionSetup from './ConnectionSetup';
+import ProjectModelSelector from './ProjectModelSelector';
 import type { ReactNode } from 'react';
 
 function ConnectionPage({
@@ -62,7 +63,6 @@ export default function RuntimeModal({
   onRefresh,
   project,
   serverConnected,
-  onProjectConnection,
   inline = false,
 }: {
   inline?: boolean;
@@ -72,7 +72,6 @@ export default function RuntimeModal({
   onRefresh: (data: Bootstrap) => void;
   project?: Project;
   serverConnected: boolean;
-  onProjectConnection?: () => void;
 }) {
   const [openSetup, setOpenSetup] = useState<string | undefined>(project?.provider);
   const blocked =
@@ -100,9 +99,6 @@ export default function RuntimeModal({
       setSaving(false);
     }
   }
-  const projectConnection = project
-    ? connectionInfo(data.runtime, project.provider, project.model)
-    : undefined;
   const [message, setMessage] = useState('');
   const descriptions: Partial<Record<Provider, string>> = {
     ollama: 'Local text models.',
@@ -131,21 +127,7 @@ export default function RuntimeModal({
           Green: connection checked. Amber: not checked. Checks do not test generation or remaining
           quota.
         </p>
-        {project && projectConnection && (
-          <section className="project-connection-summary" aria-label="Current project connection">
-            <strong>{project.title}</strong>
-            <p>
-              {PROVIDER_LABELS[project.provider]} · {project.model || 'No model ID selected'}
-            </p>
-            <ConnectionStatus info={projectConnection} />
-            <p>{projectConnection.message}</p>
-            {onProjectConnection && (
-              <button className="button secondary small" onClick={onProjectConnection}>
-                Change this project's connection
-              </button>
-            )}
-          </section>
-        )}
+        {project && <ProjectModelSelector data={data} project={project} onRefresh={onRefresh} />}
 
         <button className="button secondary" disabled={saving} onClick={() => void check()}>
           {saving ? 'Checking connections…' : 'Check connections'}
@@ -158,10 +140,14 @@ export default function RuntimeModal({
             const ready = modelReadiness(data.runtime, provider).ready;
             const status = connectionInfo(data.runtime, provider);
             const model =
-              provider !== 'demo' && provider !== 'external' ? data.runtime.models[provider] : '';
+              provider !== 'demo' && provider !== 'external'
+                ? project?.provider === provider
+                  ? project.model || data.runtime.models[provider]
+                  : data.runtime.models[provider]
+                : '';
             return (
               <article
-                className={`runtime-option ${data.state.provider === provider ? 'chosen' : ''}`}
+                className={`runtime-option ${project?.provider === provider ? 'chosen' : ''}`}
                 key={provider}
                 aria-label={`${PROVIDER_LABELS[provider]} connection`}
               >
@@ -171,9 +157,21 @@ export default function RuntimeModal({
                 <div>
                   <strong>
                     {PROVIDER_LABELS[provider]}{' '}
-                    {data.state.provider === provider && <span className="tag">Default</span>}
+                    {project?.provider === provider && (
+                      <span className="tag">Selected for this project</span>
+                    )}
+                    {data.state.provider === provider && (
+                      <span className="tag">Default for new projects</span>
+                    )}
                   </strong>
                   {model && <p className="provider-model">{model}</p>}
+                  {project?.provider === provider &&
+                    model !== data.runtime.models[provider as keyof typeof data.runtime.models] && (
+                      <small>
+                        Default model for new projects:{' '}
+                        {data.runtime.models[provider as keyof typeof data.runtime.models]}
+                      </small>
+                    )}
                   <p>{descriptions[provider]}</p>
                   <ConnectionStatus info={status} />
                   {status.state !== 'connected' && <small>{status.message}</small>}

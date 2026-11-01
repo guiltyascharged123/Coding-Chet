@@ -74,7 +74,11 @@ import LiveConsole from './components/LiveConsole';
 import OfficeWork from './components/OfficeWork';
 import { useProjectConsole } from './useProjectConsole';
 import { officeWork } from './office/work';
-import { roleProcedure } from '../shared/role-protocol';
+import { BASE_AGENT_INSTRUCTIONS, roleProcedure } from '../shared/role-protocol';
+import RestartProject from './components/RestartProject';
+import TeamConfigurator from './components/TeamConfigurator';
+import ProjectConversation from './components/ProjectConversation';
+import IdeaBoard from './components/IdeaBoard';
 
 const Office = lazy(() => import('./components/Office'));
 type View =
@@ -85,7 +89,9 @@ type View =
   | 'activity'
   | 'outputs'
   | 'discussions'
-  | 'console';
+  | 'console'
+  | 'conversation'
+  | 'ideas';
 const nav = [
   { id: 'workspace' as View, label: 'Workspace', icon: LayoutDashboard },
   { id: 'tasks' as View, label: 'Task board', icon: ClipboardList },
@@ -94,6 +100,8 @@ const nav = [
   { id: 'discussions' as View, label: 'Team discussions', icon: MessageCircle },
   { id: 'activity' as View, label: 'Activity', icon: ActivityIcon },
   { id: 'console' as View, label: 'Live console', icon: TerminalSquare },
+  { id: 'conversation' as View, label: 'Project conversation', icon: MessageCircle },
+  { id: 'ideas' as View, label: 'Idea board', icon: Sparkles },
 ];
 const taskLabels: Record<TaskStatus, string> = {
   queued: 'Up next',
@@ -118,7 +126,7 @@ export default function App() {
   });
   const [projectMenu, setProjectMenu] = useState(false);
   const [modal, setModal] = useState<
-    'project' | 'edit-project' | 'runtime' | 'help' | 'controls' | 'plan' | null
+    'project' | 'edit-project' | 'runtime' | 'help' | 'controls' | 'plan' | 'restart' | null
   >(null);
   const [controlsTab, setControlsTab] = useState('limits');
   const [consoleFocus, setConsoleFocus] = useState<{
@@ -139,6 +147,7 @@ export default function App() {
   const [officeMoving, setOfficeMoving] = useState(
     () => !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
+  const [meetingFocus, setMeetingFocus] = useState<string>();
   const [cameraMode, setCameraMode] = useState<'orbit' | 'top'>('orbit');
   const [resetCamera, setResetCamera] = useState(0);
   const [activityFilter, setActivityFilter] = useState('all');
@@ -152,9 +161,10 @@ export default function App() {
   const activities = state?.activities.filter((a) => a.projectId === project?.id) || [];
   const pending = state?.approvals.filter((a) => a.status === 'pending') || [];
   const projectApprovals = pending.filter((a) => a.projectId === project?.id);
-  const done = tasks.filter((t) => t.status === 'done').length;
+  const planTasks = tasks.filter((t) => !t.conversationMessageId);
+  const done = planTasks.filter((t) => t.status === 'done').length;
   const working = tasks.filter((t) => t.status === 'working').length;
-  const progress = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
+  const progress = planTasks.length ? Math.round((done / planTasks.length) * 100) : 0;
   const selectedTask = state?.tasks.find((t) => t.id === taskId);
   const selectedAgent = state?.agents.find((a) => a.id === agentId);
   const selectedReview = state?.approvals.find((a) => a.id === reviewId && a.status === 'pending');
@@ -320,15 +330,6 @@ export default function App() {
               'Default connection updated. Existing projects keep their model.',
             )
           }
-          onProjectConnection={
-            project
-              ? () => {
-                  setView('workspace');
-                  setControlsTab('limits');
-                  setModal('controls');
-                }
-              : undefined
-          }
         />
         {toast && (
           <p className="toast" role="status">
@@ -379,6 +380,7 @@ export default function App() {
         </div>
         {modal === 'project' && (
           <ProjectModal
+            baseTeam={data.state.agents}
             provider={state.provider}
             model={
               state.provider !== 'demo' && state.provider !== 'external'
@@ -557,17 +559,21 @@ export default function App() {
               <h1>
                 {view === 'workspace'
                   ? 'Workspace'
-                  : view === 'console'
-                    ? 'Live console'
-                    : view === 'discussions'
-                      ? 'Team discussions'
-                      : view === 'team'
-                        ? 'Your team'
-                        : view === 'tasks'
-                          ? 'Task board'
-                          : view === 'outputs'
-                            ? 'Outputs'
-                            : 'Activity'}
+                  : view === 'ideas'
+                    ? 'Idea board'
+                    : view === 'conversation'
+                      ? 'Project conversation'
+                      : view === 'console'
+                        ? 'Live console'
+                        : view === 'discussions'
+                          ? 'Team discussions'
+                          : view === 'team'
+                            ? 'Your team'
+                            : view === 'tasks'
+                              ? 'Task board'
+                              : view === 'outputs'
+                                ? 'Outputs'
+                                : 'Activity'}
               </h1>
               <p>
                 {view === 'workspace'
@@ -591,6 +597,33 @@ export default function App() {
             </button>
           </div>
 
+          <div className="project-run-actions">
+            {project.status !== 'running' && working > 0 && (
+              <button
+                className="button secondary small"
+                disabled={busy}
+                onClick={() => act(() => api(`/projects/${project.id}/pause`))}
+              >
+                Pause project work
+              </button>
+            )}
+            <button
+              className="button secondary small"
+              disabled={busy}
+              onClick={() => setModal('restart')}
+            >
+              <RotateCcw size={15} />
+              Restart project
+            </button>
+            {project.restartedFrom && (
+              <button
+                className="button secondary small"
+                onClick={() => setProjectId(project.restartedFrom!)}
+              >
+                Open previous run
+              </button>
+            )}
+          </div>
           <section className="project-banner" aria-label="Current project">
             <div className="project-art">
               <span />
@@ -641,14 +674,14 @@ export default function App() {
                 <span style={{ width: `${progress}%` }} />
               </div>
               <small>
-                {done} of {tasks.length} tasks complete
+                {done} of {planTasks.length} tasks complete
               </small>
             </div>
             <button
               disabled={
                 busy ||
                 !connected ||
-                !tasks.length ||
+                !planTasks.length ||
                 project.planningStatus === 'planning' ||
                 project.planningStatus === 'failed'
               }
@@ -842,6 +875,7 @@ export default function App() {
               key={project.id}
               project={project}
               meetings={meetings}
+              focusId={meetingFocus}
               onUsage={() => {
                 setControlsTab('usage');
                 setModal('controls');
@@ -901,6 +935,9 @@ export default function App() {
                         activities={activities}
                         meeting={currentMeeting}
                         work={work}
+                        capacity={project.officeCapacity || 4}
+                        ideas={(state.ideas || []).filter((idea) => idea.projectId === project.id)}
+                        onIdeaBoard={() => setView('ideas')}
                         mode={cameraMode}
                         zoom={zoom}
                         reset={resetCamera}
@@ -916,11 +953,13 @@ export default function App() {
                           ? currentMeeting.status === 'gathering'
                             ? 'Team gathering'
                             : 'In a team meeting'
-                          : !tasks.length
-                            ? 'Add tasks to plan'
-                            : !modelReadiness(data.runtime, project.provider, project.model).ready
-                              ? 'Model setup needed'
-                              : STATUS_LABELS[project.status]}
+                          : working
+                            ? 'Team is working'
+                            : !tasks.length
+                              ? 'Add tasks to plan'
+                              : !modelReadiness(data.runtime, project.provider, project.model).ready
+                                ? 'Model setup needed'
+                                : STATUS_LABELS[project.status]}
                       </span>
                       <span className="scene-agent-count">
                         <Users size={13} />
@@ -1068,6 +1107,12 @@ export default function App() {
 
           {view === 'team' && (
             <>
+              <TeamConfigurator
+                key={project.id}
+                project={project}
+                team={state.agents}
+                active={working > 0 || !!currentMeeting}
+              />
               <div className="team-grid">
                 {state.agents.map((agent) => (
                   <article className="team-profile" key={agent.id}>
@@ -1076,7 +1121,7 @@ export default function App() {
                       style={{ '--agent-color': agent.color } as React.CSSProperties}
                     >
                       <Avatar color={agent.color} size={96} />
-                      <span>DESK 0{agent.desk + 1}</span>
+                      <span>DESK {String(agent.desk + 1).padStart(2, '0')}</span>
                     </div>
                     <div className="profile-content">
                       <div className="profile-name">
@@ -1342,6 +1387,26 @@ export default function App() {
               )}
             </section>
           )}
+          {view === 'ideas' && (
+            <IdeaBoard
+              key={project.id}
+              data={data}
+              project={project}
+              onTask={setTaskId}
+              onMeeting={(id) => {
+                setMeetingFocus(id);
+                setView('discussions');
+              }}
+            />
+          )}
+          {view === 'conversation' && (
+            <ProjectConversation
+              key={project.id}
+              data={data}
+              project={project}
+              onTask={setTaskId}
+            />
+          )}
           {view === 'console' && (
             <LiveConsole
               key={project.id}
@@ -1367,6 +1432,7 @@ export default function App() {
 
       {modal === 'project' && (
         <ProjectModal
+          baseTeam={data.state.agents}
           onClose={() => setModal(null)}
           provider={state.provider}
           model={
@@ -1405,10 +1471,22 @@ export default function App() {
           }}
         />
       )}
+      {modal === 'restart' && (
+        <RestartProject
+          project={project}
+          onClose={() => setModal(null)}
+          onCreated={(id) => {
+            setProjectId(id);
+            setModal(null);
+            setView('workspace');
+            void getState().then(setData);
+          }}
+        />
+      )}
       {modal === 'plan' && (
         <PlanEditor
           project={project}
-          tasks={tasks}
+          tasks={planTasks}
           team={state.agents}
           onClose={() => setModal(null)}
         />
@@ -1472,6 +1550,7 @@ export default function App() {
         <AgentModal
           agent={selectedAgent}
           projectId={project.id}
+          officeCapacity={project.officeCapacity || 4}
           onClose={() => setAgentId(undefined)}
           onSaved={() => {
             setAgentId(undefined);
@@ -1503,6 +1582,10 @@ export default function App() {
             {!!selectedTask.toolLog?.length && (
               <details className="tool-activity" open>
                 <summary>Work activity & tool receipts ({selectedTask.toolLog.length})</summary>
+                <p className="field-hint">
+                  Saved receipts include earlier attempts. Open the task’s live console to inspect
+                  each attempt separately.
+                </p>
                 {selectedTask.toolLog.map((e) => (
                   <div key={e.id}>
                     <strong>
@@ -1707,11 +1790,13 @@ function AgentCard({
 function AgentModal({
   agent,
   projectId,
+  officeCapacity = 4,
   onClose,
   onSaved,
 }: {
   agent: Agent;
   projectId?: string;
+  officeCapacity?: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -1743,7 +1828,10 @@ function AgentModal({
       <form className="modal-form" onSubmit={submit}>
         <details>
           <summary>How this role works</summary>
-          <p className="field-hint">{roleProcedure({ role })}</p>
+          <h4>Shared operating template</h4>
+          <p className="field-hint">{BASE_AGENT_INSTRUCTIONS}</p>
+          <h4>Role procedure</h4>
+          <p className="field-hint">{roleProcedure({ role }).split('Role procedure: ')[1]}</p>
         </details>
         <div className="form-agent-intro">
           <Avatar color={agent.color} size={60} />
@@ -1816,16 +1904,13 @@ function AgentModal({
         <label>
           A place in the studio
           <select value={desk} onChange={(e) => setDesk(Number(e.target.value))}>
-            {[
-              '01 · Window side',
-              '02 · Inspiration corner',
-              '03 · Builder’s bench',
-              '04 · Quiet corner',
-            ].map((d, i) => (
-              <option key={i} value={i}>
-                Desk {d}
-              </option>
-            ))}
+            {Array.from({ length: officeCapacity }, (_, i) => String(i + 1).padStart(2, '0')).map(
+              (d, i) => (
+                <option key={i} value={i}>
+                  Desk {d}
+                </option>
+              ),
+            )}
           </select>
           <span className="field-hint">
             Choosing an occupied desk swaps seats with that teammate.

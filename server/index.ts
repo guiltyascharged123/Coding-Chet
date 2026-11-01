@@ -13,6 +13,8 @@ import { allowedHost, allowedOrigin, BrowserSessions } from './origin.js';
 import { runtimeIdentity } from '../scripts/runtime-identity.mjs';
 import { acceptanceListSchema } from '../shared/verification.js';
 import { collaborationSchema, providerSchema } from '../shared/schemas.js';
+import { AGENT_IDS, teamMemberSchema } from '../shared/team.js';
+import { ideaProposalSchema } from '../shared/ideas.js';
 import { CONSOLE_LIMITS, type ConsoleEntry } from '../shared/console.js';
 import { refreshManagedInfo } from './managed.js';
 import { projectWorkspace, workspaceFiles, workspaceFile, workspaceZip } from './workspaces.js';
@@ -197,6 +199,8 @@ app.post(
         planning: z.enum(['template', 'ai', 'manual']).optional(),
         requestId: z.string().uuid().optional(),
         collaboration: collaborationSchema.optional(),
+        officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(4),
+        team: z.array(teamMemberSchema).min(1).max(12).optional(),
         workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
       })
       .parse(req.body);
@@ -213,6 +217,8 @@ app.post(
       body.requestId,
       body.workflow || (Object.hasOwn(req.body, 'documentPack') ? undefined : 'office'),
       body.collaboration,
+      body.officeCapacity,
+      body.team,
     );
     res.status(201).json({ project });
   }),
@@ -221,6 +227,108 @@ app.put(
   '/api/projects/:id',
   route((req, res) => {
     res.json({ project: engine.updateProject(param(req, 'id'), req.body) });
+  }),
+);
+app.post(
+  '/api/projects/:id/restart',
+  route(async (req, res) => {
+    const body = z
+      .object({
+        requestId: z.string().uuid(),
+        title: z.string().trim().min(2).max(80),
+        mode: z.enum(['replan', 'reuse']),
+        officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).optional(),
+      })
+      .parse(req.body);
+    res.status(201).json({
+      project: await engine.restartProject(
+        param(req, 'id'),
+        body.requestId,
+        body.title,
+        body.mode,
+        body.officeCapacity,
+      ),
+    });
+  }),
+);
+app.put(
+  '/api/projects/:id/team',
+  route((req, res) => {
+    const body = z
+      .object({
+        capacity: z.union([z.literal(4), z.literal(8), z.literal(12)]),
+        members: z
+          .array(
+            z.object({
+              id: z.enum(AGENT_IDS),
+              name: z.string().trim().min(1).max(30),
+              role: z.string().trim().min(2).max(50),
+              specialty: z.string().trim().min(5).max(600),
+              goal: z.string().max(1000).optional(),
+              color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+              desk: z.number().int().min(0).max(11),
+            }),
+          )
+          .min(1)
+          .max(12),
+      })
+      .parse(req.body);
+    engine.configureTeam(param(req, 'id'), body.capacity, body.members);
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/projects/:id/messages',
+  route((req, res) => {
+    const body = z
+      .object({
+        id: z.string().uuid(),
+        content: z.string().trim().min(1).max(2000),
+        askCoordinator: z.boolean(),
+        kind: z.enum(['direction', 'question']).optional(),
+        respondAsAgentId: z.enum(AGENT_IDS).optional(),
+      })
+      .parse(req.body);
+    res.status(201).json({
+      message: engine.postProjectMessage(
+        param(req, 'id'),
+        body.id,
+        body.content,
+        body.askCoordinator,
+        { kind: body.kind, respondAsAgentId: body.respondAsAgentId },
+      ),
+    });
+  }),
+);
+app.post(
+  '/api/projects/:id/ideas',
+  route((req, res) => {
+    const body = ideaProposalSchema.extend({ id: z.string().uuid() }).parse(req.body);
+    res.status(201).json({ idea: engine.addIdea(param(req, 'id'), body.id, body) });
+  }),
+);
+app.patch(
+  '/api/projects/:id/ideas/:ideaId',
+  route((req, res) => {
+    const body = z.object({ status: z.enum(['selected', 'rejected', 'proposed']) }).parse(req.body);
+    engine.decideIdea(param(req, 'id'), param(req, 'ideaId'), body.status);
+    res.json({ ok: true });
+  }),
+);
+app.post(
+  '/api/projects/:id/ideas/:ideaId/investigate',
+  route((req, res) => {
+    const body = z
+      .object({ requestId: z.string().uuid(), agentId: z.enum(AGENT_IDS) })
+      .parse(req.body);
+    res.json({
+      task: engine.investigateIdea(
+        param(req, 'id'),
+        param(req, 'ideaId'),
+        body.requestId,
+        body.agentId,
+      ),
+    });
   }),
 );
 app.post(
@@ -362,7 +470,7 @@ app.patch(
         name: z.string().trim().min(1).max(30),
         role: z.string().trim().min(2).max(50),
         specialty: z.string().trim().min(5).max(600),
-        desk: z.number().int().min(0).max(3),
+        desk: z.number().int().min(0).max(11),
         goal: z.string().trim().max(1000).optional(),
         projectId: z.string().optional(),
       })

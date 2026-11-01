@@ -24,14 +24,16 @@ npm run setup:local
 
 ## Use it
 
-1. **Model connections:** check readiness and choose the default for new projects.
+1. **Models & sign-in:** check readiness and choose the default for new projects. The **Selected** panel separately shows and changes the current project's exact connection and model.
 2. **New project:** provide the goal, useful deliverables, constraints and evidence. Choose a team. AI planning uses the configured model; the manual option starts empty.
 3. **Edit plan:** inspect tasks, owners, dependencies and acceptance criteria.
 4. **Run team:** agents use the selected model with their role instructions and saved project context. The default permits one task at a time to control resource use.
 5. **Task board / Live console:** inspect actual responses, checks, errors and public tool output. Retry saved failures without rewriting the brief.
 6. **View results / Outputs:** read and export deliverables. A completed plan does not by itself prove an external goal was achieved; inspect the evidence.
 
-Model-backed meetings are optional and off by default. A normal full meeting adds five model requests. A seated or moving avatar is not evidence of inference; the console and receipts show actual work.
+Choose a 4-, 8- or 12-person office and assign specialists from 20 profiles. Each model turn receives the shared working template, the named specialist's method and goal, and this project's evidence. The project conversation and idea board retain real replies and source-linked proposals. See [Teams and workflow](docs/TEAMS-AND-WORKFLOW.md) for setup, role templates, model selection and restarting a saved project without losing old work.
+
+Model-backed meetings are optional and off by default. A normal full meeting adds one model request per participant plus one chair summary. A seated or moving avatar is not evidence of inference; the console and receipts show actual work.
 
 The Workroom logo returns to Workspace. Sidebar pages, model settings and recovery actions are described in the [functionality audit](docs/UI-FUNCTIONALITY.md).
 

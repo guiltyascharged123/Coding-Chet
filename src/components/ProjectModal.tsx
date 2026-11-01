@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Loader2, Plus } from 'lucide-react';
-import type { Project, Provider, Workflow, ReasoningEffort } from '../../shared/types';
-import { WORKFLOWS } from '../../shared/workflows';
+import type { Agent, Project, Provider, Workflow, ReasoningEffort } from '../../shared/types';
+import { WORKFLOWS, projectTeam } from '../../shared/workflows';
+import { expandTeam } from '../../shared/team';
+import { SPECIALISTS } from '../../shared/specialists';
 import { api, download } from '../api';
 import Modal from './Modal';
 
@@ -15,6 +17,9 @@ type Draft = {
   reasoningEffort?: ReasoningEffort;
   meetings?: boolean;
   researchEnabled?: boolean;
+  exploration?: 'focused' | 'expansive';
+  officeCapacity?: 4 | 8 | 12;
+  members?: Agent[];
 };
 const fresh = (): Draft => ({
   title: '',
@@ -54,12 +59,14 @@ export default function ProjectModal({
   provider,
   model,
   onConfigure,
+  baseTeam,
 }: {
   onClose: () => void;
   onCreated: (id: string) => void;
   provider: Provider;
   model?: string;
   onConfigure?: () => void;
+  baseTeam: Agent[];
 }) {
   const [draft, setDraft] = useState(() => readDraft(provider));
   const [storage, setStorage] = useState('');
@@ -73,7 +80,22 @@ export default function ProjectModal({
       setStorage('Browser storage is unavailable. Download your brief before closing this tab.');
     }
   }, [draft]);
+  const members =
+    draft.members ||
+    expandTeam(
+      projectTeam(draft.workflow, baseTeam.slice(0, 4)),
+      draft.officeCapacity || 4,
+      draft.workflow,
+    );
   function change(values: Partial<Draft>) {
+    if (values.workflow || values.officeCapacity) {
+      const workflow = values.workflow || draft.workflow,
+        capacity = values.officeCapacity || draft.officeCapacity || 4;
+      const source = values.workflow
+        ? projectTeam(workflow, baseTeam.slice(0, 4))
+        : members.filter((agent) => agent.desk < capacity);
+      values.members = expandTeam(source, capacity, workflow);
+    }
     setDraft((d) => ({ ...d, ...values, requestId: crypto.randomUUID() }));
   }
   async function submit(e: FormEvent) {
@@ -83,9 +105,12 @@ export default function ProjectModal({
     try {
       const result = await api<{ project: Project }>('/projects', {
         ...draft,
+        team: members,
         documentPack: 'office',
         collaboration: {
           researchEnabled: !!draft.researchEnabled,
+          exploration: draft.exploration || 'focused',
+          requestTimeoutSeconds: 900,
           reasoningEffort: draft.reasoningEffort || 'medium',
           meetingPolicy: {
             enabled: provider !== 'external' && (draft.meetings ?? false),
@@ -193,6 +218,75 @@ export default function ProjectModal({
             is no fixed step count.
           </span>
         </label>
+        <label>
+          Office space
+          <select
+            aria-label="Office space"
+            value={draft.officeCapacity || 4}
+            onChange={(e) => change({ officeCapacity: Number(e.target.value) as 4 | 8 | 12 })}
+          >
+            <option value={4}>Studio · 4 agents</option>
+            <option value={8}>Office · 8 agents</option>
+            <option value={12}>Headquarters · 12 agents</option>
+          </select>
+          <span className="field-hint">
+            Choose specialists in Your team. Concurrency and request limits apply independently of
+            team size.
+          </span>
+        </label>
+        <details>
+          <summary>
+            Choose {members.length} specialists from {SPECIALISTS.length} role profiles
+          </summary>
+          <div className="specialist-picker-grid">
+            {members.map((agent) => (
+              <label key={agent.id}>
+                {agent.name}
+                <select
+                  aria-label={`New project ${agent.name} specialist`}
+                  value={
+                    SPECIALISTS.some((preset) => preset.role === agent.role)
+                      ? agent.role
+                      : '__custom'
+                  }
+                  onChange={(event) => {
+                    const preset = SPECIALISTS.find((p) => p.role === event.target.value);
+                    if (preset)
+                      change({
+                        members: members.map((member) =>
+                          member.id === agent.id ? { ...member, ...preset } : member,
+                        ),
+                      });
+                  }}
+                >
+                  {!SPECIALISTS.some((preset) => preset.role === agent.role) && (
+                    <option value="__custom">{agent.role}</option>
+                  )}
+                  {SPECIALISTS.map((preset) => (
+                    <option key={preset.role} value={preset.role}>
+                      {preset.role}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        </details>
+        <label>
+          Working style
+          <select
+            aria-label="Working style"
+            value={draft.exploration || 'focused'}
+            onChange={(e) => change({ exploration: e.target.value as 'focused' | 'expansive' })}
+          >
+            <option value="focused">Focused delivery</option>
+            <option value="expansive">Creative exploration</option>
+          </select>
+          <span className="field-hint">
+            Creative exploration encourages unconventional approaches and autonomous internal work.
+            Model-provider rules and tool permissions still apply.
+          </span>
+        </label>
         {provider === 'codex' && (
           <>
             <label>
@@ -231,9 +325,9 @@ export default function ProjectModal({
           Automatic kickoff and progress meetings
         </label>
         <p className="field-hint">
-          A normal meeting uses five model requests, plus bounded corrections for malformed replies.
-          It records proposals, critique and next actions. Leave off to save model calls; request a
-          meeting when useful. Change the cadence in Edit plan.
+          A meeting uses one request per teammate plus one chair summary, plus bounded corrections
+          for malformed replies. It records proposals, critique and next actions. Leave off to save
+          model calls; request a meeting when useful. Change the cadence in Edit plan.
         </p>
         {draft.workflow === 'software' && (
           <p className="planning-note">

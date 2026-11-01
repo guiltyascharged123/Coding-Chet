@@ -1,18 +1,11 @@
 import type { Activity, Agent, Task, Meeting } from '../../shared/types';
+import type { OfficeCapacity } from '../../shared/team';
+import { OFFICE_DESKS, officeLayout, meetingSeats } from '../../shared/office-layout';
+import { roleWorkplace } from '../../shared/role-protocol';
 
 export type Point = { x: number; z: number };
-export const DESKS: [number, number, number][] = [
-  [-4.3, 0, -2.4],
-  [3.6, 0, -2.4],
-  [-4.3, 0, 2.7],
-  [3.6, 0, 2.7],
-];
-export const MEETING_SEATS = [
-  { x: -0.55, z: 1.3 },
-  { x: 0.55, z: 1.3 },
-  { x: -0.55, z: 4.05 },
-  { x: 0.55, z: 4.05 },
-];
+export const DESKS = OFFICE_DESKS;
+export const MEETING_SEATS = meetingSeats(4);
 export type Action = 'desk' | 'coffee' | 'whiteboard' | 'meeting' | 'printer' | 'handoff';
 type Goal = Point & { action: Action; label: string; facing: number };
 export type Person = Point & {
@@ -28,36 +21,52 @@ export type Person = Point & {
   taskKey: string;
   status?: string;
   peer?: string;
+  holding?: boolean;
+  exitSeatZ?: number;
+  workplace?: 'board' | 'desk';
+  boardSlot?: number;
 };
 export const WALK_SPEED = 2.8;
 
 // Footprints include clearance for a character. Rugs are walkable. The chairs,
 // shelves, equipment, walls, and meeting table are not.
-const furniture = [
-  ...DESKS.flatMap(([x, , z]) => [
-    { x, z, halfX: 1.85, halfZ: 1.1 },
-    { x, z: z + 1.1, halfX: 0.83, halfZ: 0.9 },
-  ]),
-  { x: 0, z: 2.65, halfX: 1.05, halfZ: 0.9 },
-  { x: -1.95, z: 2.65, halfX: 0.32, halfZ: 1.95 },
-  { x: 1.95, z: 2.65, halfX: 0.32, halfZ: 1.95 },
-  { x: 0, z: 0.65, halfX: 2.25, halfZ: 0.32 },
-  { x: -5.5, z: -5.9, halfX: 2.1, halfZ: 0.68 },
-  { x: 7.5, z: 0.3, halfX: 0.95, halfZ: 1.55 },
-  { x: -7.4, z: 1.2, halfX: 0.95, halfZ: 1.0 },
-  ...[
-    [-7.5, -5.3],
-    [7.6, -5.2],
-    [-7.6, 5.3],
-    [7.3, 5.4],
-  ].map(([x, z]) => ({ x, z, halfX: 0.75, halfZ: 0.75 })),
-];
-export function walkable(point: Point, people: Point[] = []) {
+const footprints = new Map<
+  OfficeCapacity,
+  { x: number; z: number; halfX: number; halfZ: number }[]
+>();
+function furniture(capacity: OfficeCapacity) {
+  if (footprints.has(capacity)) return footprints.get(capacity)!;
+  const layout = officeLayout(capacity);
+  const result = [
+    ...DESKS.slice(0, capacity).flatMap(([x, , z]) => [
+      { x, z, halfX: 1.85, halfZ: 1.1 },
+      { x, z: z + 1.1, halfX: 0.83, halfZ: 0.9 },
+    ]),
+    { x: 0, z: layout.tableZ, halfX: 1.05, halfZ: layout.tableHalfZ },
+    { x: -1.95, z: layout.roomZ, halfX: 0.32, halfZ: layout.roomHalfZ },
+    { x: 1.95, z: layout.roomZ, halfX: 0.32, halfZ: layout.roomHalfZ },
+    { x: 0, z: 0.65, halfX: 2.25, halfZ: 0.32 },
+    { x: -5.5, z: layout.backZ + 0.65, halfX: 2.1, halfZ: 0.68 },
+    { x: 7.5, z: 0.3, halfX: 0.95, halfZ: 1.55 },
+    { x: -7.4, z: 1.2, halfX: 0.95, halfZ: 1.0 },
+    ...[
+      [-7.5, -5.3],
+      [7.6, -5.2],
+      [-7.6, 5.3],
+      [7.3, 5.4],
+    ].map(([x, z]) => ({ x, z, halfX: 0.75, halfZ: 0.75 })),
+  ];
+  footprints.set(capacity, result);
+  return result;
+}
+export function walkable(point: Point, people: Point[] = [], capacity: OfficeCapacity = 4) {
+  const layout = officeLayout(capacity);
   return (
-    Math.abs(point.x) <= 7.95 &&
-    point.z >= -5.85 &&
-    point.z <= 6.0 &&
-    !furniture.some(
+    point.x >= layout.minX &&
+    point.x <= layout.maxX &&
+    point.z >= layout.minZ &&
+    point.z <= layout.maxZ &&
+    !furniture(capacity).some(
       (r) => Math.abs(point.x - r.x) < r.halfX && Math.abs(point.z - r.z) < r.halfZ,
     ) &&
     !people.some((p) => Math.hypot(point.x - p.x, point.z - p.z) < 0.9)
@@ -66,13 +75,13 @@ export function walkable(point: Point, people: Point[] = []) {
 function distance(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
-function clearSegment(a: Point, b: Point, people: Point[] = []) {
-  if (!walkable(b, people)) return false;
+function clearSegment(a: Point, b: Point, people: Point[] = [], capacity: OfficeCapacity = 4) {
+  if (!walkable(b, people, capacity)) return false;
   const dx = b.x - a.x,
     dz = b.z - a.z;
   // Exact segment/rectangle intersection avoids clipping even a tiny corner
   // between grid samples. Boundary contact is allowed at numerical precision.
-  for (const r of furniture) {
+  for (const r of furniture(capacity)) {
     let enter = 0,
       leave = 1;
     for (const [origin, delta, low, high] of [
@@ -108,16 +117,25 @@ function clearSegment(a: Point, b: Point, people: Point[] = []) {
 }
 
 /** A* on an office floor grid, then line-of-sight smoothing. No diagonal corner cuts. */
-export function route(start: Point, goal: Point, people: Point[] = []): Point[] {
-  if (!walkable(goal, people)) return [];
-  if (clearSegment(start, goal, people)) return [goal];
-  const size = 0.3,
-    width = 55;
+export function route(
+  start: Point,
+  goal: Point,
+  people: Point[] = [],
+  capacity: OfficeCapacity = 4,
+): Point[] {
+  if (!walkable(goal, people, capacity)) return [];
+  if (clearSegment(start, goal, people, capacity)) return [goal];
+  const layout = officeLayout(capacity),
+    size = 0.3,
+    originX = layout.minX - 0.15,
+    originZ = layout.minZ - 0.15;
+  const width = Math.ceil((layout.maxX - originX) / size) + 1;
+  const height = Math.ceil((layout.maxZ - originZ) / size) + 1;
   const node = (p: Point) => ({
-    x: Math.round((p.x + 8.1) / size),
-    z: Math.round((p.z + 6) / size),
+    x: Math.round((p.x - originX) / size),
+    z: Math.round((p.z - originZ) / size),
   });
-  const world = (x: number, z: number) => ({ x: x * size - 8.1, z: z * size - 6 });
+  const world = (x: number, z: number) => ({ x: x * size + originX, z: z * size + originZ });
   const first = node(start),
     last = node(goal);
   const key = (x: number, z: number) => z * width + x;
@@ -137,7 +155,7 @@ export function route(start: Point, goal: Point, people: Point[] = []): Point[] 
     if (
       Math.abs(current.x - last.x) <= 1 &&
       Math.abs(current.z - last.z) <= 1 &&
-      clearSegment(currentPoint, goal, people)
+      clearSegment(currentPoint, goal, people, capacity)
     ) {
       const path: Point[] = [goal, currentPoint];
       let cursor = id;
@@ -151,7 +169,7 @@ export function route(start: Point, goal: Point, people: Point[] = []): Point[] 
       let index = 0;
       while (index < path.length - 1) {
         let next = path.length - 1;
-        while (next > index + 1 && !clearSegment(path[index], path[next], people)) next--;
+        while (next > index + 1 && !clearSegment(path[index], path[next], people, capacity)) next--;
         smooth.push(path[next]);
         index = next;
       }
@@ -169,12 +187,12 @@ export function route(start: Point, goal: Point, people: Point[] = []): Point[] 
     ]) {
       const x = current.x + dx,
         z = current.z + dz;
-      if (x < 0 || x >= width || z < 0 || z > 40) continue;
+      if (x < 0 || x >= width || z < 0 || z >= height) continue;
       const nextId = key(x, z),
         point = world(x, z);
       if (
         closed.has(nextId) ||
-        !clearSegment(id === firstKey ? start : currentPoint, point, people)
+        !clearSegment(id === firstKey ? start : currentPoint, point, people, capacity)
       )
         continue;
       const cost = scores.get(id)! + Math.hypot(dx, dz);
@@ -191,7 +209,7 @@ function desk(agent: Agent): Goal {
   const [x, , z] = DESKS[agent.desk];
   return { x, z: z + 2.16, action: 'desk', label: 'their desk', facing: Math.PI };
 }
-function station(action: Action, index: number): Goal {
+function station(action: Action, index: number, capacity: OfficeCapacity = 4): Goal {
   switch (action) {
     case 'coffee':
       return {
@@ -203,8 +221,8 @@ function station(action: Action, index: number): Goal {
       };
     case 'whiteboard':
       return {
-        x: 2.0 + index * 0.9,
-        z: -5.15,
+        x: 1.8 + index * 1.05,
+        z: officeLayout(capacity).backZ + 1.4,
         action,
         label: 'the planning wall',
         facing: Math.PI,
@@ -219,7 +237,7 @@ function station(action: Action, index: number): Goal {
       };
     default:
       return {
-        ...MEETING_SEATS[index % 4],
+        ...meetingSeats(capacity)[index % capacity],
         action,
         label: action === 'handoff' ? 'a team handoff' : 'the meeting room',
         facing:
@@ -227,14 +245,13 @@ function station(action: Action, index: number): Goal {
             ? index % 2 === 0
               ? Math.PI / 2
               : -Math.PI / 2
-            : index < 2
-              ? 0
-              : Math.PI,
+            : meetingSeats(capacity)[index % capacity].facing,
       };
   }
 }
 
 export class OfficeSimulation {
+  constructor(public capacity: OfficeCapacity = 4) {}
   people = new Map<string, Person>();
   time = 0;
   private team: Agent[] = [];
@@ -252,6 +269,15 @@ export class OfficeSimulation {
       this.pending = [];
     }
     this.team = agents;
+    const boardAgents = agents.filter(
+      (agent) =>
+        roleWorkplace(
+          agent,
+          tasks.find((task) => task.agentId === agent.id && task.status === 'working'),
+        ) === 'board',
+    );
+    for (const person of this.people.values())
+      if (!boardAgents.some((agent) => agent.id === person.id)) person.boardSlot = undefined;
     for (const id of this.people.keys())
       if (!agents.some((agent) => agent.id === id)) this.people.delete(id);
     for (const [index, agent] of agents.entries()) {
@@ -276,6 +302,20 @@ export class OfficeSimulation {
       const task = tasks.find(
         (t) => t.agentId === agent.id && (t.status === 'working' || t.status === 'review'),
       );
+      person.workplace = roleWorkplace(agent, task);
+      if (person.workplace === 'board' && person.boardSlot === undefined) {
+        person.boardSlot =
+          [0, 1, 2, 3].find(
+            (slot) =>
+              ![...this.people.values()].some(
+                (other) => other !== person && other.boardSlot === slot,
+              ),
+          ) ?? index % 4;
+      }
+      const destination =
+        person.workplace === 'board'
+          ? station('whiteboard', person.boardSlot || 0, this.capacity)
+          : desk(agent);
       const taskKey = task ? `${task.id}:${task.status}` : '';
       person.status = activeMeeting
         ? activeMeeting.speakerId === agent.id
@@ -286,17 +326,17 @@ export class OfficeSimulation {
         person.peer = undefined;
         person.taskKey = taskKey;
         if (changedMeeting || person.goal.action !== 'meeting')
-          this.send(person, station('meeting', index));
+          this.send(person, station('meeting', index, this.capacity));
         continue;
       }
       if (changedMeeting) {
+        if (person.goal.action === 'meeting') person.exitSeatZ = person.goal.z;
         person.peer = undefined;
-        this.send(person, task?.status === 'review' ? station('whiteboard', index) : desk(agent));
+        this.send(person, destination);
       }
       if (person.taskKey !== taskKey) {
         person.taskKey = taskKey;
-        if (!person.peer)
-          this.send(person, task?.status === 'review' ? station('whiteboard', index) : desk(agent));
+        if (!person.peer) this.send(person, destination);
       } else if (
         person.goal.action === 'desk' &&
         (person.goal.x !== desk(agent).x || person.goal.z !== desk(agent).z)
@@ -359,7 +399,7 @@ export class OfficeSimulation {
   }
   private send(person: Person, goal: Goal) {
     person.goal = goal;
-    person.path = route(person, goal);
+    person.path = route(person, goal, [], this.capacity);
     person.waitUntil = this.time + 4;
     person.blocked = 0;
   }
@@ -390,7 +430,9 @@ export class OfficeSimulation {
           const agent = this.team.find((a) => a.id === p.id)!;
           this.send(
             p,
-            p.status === 'review' ? station('whiteboard', this.team.indexOf(agent)) : desk(agent),
+            p.workplace === 'board'
+              ? station('whiteboard', p.boardSlot || 0, this.capacity)
+              : desk(agent),
           );
         }
         this.encounter = undefined;
@@ -399,6 +441,37 @@ export class OfficeSimulation {
     }
     for (const [index, agent] of this.team.entries()) {
       const p = this.people.get(agent.id)!;
+      p.walking = false;
+      p.holding = false;
+      if (this.capacity > 4) {
+        const inside = (person: Point) =>
+          Math.abs(person.x) < 2.4 &&
+          person.z > 0.5 &&
+          person.z <
+            officeLayout(this.capacity).roomZ + officeLayout(this.capacity).roomHalfZ + 0.7;
+        if (p.goal.action === 'meeting') {
+          // Fill the farthest seats first so a seated colleague cannot block
+          // the narrow aisle. Waiting changes animation only, never model work.
+          p.holding = [...this.people.values()].some(
+            (other) =>
+              other !== p &&
+              other.goal.action === 'meeting' &&
+              other.goal.z < p.goal.z - 0.1 &&
+              distance(other, other.goal) > 0.12,
+          );
+        } else if (p.exitSeatZ !== undefined) {
+          if (!inside(p)) p.exitSeatZ = undefined;
+          else
+            p.holding = [...this.people.values()].some(
+              (other) =>
+                other !== p &&
+                other.exitSeatZ !== undefined &&
+                other.exitSeatZ > p.exitSeatZ! + 0.1 &&
+                inside(other),
+            );
+        }
+        if (p.holding) continue;
+      }
       if (!p.path.length && distance(p, p.goal) > 0.1) {
         p.blocked += dt;
         if (p.blocked > 0.7) {
@@ -406,13 +479,13 @@ export class OfficeSimulation {
             p,
             p.goal,
             [...this.people.values()].filter((q) => q !== p),
+            this.capacity,
           );
           p.blocked = 0;
         }
       }
       // Idle and working agents stay at their assigned desk. Travel only follows
       // task assignment, human review, a real handoff or a persisted team meeting.
-      p.walking = false;
       const next = p.path[0];
       if (!next) {
         const angle = Math.atan2(
@@ -438,6 +511,7 @@ export class OfficeSimulation {
             p,
             p.goal,
             [...this.people.values()].filter((q) => q !== p),
+            this.capacity,
           );
           p.blocked = 0;
         }

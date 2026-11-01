@@ -207,6 +207,8 @@ test('only human-verified, current, project-scoped memory reaches relevant task 
       {
         sourceId: `task:${source.id}`,
         briefRevision: 0,
+        accepted: true,
+        sourceStatus: 'done',
         title: source.title,
         output: source.output,
       },

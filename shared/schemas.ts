@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { acceptanceListSchema, observationSchema } from './verification.js';
 import { decisionSchema, workResultSchema } from './work.js';
+import { AGENT_IDS } from './team.js';
+import { ideaSchema } from './ideas.js';
 export const providers = [
   'demo',
   'openai',
@@ -49,6 +51,8 @@ const id = z.string().min(1).max(100),
 export const collaborationSchema = z.object({
   reasoningEffort: z.enum(['low', 'medium', 'high']).default('medium'),
   researchEnabled: z.boolean().default(false),
+  exploration: z.enum(['focused', 'expansive']).default('focused'),
+  requestTimeoutSeconds: z.number().int().min(60).max(3600).default(900),
   meetingPolicy: z.object({ enabled: z.boolean(), everyTasks: z.number().int().min(1).max(20) }),
 });
 export const meetingSchema = z.object({
@@ -66,11 +70,12 @@ export const meetingSchema = z.object({
         role: text.min(2).max(50),
         specialty: text.min(5).max(600),
         color: text.regex(/^#[0-9a-fA-F]{6}$/),
-        desk: z.number().int().min(0).max(3),
+        desk: z.number().int().min(0).max(11),
         goal: text.max(1000).optional(),
       }),
     )
-    .length(4),
+    .min(1)
+    .max(12),
   contributions: z
     .array(
       z.object({
@@ -80,7 +85,7 @@ export const meetingSchema = z.object({
         createdAt: z.number().finite(),
       }),
     )
-    .max(4),
+    .max(12),
   summary: text.max(20000),
   speakerId: id.optional(),
   error: text.max(4000).optional(),
@@ -114,10 +119,24 @@ export const stateSchema = z
     policy: policySchema.optional(),
     memory: z.array(memorySchema).max(1000).optional(),
     meetings: z.array(meetingSchema).max(2000).optional(),
+    projectMessages: z
+      .array(
+        z.object({
+          id,
+          projectId: id,
+          content: text.trim().min(1).max(2000),
+          createdAt: z.number().finite(),
+          responseTaskId: id.optional(),
+          kind: z.enum(['direction', 'question', 'idea']).optional(),
+        }),
+      )
+      .max(500)
+      .optional(),
+    ideas: z.array(ideaSchema).max(500).optional(),
     agents: z
       .array(
         z.object({
-          id: z.enum(['mira', 'sol', 'atlas', 'echo']),
+          id: z.enum(AGENT_IDS),
           name: text.min(1).max(30),
           role: text.min(2).max(50),
           specialty: text.min(5).max(600),
@@ -157,6 +176,10 @@ export const stateSchema = z
           workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
           reasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
           researchEnabled: z.boolean().optional(),
+          exploration: z.enum(['focused', 'expansive']).optional(),
+          requestTimeoutSeconds: z.number().int().min(60).max(3600).optional(),
+          restartedFrom: id.optional(),
+          officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).optional(),
           instructionHistory: z
             .array(
               z.object({
@@ -177,11 +200,12 @@ export const stateSchema = z
                 role: text.min(2).max(50),
                 specialty: text.min(5).max(600),
                 color: text.regex(/^#[0-9a-fA-F]{6}$/),
-                desk: z.number().int().min(0).max(3),
+                desk: z.number().int().min(0).max(11),
                 goal: text.max(1000).optional(),
               }),
             )
-            .length(4)
+            .min(1)
+            .max(12)
             .optional(),
           workspaceFolder: text.regex(/^[a-z0-9-]{1,160}$/).optional(),
           toolNetwork: z.boolean().optional(),
@@ -200,6 +224,9 @@ export const stateSchema = z
           dependencies: z.array(id).max(100),
           status: z.enum(['queued', 'working', 'review', 'done', 'failed']),
           requiresApproval: z.boolean(),
+          conversationMessageId: id.optional(),
+          conversationPending: z.boolean().optional(),
+          requestedByTaskId: id.optional(),
           documentKind: z
             .enum([
               'brief',
@@ -215,6 +242,7 @@ export const stateSchema = z
           feedback: text.max(4000),
           error: text.max(4000).optional(),
           startedAt: z.number().finite().optional(),
+          lastAttemptStartedAt: z.number().finite().optional(),
           completedAt: z.number().finite().optional(),
           revisions: z.number().int().min(0).optional(),
           attemptId: id.optional(),
@@ -297,18 +325,20 @@ export const stateSchema = z
         s.activities,
         s.memory || [],
         s.meetings || [],
+        s.projectMessages || [],
+        s.ideas || [],
       ].every(unique) ||
-      new Set(s.agents.map((a) => a.desk)).size !== 4
+      new Set(s.agents.map((a) => a.desk)).size !== s.agents.length
     )
       fail('Duplicate IDs or desk assignments.');
     const projects = new Set(s.projects.map((p) => p.id)),
-      agents = new Set<string>(s.agents.map((a) => a.id)),
+      agents = new Set<string>(AGENT_IDS),
       tasks = new Map(s.tasks.map((t) => [t.id, t]));
     for (const m of s.meetings || []) {
       const participants = new Set(m.participants.map((a) => a.id));
       if (
         !projects.has(m.projectId) ||
-        participants.size !== 4 ||
+        participants.size !== m.participants.length ||
         m.participants.some((a) => !agents.has(a.id)) ||
         m.contributions.some((c) => !participants.has(c.agentId)) ||
         new Set(m.contributions.map((c) => c.agentId)).size !== m.contributions.length ||
@@ -318,21 +348,66 @@ export const stateSchema = z
     }
     for (const p of s.projects)
       if (
-        p.team &&
-        (new Set(p.team.map((a) => a.id)).size !== 4 ||
-          p.team.some((a) => !agents.has(a.id)) ||
-          new Set(p.team.map((a) => a.desk)).size !== 4)
+        (p.restartedFrom && !projects.has(p.restartedFrom)) ||
+        (p.team &&
+          (new Set(p.team.map((a) => a.id)).size !== p.team.length ||
+            p.team.some((a) => !agents.has(a.id)) ||
+            new Set(p.team.map((a) => a.desk)).size !== p.team.length ||
+            p.team.length > (p.officeCapacity || 4) ||
+            p.team.some((a) => a.desk >= (p.officeCapacity || 4))))
       )
         fail('Invalid project team.');
     for (const t of s.tasks)
       if (
         !projects.has(t.projectId) ||
-        !agents.has(t.agentId) ||
+        !(s.projects.find((p) => p.id === t.projectId)?.team || s.agents).some(
+          (a) => a.id === t.agentId,
+        ) ||
         t.dependencies.some((d) => tasks.get(d)?.projectId !== t.projectId)
       )
         fail('Invalid task reference.');
+    for (const idea of s.ideas || []) {
+      if (
+        !projects.has(idea.projectId) ||
+        (idea.authorAgentId && !agents.has(idea.authorAgentId)) ||
+        (idea.sourceTaskId && tasks.get(idea.sourceTaskId)?.projectId !== idea.projectId) ||
+        (idea.sourceMeetingId &&
+          !(s.meetings || []).some(
+            (meeting) =>
+              meeting.id === idea.sourceMeetingId && meeting.projectId === idea.projectId,
+          )) ||
+        (idea.investigationTaskId &&
+          tasks.get(idea.investigationTaskId)?.projectId !== idea.projectId)
+      )
+        fail('Invalid idea board reference.');
+    }
     for (const a of s.approvals)
       if (tasks.get(a.taskId)?.projectId !== a.projectId) fail('Invalid approval reference.');
+    for (const message of s.projectMessages || [])
+      if (
+        !projects.has(message.projectId) ||
+        (message.responseTaskId &&
+          tasks.get(message.responseTaskId)?.projectId !== message.projectId)
+      )
+        fail('Invalid project conversation reference.');
+    for (const task of s.tasks) {
+      if (task.requestedByTaskId && tasks.get(task.requestedByTaskId)?.projectId !== task.projectId)
+        fail('Invalid specialist request source.');
+      if (task.conversationMessageId) {
+        const message = (s.projectMessages || []).find(
+          (m) => m.id === task.conversationMessageId && m.projectId === task.projectId,
+        );
+        let ancestor: typeof task | undefined = task;
+        const seen = new Set<string>();
+        while (ancestor && ancestor.id !== message?.responseTaskId && !seen.has(ancestor.id)) {
+          seen.add(ancestor.id);
+          ancestor = ancestor.requestedByTaskId ? tasks.get(ancestor.requestedByTaskId) : undefined;
+          if (ancestor?.conversationMessageId !== task.conversationMessageId) ancestor = undefined;
+        }
+        if (!message?.responseTaskId || ancestor?.id !== message.responseTaskId)
+          fail('Invalid conversation task reference.');
+      }
+    }
     for (const m of s.memory || [])
       if (
         !projects.has(m.projectId) ||

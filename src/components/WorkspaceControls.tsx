@@ -5,6 +5,8 @@ import { PROVIDER_LABELS } from '../../shared/types';
 import { api, saveBlob } from '../api';
 import Modal from './Modal';
 import { useSavedDraft } from '../drafts';
+import NumberField from './NumberField';
+import ProjectModelSelector from './ProjectModelSelector';
 
 export default function WorkspaceControls({
   data,
@@ -41,11 +43,6 @@ export default function WorkspaceControls({
   const setSource = (source: string) => saveMemoryDraft({ content: memory, source });
   const [restore, setRestore] = useState<unknown>(),
     [confirmed, setConfirmed] = useState(false);
-  const [connection, setConnection] = useState(project.provider);
-  const [model, setModel] = useState(project.model || '');
-  const [projectTools, setProjectTools] = useState(
-    project.workflow === 'software' || project.workMode === 'workspace',
-  );
   const [instructions, saveInstructions, clearInstructions, instructionError] = useSavedDraft(
     `workroom-instructions-${project.id}`,
     { text: project.instructionHistory?.at(-1)?.text || '', reason: '' },
@@ -115,120 +112,7 @@ export default function WorkspaceControls({
         </div>
         {tab === 'limits' && (
           <>
-            {selectedProject && (
-              <section className="control-section">
-                <h3>This project’s connection</h3>
-                <p>
-                  Changing the default runtime affects new projects. This project keeps its selected
-                  connection and model until you explicitly change it here. Pause it first.
-                </p>
-                <div className="control-row">
-                  <select
-                    aria-label="Project connection"
-                    value={connection}
-                    onChange={(e) => {
-                      const provider = e.target.value as typeof connection;
-                      setConnection(provider);
-                      if (provider !== 'codex' && project.workflow !== 'software')
-                        setProjectTools(false);
-                      setModel(
-                        provider === project.provider
-                          ? project.model || ''
-                          : provider === 'demo' || provider === 'external'
-                            ? ''
-                            : data.runtime.models[provider],
-                      );
-                    }}
-                  >
-                    {Object.entries(PROVIDER_LABELS)
-                      .filter(([id]) => id !== 'demo' || connection === 'demo')
-                      .map(([id, label]) => (
-                        <option
-                          key={id}
-                          value={id}
-                          disabled={!data.runtime.available[id as typeof connection]}
-                        >
-                          {id === 'demo' ? 'Saved simulation · choose a real model' : label}
-                        </option>
-                      ))}
-                  </select>
-                  <button
-                    className="button secondary"
-                    disabled={busy}
-                    onClick={() =>
-                      act(
-                        () =>
-                          api(`/projects/${project.id}/runtime`, {
-                            provider: connection,
-                            model,
-                            workMode: projectTools ? 'workspace' : 'text',
-                          }),
-                        'Project connection and model updated; saved work retained.',
-                      )
-                    }
-                  >
-                    Set project connection
-                  </button>
-                </div>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    aria-label="Enable managed project tools"
-                    checked={projectTools}
-                    disabled={project.workflow === 'software' || connection !== 'codex'}
-                    onChange={(e) => setProjectTools(e.target.checked)}
-                  />
-                  Enable managed project tools (Codex file editing and commands)
-                </label>
-                <p className="field-hint">
-                  Available to any team using Codex. Files stay in this project’s managed folder;
-                  all roles share it. Tool access requires the coding sandbox check to pass.
-                  Dependency-download network access is a separate option in Edit plan. Text
-                  connections cannot edit or test files.{' '}
-                  {projectTools ? data.runtime.coding?.message : ''}
-                </p>
-                {connection !== 'demo' && connection !== 'external' && (
-                  <label>
-                    Project model ID
-                    <input
-                      aria-label="Project model ID"
-                      value={model}
-                      maxLength={150}
-                      list="project-model-ids"
-                      onChange={(e) => setModel(e.target.value)}
-                      placeholder={data.runtime.models[connection]}
-                    />
-                    <datalist id="project-model-ids">
-                      {[
-                        ...new Set(
-                          [
-                            data.runtime.models[connection],
-                            ...(data.runtime.listedModels?.[
-                              connection as 'ollama' | 'compatible'
-                            ] || []),
-                            ...data.state.projects
-                              .filter((p) => p.provider === connection)
-                              .map((p) => p.model),
-                          ].filter(Boolean),
-                        ),
-                      ].map((id) => (
-                        <option key={id} value={id} />
-                      ))}
-                    </datalist>
-                    <span className="field-hint">
-                      Use the exact ID available to your account or local server. For Codex, run the
-                      bundled Codex CLI and use /model to see your choices. Saving does not make a
-                      generation request or verify access. Paid API pricing must match this ID.
-                    </span>
-                  </label>
-                )}
-                <p>
-                  Current project: {PROVIDER_LABELS[project.provider]}
-                  {project.model ? ` · ${project.model}` : ''}. External workers have their own
-                  tools and billing; Workroom cannot meter their internal calls.
-                </p>
-              </section>
-            )}
+            {selectedProject && <ProjectModelSelector data={data} project={project} />}
             <form
               onSubmit={(e: FormEvent) => {
                 e.preventDefault();
@@ -254,14 +138,13 @@ export default function WorkspaceControls({
                 {fields.map(([name, label, min, max]) => (
                   <label key={name}>
                     {label}
-                    <input
-                      type="number"
+                    <NumberField
                       min={min}
                       max={max}
                       step={name.endsWith('Usd') ? '0.01' : '1'}
                       value={draft[name] as number}
                       required
-                      onChange={(e) => setDraft({ ...draft, [name]: Number(e.target.value) })}
+                      onValue={(value) => setDraft({ ...draft, [name]: value })}
                     />
                   </label>
                 ))}
@@ -318,27 +201,19 @@ export default function WorkspaceControls({
                       {(['inputPerMillion', 'outputPerMillion'] as const).map((name) => (
                         <label key={name}>
                           {name === 'inputPerMillion' ? 'Input price' : 'Output price'}
-                          <input
+                          <NumberField
                             aria-label={`${provider} ${name}`}
-                            type="number"
                             min="0"
                             max="1000"
                             step="any"
                             required
-                            value={
-                              Number.isFinite(draft.rates[provider]![name])
-                                ? draft.rates[provider]![name]
-                                : ''
-                            }
-                            onChange={(e) =>
+                            value={draft.rates[provider]![name]}
+                            onValue={(value) =>
                               setDraft({
                                 ...draft,
                                 rates: {
                                   ...draft.rates,
-                                  [provider]: {
-                                    ...draft.rates[provider]!,
-                                    [name]: e.target.value === '' ? NaN : Number(e.target.value),
-                                  },
+                                  [provider]: { ...draft.rates[provider]!, [name]: value },
                                 },
                               })
                             }

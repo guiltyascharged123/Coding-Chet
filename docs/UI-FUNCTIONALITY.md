@@ -13,11 +13,16 @@ The main flow is **connect model → describe goal → review plan → run → i
 | Task board / task card            | Assignments, dependencies, actual results, checks, failures, saved rejected replies and retry.                                                                  |
 | Outputs / View results            | Read and export deliverables; source files appear only when the project has a managed folder.                                                                   |
 | Your team / profile               | Edit project-specific role instructions and desk assignment; inspect role procedures.                                                                           |
+| Office & specialists              | Choose a 4-, 8- or 12-desk space and assign any of 20 specialist profiles before model planning; inspect the shared template and each specialist's method.      |
+| Project conversation              | Save project-scoped direction or request a real specialist reply, including while the main task plan remains paused.                                            |
+| Idea board                        | Save source-linked proposals, choose or reject approaches, and request an actual specialist investigation. The 3D board opens this same saved board.            |
 | Team discussions                  | Start/read actual model-backed meetings; retry unfinished contributions or explicitly skip a failed meeting.                                                    |
 | Activity                          | Saved engine events, decisions, model-result summaries and errors. No timer-generated motivation in normal work.                                                |
 | Live console                      | Observe public requests, replies and tool receipts; filter, reconnect and export bounded retained logs.                                                         |
 | Model → Change                    | Change the existing project's provider/model and optional Codex tools after pausing.                                                                            |
 | Model connections                 | Check readiness, choose a default for future projects, and open a working setup guide for each provider. Unconfigured providers retain accessible instructions. |
+| Selected project model            | Show the current project's exact provider and model ID. Explicitly apply a new choice without changing the default for future projects.                         |
+| Restart project                   | Stop the old run, create fresh assignments or replan, and retain the previous run's results and files. Rolling usage limits remain in force.                    |
 | Workspace controls                | Limits, usage, project memory/instructions, and backup/restore. Backup import is also available before the first project.                                       |
 | Models & sign-in                  | Open Connections to check actual readiness, sign in or reconnect, and edit saved provider settings.                                                             |
 | Notification bell                 | Open pending review or request browser notification permission; report unsupported/denied permission.                                                           |
@@ -32,7 +37,7 @@ The main flow is **connect model → describe goal → review plan → run → i
 - Replaced promotional headings and activity filler with screen names and factual runtime states. Removed the decorative account avatar and redundant sidebar project promotion.
 - Completed projects now have a **View results** action instead of an inert disabled completion button.
 - AI planning remains the default. The manual option and planning-failure recovery start with zero tasks, rather than inserting generic document stages. Existing saved plans are preserved.
-- Codex-only creation options are shown only for Codex. Software workflows explain their Codex tool requirement. Automatic meetings default off to avoid five-call rituals without a user-selected purpose.
+- Codex-only creation options are shown only for Codex. Software workflows explain their Codex tool requirement. Automatic meetings default off; a full meeting normally uses one request per participant plus one chair summary.
 - Provider setup remains clickable when a connection is unavailable. A failed provider change cannot leave the connection dialog permanently busy.
 - Missing approval records no longer crash task-card navigation. A card can still open the task's saved details.
 - The example external worker now calls a real model or fails. Missing API keys do not yield sample success text.

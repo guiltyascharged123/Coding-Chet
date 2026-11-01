@@ -140,6 +140,16 @@ const modelServer = createServer(async (req, res) => {
         },
       ],
     };
+    if (input.task.description?.includes('Propose up to three'))
+      result.ideas = [
+        {
+          title: 'Measure a recurring workflow problem',
+          proposal:
+            'Compare a supplied recurring report against a small automation prototype before assuming demand.',
+          rationale: 'This is a hypothesis; customer demand and time savings are unverified.',
+          nextStep: 'Use one supplied example to define a measurable validation check.',
+        },
+      ];
     if (input.project.title.includes('Response recovery fixture') && !input.task.revisionFeedback)
       result.checks[0].evidence = '';
     res.end(

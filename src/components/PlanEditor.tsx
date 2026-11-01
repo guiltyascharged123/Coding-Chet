@@ -4,6 +4,7 @@ import { api } from '../api';
 import Modal from './Modal';
 import { useSavedDraft } from '../drafts';
 import { hasProjectTools } from '../../shared/capabilities';
+import NumberField from './NumberField';
 
 export default function PlanEditor({
   project,
@@ -25,6 +26,8 @@ export default function PlanEditor({
       meetings: !!project.meetingPolicy?.enabled,
       researchEnabled: !!project.researchEnabled,
       cadence: project.meetingPolicy?.everyTasks || 3,
+      exploration: project.exploration || 'focused',
+      timeout: project.requestTimeoutSeconds || 900,
     },
   );
   const { rows, network, effort, meetings, cadence } = draft;
@@ -50,6 +53,8 @@ export default function PlanEditor({
           toolNetwork: network,
           collaboration: {
             researchEnabled: draft.researchEnabled,
+            exploration: draft.exploration || 'focused',
+            requestTimeoutSeconds: draft.timeout === undefined ? 900 : draft.timeout,
             reasoningEffort: effort,
             meetingPolicy: { enabled: meetings, everyTasks: cadence },
           },
@@ -77,7 +82,41 @@ export default function PlanEditor({
           tasks to extend a project. Changes take effect when you save.
         </p>
         <fieldset className="plan-row">
-          <legend>Meeting settings</legend>
+          <legend>Team workflow</legend>
+          <label>
+            Working style
+            <select
+              aria-label="Working style"
+              value={draft.exploration || 'focused'}
+              onChange={(e) =>
+                saveDraft({ ...draft, exploration: e.target.value as 'focused' | 'expansive' })
+              }
+            >
+              <option value="focused">Focused delivery</option>
+              <option value="expansive">Creative exploration</option>
+            </select>
+            <span className="field-hint">
+              Broader exploration and autonomous internal work; file access, network, spending
+              controls and provider rules are configured separately.
+            </span>
+          </label>
+          <label>
+            Request timeout (seconds)
+            <NumberField
+              aria-label="Request timeout (seconds)"
+              value={draft.timeout === undefined ? 900 : draft.timeout}
+              min={60}
+              max={3600}
+              required
+              step={1}
+              onValue={(timeout) => saveDraft({ ...draft, timeout })}
+            />
+            <span className="field-hint">
+              Each text/model request can run for this long. Local CPU inference may need several
+              minutes. Coding jobs have a separate 15-minute limit.
+            </span>
+          </label>
+
           {project.provider === 'codex' && (
             <>
               <label>
@@ -117,19 +156,19 @@ export default function PlanEditor({
           </label>
           <label>
             Completed tasks between meetings
-            <input
+            <NumberField
               aria-label="Completed tasks between meetings"
-              type="number"
               min={1}
               max={20}
               value={cadence}
-              onChange={(e) => setCadence(Number(e.target.value))}
+              onValue={setCadence}
             />
           </label>
           <p className="field-hint">
-            Kickoff, then progress checkpoints when more work is ready. A normal meeting adds five
-            model requests; malformed replies can add one correction per turn. Existing limits
-            apply; completed contributions survive retries. Settings save with this plan.
+            Kickoff, then progress checkpoints when more work is ready. A meeting adds one model
+            request per teammate plus one chair summary; malformed replies can add one correction
+            per turn. Existing limits apply; completed contributions survive retries. Settings save
+            with this plan.
           </p>
         </fieldset>
         {rows.map((t, i) => {

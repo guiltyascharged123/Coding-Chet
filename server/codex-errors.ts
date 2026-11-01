@@ -19,7 +19,7 @@ const messages = {
   CODEX_INSTALL:
     'The Codex executable could not start. Run npm run local to prepare dependencies and check any WORKROOM_CODEX_BIN override.',
   CODEX_TIMEOUT:
-    'The Codex job reached its time limit (text: five minutes; software: 15 minutes). Review Usage before retrying; allowance may already have been consumed.',
+    'The Codex job reached its request time limit. Text-job timeout is configurable in Edit plan; software jobs have a 15-minute limit. Review Usage before retrying; allowance may already have been consumed.',
   CODEX_CANCELLED:
     'The Codex job was cancelled. Review Usage before retrying; allowance may already have been consumed.',
   CODEX_TOOL_BLOCKED:

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Meeting, Project } from '../../shared/types';
@@ -11,12 +11,17 @@ export default function Collaboration({
   meetings,
   onSettings,
   onUsage,
+  focusId,
 }: {
   project: Project;
   meetings: Meeting[];
   onSettings: () => void;
   onUsage: () => void;
+  focusId?: string;
 }) {
+  useEffect(() => {
+    if (focusId) document.getElementById(`meeting-${focusId}`)?.scrollIntoView({ block: 'start' });
+  }, [focusId]);
   const [agenda, setAgenda, clearAgenda, draftError] = useSavedDraft(
     `workroom-agenda-${project.id}`,
     'Compare approaches to the project goal, challenge weak assumptions, and agree the next useful actions.',
@@ -50,7 +55,7 @@ export default function Collaboration({
       <p className="field-hint">
         {project.provider === 'demo'
           ? 'Demo meetings are labeled simulations; no AI is called.'
-          : 'A normal meeting uses five model requests; malformed replies can add one correction per turn. Existing limits apply. Contributions are generated one at a time.'}{' '}
+          : `This team normally uses ${(project.team?.length || 4) + 1} model requests per meeting; malformed replies can add one correction per turn. Existing limits apply. Contributions are generated one at a time.`}{' '}
         Automatic meetings:{' '}
         {project.meetingPolicy?.enabled
           ? `kickoff and after every ${project.meetingPolicy.everyTasks} completed tasks`
@@ -109,7 +114,7 @@ export default function Collaboration({
         </div>
       )}
       {[...meetings].reverse().map((meeting) => (
-        <article className="meeting-record" key={meeting.id}>
+        <article id={`meeting-${meeting.id}`} className="meeting-record" key={meeting.id}>
           <header>
             <div>
               <span className="eyebrow">

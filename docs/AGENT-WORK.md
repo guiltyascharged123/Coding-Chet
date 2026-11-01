@@ -8,7 +8,7 @@ In **Workspace**, **Team at work** shows each agent's assignment and observed re
 
 Characters walk at a faster pace. Active agents read at their monitors and type when public replies or tool activity arrive. A saved dependency transfer sends its author to the receiving teammate's desk, with a labeled connection; clicking the connection opens the source task. These movements illustrate recorded work. Walking does not itself trigger another model request, delay task execution or create a conversation.
 
-Explicit model-backed meetings gather the team in the meeting room. Only the current contributor speaks; saved contributions and the chair's decision guide later tasks. Start one from **Team discussions**, or explicitly enable automatic meetings in the plan. A normal meeting uses five requests, so automatic meetings stay off by default. Pausing office movement pauses animation while work continues.
+Explicit model-backed meetings gather the team in the meeting room. Only the current contributor speaks; saved contributions and the chair's decision guide later tasks. Start one from **Team discussions**, or explicitly enable automatic meetings in the plan. A full meeting uses one request per participant plus a chair summary (5, 9 or 13 requests for 4, 8 or 12 teammates), so automatic meetings stay off by default. Pausing office movement pauses animation while work continues.
 
 ## Roles and collaboration
 
@@ -29,3 +29,5 @@ Existing failed assignments and earlier outputs stay saved. After updating Workr
 Choose **Venture & opportunity validation** for a new project, or edit the roles and plan of an existing one. Give the team a financial goal and any real constraints you want it to respect. It should compare distinct routes, challenge the strongest option, check delivery and acquisition costs, and produce the smallest useful experiment with measurable success and stop conditions. Unknown resources remain assumptions. Documents should advance that experiment rather than serve as proof of progress.
 
 A text-only connection can analyze supplied material and create requested assets. Codex public research requires the project's research option; actual coding requires its managed-workspace tools. Connection instructions are in [CONNECTIONS.md](CONNECTIONS.md). A 3D office is a visualization, not a browser, payment system or business account. Outreach, deployment, transactions and revenue cannot be treated as accomplished without the necessary authorized tools and evidence. Workroom does not have a general-purpose external-action integration for those activities.
+
+For model selection, office/team configuration, role templates, conversation, functional board, creative exploration and fresh restarts, see [TEAMS-AND-WORKFLOW.md](TEAMS-AND-WORKFLOW.md).

@@ -287,3 +287,5 @@ Activity keeps older events: use **Load older activity**. This does not consume 
 If terminal Codex login succeeded but Workroom still says sign-in is pending, use **Models & sign-in → Codex → Check status**. **Reset sign-in** cancels the pending attempt and reloads its form without signing you out. **Reconnect ChatGPT** starts a fresh browser login. The CLI status panel shows the checked result.
 
 For role procedures, real-time office behavior, saved-result handoffs and source-reading failures, see [How agents work](AGENT-WORK.md).
+
+For the current model selector, 4/8/12-person offices, specialist templates, conversation, idea board and restarting a saved project, see [Teams and workflow](TEAMS-AND-WORKFLOW.md).

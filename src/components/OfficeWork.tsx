@@ -1,6 +1,20 @@
 import { ArrowRight, TerminalSquare } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { Agent, Task } from '../../shared/types';
 import type { OfficeWork as Work } from '../office/work';
+function Elapsed({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  return (
+    <small className="work-elapsed">
+      Assignment elapsed {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
+    </small>
+  );
+}
 
 export default function OfficeWork({
   agents,
@@ -44,6 +58,9 @@ export default function OfficeWork({
                 <span>{agent.role}</span>
               </div>
               <b>{current.label}</b>
+              {current.active && current.task?.startedAt && (
+                <Elapsed startedAt={current.task.startedAt} />
+              )}
               {current.task ? (
                 <button className="office-work-task" onClick={() => onTask(current.task!)}>
                   {current.task.title}

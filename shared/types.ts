@@ -1,5 +1,6 @@
 import type { Observation } from './verification.js';
 import type { WorkResult } from './work.js';
+import type { ProjectIdea } from './ideas.js';
 export type Provider =
   'demo' | 'openai' | 'gemini' | 'external' | 'codex' | 'ollama' | 'compatible';
 export type ProjectStatus = 'ready' | 'running' | 'paused' | 'needs_input' | 'completed';
@@ -49,6 +50,9 @@ export interface Task {
   dependencies: string[];
   status: TaskStatus;
   requiresApproval: boolean;
+  conversationMessageId?: string;
+  conversationPending?: boolean;
+  requestedByTaskId?: string;
   documentKind?: DocumentKind;
   revisions?: number;
   attemptId?: string;
@@ -56,6 +60,7 @@ export interface Task {
   feedback: string;
   error?: string;
   startedAt?: number;
+  lastAttemptStartedAt?: number;
   completedAt?: number;
   leaseId?: string;
   leaseExpiresAt?: number;
@@ -115,6 +120,10 @@ export interface Project {
   meetingPolicy?: { enabled: boolean; everyTasks: number };
   researchEnabled?: boolean;
   instructionHistory?: { id: string; text: string; reason: string; createdAt: number }[];
+  restartedFrom?: string;
+  exploration?: 'focused' | 'expansive';
+  requestTimeoutSeconds?: number;
+  officeCapacity?: 4 | 8 | 12;
 }
 export interface MemoryItem {
   id: string;
@@ -193,6 +202,15 @@ export interface WorkspaceState {
   policy?: CostPolicy;
   memory?: MemoryItem[];
   meetings?: Meeting[];
+  projectMessages?: {
+    id: string;
+    projectId: string;
+    content: string;
+    createdAt: number;
+    responseTaskId?: string;
+    kind?: 'direction' | 'question' | 'idea';
+  }[];
+  ideas?: ProjectIdea[];
 }
 export interface ConnectionInfo {
   state: 'connected' | 'configured' | 'unavailable' | 'disabled';

@@ -217,7 +217,7 @@ test('completed legacy receipts without a response cannot be silently replayed o
     engine = new Engine(store);
     assert.equal(engine.task(task.id).status, 'failed');
     assert.equal(engine.task(task.id).recovery?.hasResponse, false);
-    engine.runProject(project.id);
+    assert.throws(() => engine.runProject(project.id), /saved task needs attention/);
     engine.tick();
     assert.equal(engine.task(task.id).status, 'failed');
     assert.equal(store.attempts().length, 1);
@@ -423,7 +423,7 @@ test('a late reply after cancellation is held for offline recovery and cannot di
     finish({ text: JSON.stringify(result()), inputTokens: 10, outputTokens: 20 });
     await waitUntil(() => !!engine.task('audit-task').recovery?.hasResponse);
     assert.equal(engine.task('audit-task').recovery?.hasResponse, true);
-    engine.runProject(project.id);
+    assert.throws(() => engine.runProject(project.id), /saved task needs attention/);
     engine.tick();
     assert.equal(calls, 1);
     engine.recoverTask('audit-task');

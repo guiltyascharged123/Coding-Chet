@@ -43,6 +43,23 @@ test('office work follows the current attempt, actual tools and saved states wit
   assert.equal(running.label, 'Running command');
   assert.equal(running.animation, 'typing');
   assert.equal(running.detail, '$ npm test');
+  for (const text of [
+    '{"summary":{"invalid":"type"}}',
+    '{"outcome":"retrieve","requests":[]}',
+    '{"summary":"unfinished',
+  ]) {
+    const reply = officeWork(
+      agents[0],
+      project,
+      [task],
+      [entry('reply', 3, { type: 'response', text, status: 'in_progress' })],
+    );
+    assert.ok(
+      !reply.detail.includes('{'),
+      'structured transport should not become dashboard garble',
+    );
+    assert.match(reply.label, /Receiving reply/);
+  }
   const review = officeWork(agents[0], project, [{ ...task, status: 'review' }], [current, tool]);
   assert.equal(review.active, false);
   assert.match(review.label, /your decision/);

@@ -135,9 +135,26 @@ export function officeWork(
     let text = entry.text;
     try {
       const value = JSON.parse(text);
-      text = value.summary || value.proposal || value.decision || value.deliverable || text;
+      text =
+        [value?.summary, value?.proposal, value?.decision, value?.deliverable].find(
+          (field) => typeof field === 'string' && field.trim(),
+        ) ||
+        (value?.outcome === 'retrieve'
+          ? 'The model requested saved source passages; its work is not complete.'
+          : Array.isArray(value?.tasks)
+            ? `Received ${value.tasks.length} proposed assignments; checking the plan.`
+            : 'Structured reply received; checking its work result.');
     } catch {
-      /* Partial public reply. */
+      if (/^\s*\{/.test(text)) {
+        const summary = text.match(/"summary"\s*:\s*("(?:\\.|[^"\\])*")/);
+        try {
+          text = summary
+            ? JSON.parse(summary[1])
+            : 'Receiving a structured reply; its work result has not been checked yet.';
+        } catch {
+          text = 'Receiving a structured reply; its work result has not been checked yet.';
+        }
+      }
     }
     return {
       ...result,

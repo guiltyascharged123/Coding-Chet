@@ -572,7 +572,7 @@ test('connection checks inspect installed model metadata, and local generation h
       }
       const body = JSON.parse(String(options?.body));
       assert.equal(body.options.num_predict, 500);
-      assert.equal(body.stream, false);
+      assert.equal(body.stream, true);
       assert.equal(body.model, 'local-test:3b');
       return Response.json({
         message: { content: '# Local document' },

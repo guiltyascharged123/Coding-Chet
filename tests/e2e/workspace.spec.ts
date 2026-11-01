@@ -686,8 +686,8 @@ test('project model choice, checked outputs and reviewed instruction versions ar
   await page.reload();
   await page.getByRole('button', { name: 'Change project model', exact: true }).click();
   await page.getByLabel('Project model ID', { exact: true }).fill('workroom-browser-model-variant');
-  await page.getByRole('button', { name: 'Set project connection', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('connection and model updated');
+  await page.getByRole('button', { name: 'Use this model for this project', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Project model saved');
   await page.getByRole('tab', { name: 'Team instructions', exact: true }).click();
   await page
     .getByLabel('Current team instructions', { exact: true })

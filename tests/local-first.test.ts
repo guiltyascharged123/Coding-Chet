@@ -93,7 +93,7 @@ test('local planning and task handoffs use actual Ollama protocol responses, str
       const request = JSON.parse(String(init?.body));
       assert.equal(request.model, DEFAULT_LOCAL_MODEL);
       assert.equal(request.think, false);
-      assert.equal(request.stream, false);
+      assert.equal(request.stream, true);
       assert.equal(typeof request.format, 'object');
       const input = JSON.parse(request.messages[1].content);
       calls++;

@@ -19,6 +19,8 @@ const fields = [
   'contributions',
   'recentWork',
   'requestedSources',
+  'projectConversation',
+  'ideaBoard',
 ];
 const textKeys = ['feedback', 'output', 'decisions', 'content', 'result', 'text'];
 const size = (value: unknown) =>
@@ -66,7 +68,7 @@ export function assembleContext(system: string, data: Data, limit: number) {
       i,
       priority: source.id.startsWith('requested:')
         ? 0
-        : source.id.startsWith('approval:')
+        : source.id.startsWith('approval:') || source.id.startsWith('message:')
           ? 1
           : source.id.startsWith('memory:')
             ? 2

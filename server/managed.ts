@@ -310,45 +310,122 @@ export async function localGenerate(
   signal?: AbortSignal,
   json = false,
   outputSchema?: Record<string, unknown>,
+  progress?: { onTrace?: (event: ConsoleEvent) => void; timeoutSeconds?: number },
 ): Promise<Generated> {
+  const seconds = progress?.timeoutSeconds || 900;
+  const timeout = AbortSignal.timeout(seconds * 1000);
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const url = serviceUrl(process.env.OLLAMA_URL || 'http://127.0.0.1:11434', true);
-  const response = await fetch(new URL('/api/chat', url), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(300000)])
-      : AbortSignal.timeout(300000),
-    body: JSON.stringify({
-      model,
-      stream: false,
-      think: false,
-      keep_alive: '2m',
-      ...(json ? { format: outputSchema || 'json' } : {}),
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      options: { num_predict: maxTokens, num_ctx: 8192 },
-    }),
-  });
-  if (!response.ok)
-    throw new Error(
-      `Ollama returned HTTP ${response.status}. Check the selected model and available RAM.`,
-    );
-  const data = (await response.json()) as {
-    message?: { content: string };
-    prompt_eval_count?: number;
-    eval_count?: number;
-    done_reason?: string;
-  };
-  if (!data.message?.content?.trim() && data.done_reason !== 'length')
-    throw new Error('The local model returned no document.');
-  return {
-    text: data.message?.content || '',
-    inputTokens: data.prompt_eval_count,
-    outputTokens: data.eval_count,
-    ...(data.done_reason === 'length' ? { outputLimitReached: true } : {}),
-  };
+  let text = '',
+    final: {
+      prompt_eval_count?: number;
+      eval_count?: number;
+      done_reason?: string;
+      done?: boolean;
+    } = {};
+  let last = 0;
+  try {
+    const response = await fetch(new URL('/api/chat', url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: combined,
+      body: JSON.stringify({
+        model,
+        stream: true,
+        think: false,
+        keep_alive: '2m',
+        ...(json ? { format: outputSchema || 'json' } : {}),
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        options: { num_predict: maxTokens, num_ctx: localContextTokens(system, user, maxTokens) },
+      }),
+    });
+    if (!response.ok)
+      throw new Error(
+        `Ollama returned HTTP ${response.status}. Check the selected model and available RAM.`,
+      );
+    const receive = (data: { message?: { content?: string }; error?: string } & typeof final) => {
+      if (data.error)
+        throw new Error(
+          'Ollama reported a generation error. Check its terminal output and available memory.',
+        );
+      if (typeof data.message?.content === 'string') text += data.message.content;
+      if (text.length > 200000)
+        throw new Error(
+          'The local reply exceeded the result size limit. The partial public reply is in Live output. Reduce the output limit before retrying.',
+        );
+      final = { ...final, ...data };
+      if (text && (data.done || Date.now() - last > 200)) {
+        last = Date.now();
+        progress?.onTrace?.({
+          id: 'result',
+          type: 'response',
+          text,
+          status: data.done ? 'completed' : 'in_progress',
+        });
+      }
+    };
+    if (response.headers.get('content-type')?.includes('application/json')) {
+      const data = await response.json();
+      receive({ ...data, done: data.done !== false });
+    } else {
+      if (!response.body) throw new Error('Ollama returned an empty response stream.');
+      const reader = response.body.getReader(),
+        decoder = new TextDecoder();
+      let pending = '';
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          pending += decoder.decode(chunk.value, { stream: !chunk.done });
+          if (pending.length > 1000000)
+            throw new Error('Ollama returned an oversized stream item.');
+          const lines = pending.split('\n');
+          pending = lines.pop() || '';
+          for (const line of lines) if (line.trim()) receive(JSON.parse(line));
+          if (chunk.done) {
+            if (pending.trim()) receive(JSON.parse(pending));
+            break;
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+      }
+    }
+    if (!final.done)
+      throw new Error(
+        'Ollama disconnected before its completion receipt. The partial public reply is saved in Live output; review before retrying.',
+      );
+    if (!text.trim() && final.done_reason !== 'length')
+      throw new Error('The local model returned no work result.');
+    return {
+      text,
+      inputTokens: final.prompt_eval_count,
+      outputTokens: final.eval_count,
+      ...(final.done_reason === 'length' ? { outputLimitReached: true } : {}),
+    };
+  } catch (error) {
+    if (timeout.aborted && !signal?.aborted)
+      throw new Error(
+        `Ollama reached this project's ${seconds}-second request timeout. A CPU-only model can be slow on long reviews. Inspect Live output, shorten the assignment or raise Request timeout in Edit plan, then retry; you can also select Codex on Models & sign-in.`,
+      );
+    if (signal?.aborted)
+      throw new Error('Ollama work was cancelled. The assignment and earlier outputs are saved.');
+    throw error;
+  }
+}
+
+export function localContextTokens(system: string, user: string, maxTokens: number) {
+  // A byte-based estimate, with space for the output and schema. The transport
+  // is also capped before dispatch; actual tokenization depends on the model.
+  return Math.min(
+    32768,
+    Math.max(
+      8192,
+      Math.ceil((Buffer.byteLength(system + user) / 3 + maxTokens + 1024) / 4096) * 4096,
+    ),
+  );
 }
 export function codexWorkerOptions(directory: string): CodexOptions {
   return {
@@ -783,6 +860,7 @@ export async function codexGenerate(
   research?: { enabled: boolean; onTool?: (entry: NonNullable<Task['toolLog']>[number]) => void },
   onTrace?: (event: ConsoleEvent) => void,
   outputSchema?: Record<string, unknown>,
+  timeoutSeconds = 900,
 ): Promise<Generated> {
   if (!managedInfo.codexReady)
     throw new Error(
@@ -792,7 +870,7 @@ export async function codexGenerate(
   const controller = new AbortController();
   const combined = AbortSignal.any([
     controller.signal,
-    AbortSignal.timeout(300000),
+    AbortSignal.timeout(timeoutSeconds * 1000),
     ...(signal ? [signal] : []),
   ]);
   try {

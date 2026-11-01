@@ -15,6 +15,9 @@ import type { Activity, Agent, Task, Meeting } from '../../shared/types';
 import { DESKS, MEETING_SEATS, OfficeSimulation } from '../office/simulation';
 import { placeLabels } from '../office/labels';
 import { DESK_CHAIR, seatedPose } from '../office/pose';
+import { officeLayout, meetingSeats } from '../../shared/office-layout';
+import type { OfficeCapacity } from '../../shared/team';
+import type { ProjectIdea } from '../../shared/ideas';
 import type { OfficeWork } from '../office/work';
 type Props = {
   agents: Agent[];
@@ -22,6 +25,9 @@ type Props = {
   activities: Activity[];
   meeting?: Meeting;
   work: Record<string, OfficeWork>;
+  capacity?: OfficeCapacity;
+  ideas?: ProjectIdea[];
+  onIdeaBoard?: () => void;
   mode: 'orbit' | 'top';
   zoom: number;
   reset: number;
@@ -101,22 +107,29 @@ export default function Office(props: Props) {
   );
 }
 
-function CameraRig({ mode, zoom, reset }: Pick<Props, 'mode' | 'zoom' | 'reset'>) {
+function CameraRig({
+  mode,
+  zoom,
+  reset,
+  capacity = 4,
+}: Pick<Props, 'mode' | 'zoom' | 'reset' | 'capacity'>) {
   const { camera, size } = useThree();
+  const layout = officeLayout(capacity);
   const controls = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   useEffect(() => {
     const position: [number, number, number] = mode === 'top' ? [0, 27, 0.01] : [17, 18, 21];
     camera.position.set(...position);
-    camera.lookAt(0, 0, 0);
-    controls.current?.target.set(0, 0, 0);
+    camera.lookAt(layout.centerX, 0, layout.centerZ);
+    controls.current?.target.set(layout.centerX, 0, layout.centerZ);
     controls.current?.update();
-  }, [camera, mode, reset]);
+  }, [camera, mode, reset, capacity]);
   useEffect(() => {
     if (camera instanceof THREE.OrthographicCamera) {
-      camera.zoom = Math.min(size.width / 24, size.height / 17) * zoom;
+      camera.zoom =
+        Math.min(size.width / (layout.width + 6), size.height / (layout.depth + 4)) * zoom;
       camera.updateProjectionMatrix();
     }
-  }, [camera, size, zoom, mode]);
+  }, [camera, size, zoom, mode, capacity]);
   return (
     <OrbitControls
       ref={controls}
@@ -125,17 +138,21 @@ function CameraRig({ mode, zoom, reset }: Pick<Props, 'mode' | 'zoom' | 'reset'>
       enablePan
       maxPolarAngle={Math.PI / 2.35}
       minPolarAngle={0.12}
-      minZoom={12}
+      minZoom={
+        Math.min(12, size.width / (layout.width + 6), size.height / (layout.depth + 4)) * 0.65
+      }
       maxZoom={95}
       zoomSpeed={0.6}
       rotateSpeed={0.5}
-      target={[0, 0, 0]}
+      target={[layout.centerX, 0, layout.centerZ]}
     />
   );
 }
 
 function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
-  const simulation = useMemo(() => new OfficeSimulation(), []);
+  const capacity = props.capacity || 4,
+    layout = officeLayout(capacity);
+  const simulation = useMemo(() => new OfficeSimulation(capacity), [capacity]);
   useEffect(
     () => simulation.update(props.agents, props.tasks, props.activities, props.meeting),
     [simulation, props.agents, props.tasks, props.activities, props.meeting],
@@ -145,7 +162,7 @@ function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
   }, -1);
   return (
     <>
-      <CameraRig mode={props.mode} zoom={props.zoom} reset={props.reset} />
+      <CameraRig mode={props.mode} zoom={props.zoom} reset={props.reset} capacity={capacity} />
       <ambientLight intensity={0.85} />
       <hemisphereLight args={['#e0e6ed', '#414b51', 1.3]} />
       <directionalLight
@@ -166,36 +183,46 @@ function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
         <meshStandardMaterial color="#303b45" roughness={1} />
       </mesh>
       <RoundedBox
-        args={[17.7, 0.32, 13.5]}
+        args={[layout.width, 0.32, layout.depth]}
         radius={0.2}
-        position={[0, -0.12, 0]}
+        position={[layout.centerX, -0.12, layout.centerZ]}
         receiveShadow
         castShadow
       >
         <meshStandardMaterial color="#434d55" />
       </RoundedBox>
-      <RoundedBox args={[17.45, 0.08, 13.25]} radius={0.1} position={[0, 0.07, 0]} receiveShadow>
+      <RoundedBox
+        args={[layout.width - 0.25, 0.08, layout.depth - 0.25]}
+        radius={0.1}
+        position={[layout.centerX, 0.07, layout.centerZ]}
+        receiveShadow
+      >
         <meshStandardMaterial color="#657079" roughness={0.95} />
       </RoundedBox>
       <gridHelper
-        args={[17.3, 18, '#58646d', '#616e76']}
-        position={[0, 0.115, 0]}
-        scale={[1, 1, 0.76]}
+        args={[layout.width - 0.4, capacity === 4 ? 18 : 30, '#58646d', '#616e76']}
+        position={[layout.centerX, 0.115, layout.centerZ]}
+        scale={[1, 1, layout.depth / layout.width]}
       />
-      <Room />
+      <Room capacity={capacity} ideas={props.ideas || []} onIdeaBoard={props.onIdeaBoard} />
+      {DESKS.slice(0, capacity).map((position, desk) => {
+        const occupant = props.agents.find((agent) => agent.desk === desk);
+        return (
+          <group key={`desk-${desk}`} position={position}>
+            <Desk
+              color={occupant?.color || '#63727d'}
+              active={!!occupant && !!props.work[occupant.id]?.active}
+              moving={props.moving}
+            />
+          </group>
+        );
+      })}
       {props.agents.map((agent) => {
         const task = props.tasks.find(
           (t) => t.agentId === agent.id && (t.status === 'working' || t.status === 'review'),
         );
         return (
           <group key={agent.id}>
-            <group position={DESKS[agent.desk]}>
-              <Desk
-                color={agent.color}
-                active={!!props.work[agent.id]?.active}
-                moving={props.moving}
-              />
-            </group>
             <AgentFigure
               agent={agent}
               work={props.work[agent.id]}
@@ -214,7 +241,7 @@ function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
           </group>
         );
       })}
-      <MeetingTable />
+      <MeetingTable capacity={capacity} />
       <HandoffLink
         simulation={simulation}
         agents={props.agents}
@@ -222,12 +249,14 @@ function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
         labelPortal={props.labelPortal}
         onTask={props.onTaskClick}
       />
-      <MeetingRoom active={!!props.meeting} />
+      <MeetingRoom active={!!props.meeting} capacity={capacity} />
       <Plant position={[-7.5, 0, -5.3]} scale={1.2} />
       <Plant position={[7.6, 0, -5.2]} scale={1.1} />
       <Plant position={[-7.6, 0, 5.3]} scale={0.8} />
       <Plant position={[7.3, 0, 5.4]} scale={0.75} />
-      <Bookcase />
+      <group position={[0, 0, layout.backZ + 6.55]}>
+        <Bookcase />
+      </group>
       <OfficeEquipment />
       <LabelLayout simulation={simulation} agents={props.agents} portal={props.labelPortal} />
       {[
@@ -235,7 +264,10 @@ function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
           position: [0, 2.4, 0.65] as [number, number, number],
           label: props.meeting ? 'TEAM MEETING · LIVE' : 'MEETING ROOM',
         },
-        { position: [3.5, 3.7, -6.1] as [number, number, number], label: 'PLANNING WALL' },
+        {
+          position: [3.5, 3.7, layout.backZ + 0.45] as [number, number, number],
+          label: 'IDEA BOARD',
+        },
         { position: [7.5, 2.2, 0.3] as [number, number, number], label: 'COFFEE' },
       ].map((zone) => (
         <Html
@@ -243,9 +275,19 @@ function Scene(props: Props & { labelPortal: RefObject<HTMLDivElement> }) {
           portal={props.labelPortal}
           position={zone.position}
           center
-          zIndexRange={[1, 0]}
+          zIndexRange={zone.label === 'IDEA BOARD' ? [14, 13] : [1, 0]}
         >
-          <span className="scene-zone-label">{zone.label}</span>
+          {zone.label === 'IDEA BOARD' ? (
+            <button
+              className="scene-board-label"
+              onClick={props.onIdeaBoard}
+              aria-label="Open idea board"
+            >
+              Idea board · {(props.ideas || []).length} ideas
+            </button>
+          ) : (
+            <span className="scene-zone-label">{zone.label}</span>
+          )}
         </Html>
       ))}
     </>
@@ -323,12 +365,21 @@ function LabelLayout({
   return null;
 }
 
-function Room() {
+function Room({
+  capacity,
+  ideas,
+  onIdeaBoard,
+}: {
+  capacity: OfficeCapacity;
+  ideas: ProjectIdea[];
+  onIdeaBoard?: () => void;
+}) {
+  const layout = officeLayout(capacity);
   return (
     <>
       <RoundedBox
-        args={[17.5, 3.8, 0.17]}
-        position={[0, 1.95, -6.55]}
+        args={[layout.width - 0.2, 3.8, 0.17]}
+        position={[layout.centerX, 1.95, layout.backZ]}
         radius={0.03}
         castShadow
         receiveShadow
@@ -336,20 +387,20 @@ function Room() {
         <meshStandardMaterial color="#59656e" />
       </RoundedBox>
       <RoundedBox
-        args={[0.17, 3.8, 13.15]}
-        position={[-8.6, 1.95, 0]}
+        args={[0.17, 3.8, layout.depth - 0.35]}
+        position={[layout.centerX - layout.width / 2 + 0.25, 1.95, layout.centerZ]}
         radius={0.03}
         castShadow
         receiveShadow
       >
         <meshStandardMaterial color="#515e68" />
       </RoundedBox>
-      <mesh position={[0, 0.22, -6.4]}>
-        <boxGeometry args={[17.2, 0.13, 0.1]} />
+      <mesh position={[layout.centerX, 0.22, layout.backZ + 0.15]}>
+        <boxGeometry args={[layout.width - 0.5, 0.13, 0.1]} />
         <meshStandardMaterial color="#424f59" />
       </mesh>
       {[-3.9, 1.4].map((z) => (
-        <group key={z} position={[-8.48, 2.35, z]}>
+        <group key={z} position={[layout.centerX - layout.width / 2 + 0.37, 2.35, z]}>
           <mesh>
             <boxGeometry args={[0.12, 2.35, 3.85]} />
             <meshStandardMaterial color="#324752" />
@@ -372,7 +423,13 @@ function Room() {
           </mesh>
         </group>
       ))}
-      <group position={[3.3, 2.25, -6.39]}>
+      <group
+        position={[3.3, 2.25, layout.backZ + 0.16]}
+        onClick={(event) => {
+          event.stopPropagation();
+          onIdeaBoard?.();
+        }}
+      >
         <RoundedBox args={[4.1, 2.18, 0.12]} radius={0.06} castShadow>
           <meshStandardMaterial color="#3b4954" />
         </RoundedBox>
@@ -380,22 +437,33 @@ function Room() {
           <boxGeometry args={[3.91, 1.99, 0.04]} />
           <meshStandardMaterial color="#9caaa9" />
         </mesh>
-        {Array.from({ length: 9 }, (_, i) => (
-          <mesh
-            key={i}
-            position={[-1.3 + (i % 3) * 0.82, 0.46 - Math.floor(i / 3) * 0.51, 0.115]}
-            rotation={[0, 0, ((i % 3) - 1) * 0.04]}
-          >
-            <boxGeometry args={[0.5, 0.33, 0.015]} />
-            <meshStandardMaterial color={['#bd914b', '#528578', '#5285b5'][i % 3]} />
-          </mesh>
-        ))}
+        {ideas
+          .filter((idea) => idea.status !== 'rejected')
+          .slice(-9)
+          .map((idea, i) => (
+            <mesh
+              key={i}
+              position={[-1.3 + (i % 3) * 0.82, 0.46 - Math.floor(i / 3) * 0.51, 0.115]}
+              rotation={[0, 0, ((i % 3) - 1) * 0.04]}
+            >
+              <boxGeometry args={[0.5, 0.33, 0.015]} />
+              <meshStandardMaterial
+                color={
+                  idea.status === 'selected'
+                    ? '#528578'
+                    : idea.status === 'investigating'
+                      ? '#5285b5'
+                      : '#bd914b'
+                }
+              />
+            </mesh>
+          ))}
         <mesh position={[0, -1.13, 0.22]} castShadow>
           <boxGeometry args={[4.2, 0.05, 0.35]} />
           <meshStandardMaterial color="#44545e" />
         </mesh>
       </group>
-      <group position={[-1.5, 2.5, -6.4]}>
+      <group position={[-1.5, 2.5, layout.backZ + 0.15]}>
         <mesh>
           <boxGeometry args={[1.7, 1.7, 0.11]} />
           <meshStandardMaterial color="#344753" />
@@ -413,7 +481,7 @@ function Room() {
           <meshStandardMaterial color="#3e6a65" />
         </mesh>
       </group>
-      <mesh position={[6.5, 2.85, -6.39]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[6.5, 2.85, layout.backZ + 0.16]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.44, 0.44, 0.08, 40]} />
         <meshStandardMaterial color="#8e9b9f" />
       </mesh>
@@ -702,7 +770,10 @@ function AgentFigure({
     if (leftArm.current)
       leftArm.current.rotation.x = walking
         ? -stride * 0.5
-        : interacting && (action === 'handoff' || status === 'speaking')
+        : interacting &&
+            (action === 'handoff' ||
+              status === 'speaking' ||
+              (action === 'whiteboard' && work?.active && work.animation === 'typing'))
           ? -1.1 + (moving ? Math.sin(clock.elapsedTime * 2.5) * 0.15 : 0)
           : typing
             ? -1.35 + (moving ? Math.sin(clock.elapsedTime * 12 + 1) * 0.1 : 0)
@@ -744,27 +815,31 @@ function AgentFigure({
       label.current.dataset.bodyZ = (person.z + body.current.position.z).toFixed(2);
       const text = !moving
         ? `${work?.label || 'At desk'} · motion paused`
-        : walking
-          ? `To ${person.goal.label}`
-          : action === 'meeting'
-            ? status === 'speaking'
-              ? 'Contributing to the meeting'
-              : 'Listening to the team'
-            : action === 'handoff'
-              ? simulation.encounter?.a === agent.id
-                ? 'Delivering saved work'
-                : 'Receiving saved work'
-              : status === 'review'
-                ? 'Waiting for your review'
-                : action === 'desk'
-                  ? work?.label || 'At desk'
-                  : action === 'coffee'
-                    ? 'Coffee break'
-                    : action === 'whiteboard'
-                      ? 'At the planning wall'
-                      : action === 'printer'
-                        ? 'Collecting documents'
-                        : 'Meeting area';
+        : person.holding
+          ? person.goal.action === 'meeting'
+            ? 'Waiting to enter meeting room'
+            : 'Waiting to leave meeting room'
+          : walking
+            ? `To ${person.goal.label}`
+            : action === 'meeting'
+              ? status === 'speaking'
+                ? 'Contributing to the meeting'
+                : 'Listening to the team'
+              : action === 'handoff'
+                ? simulation.encounter?.a === agent.id
+                  ? 'Delivering saved work'
+                  : 'Receiving saved work'
+                : status === 'review'
+                  ? 'Waiting for your review'
+                  : action === 'desk'
+                    ? work?.label || 'At desk'
+                    : action === 'coffee'
+                      ? 'Coffee break'
+                      : action === 'whiteboard'
+                        ? 'At the planning wall'
+                        : action === 'printer'
+                          ? 'Collecting documents'
+                          : 'Meeting area';
       if (actionLabel.current && actionLabel.current.textContent !== text)
         actionLabel.current.textContent = text;
     }
@@ -929,23 +1004,30 @@ function Plant({ position, scale = 1 }: { position: [number, number, number]; sc
   );
 }
 
-function MeetingRoom({ active }: { active: boolean }) {
+function MeetingRoom({ active, capacity }: { active: boolean; capacity: OfficeCapacity }) {
+  const layout = officeLayout(capacity),
+    length = layout.roomHalfZ * 2;
   return (
     <group>
-      <RoundedBox args={[3.9, 0.025, 4.8]} radius={0.08} position={[0, 0.13, 2.7]} receiveShadow>
+      <RoundedBox
+        args={[3.9, 0.025, length + 0.9]}
+        radius={0.08}
+        position={[0, 0.13, layout.roomZ]}
+        receiveShadow
+      >
         <meshStandardMaterial color={active ? '#365e68' : '#425360'} />
       </RoundedBox>
       {[-1.95, 1.95].map((x) => (
-        <group key={x} position={[x, 1.2, 2.65]}>
+        <group key={x} position={[x, 1.2, layout.roomZ]}>
           <mesh>
-            <boxGeometry args={[0.06, 2.1, 3.9]} />
+            <boxGeometry args={[0.06, 2.1, length]} />
             <meshStandardMaterial color="#829da8" transparent opacity={0.16} depthWrite={false} />
           </mesh>
           <mesh position={[0, -0.98, 0]}>
-            <boxGeometry args={[0.1, 0.12, 3.9]} />
+            <boxGeometry args={[0.1, 0.12, length]} />
             <meshStandardMaterial color="#3d515d" />
           </mesh>
-          {[-1.92, 1.92].map((z) => (
+          {[-layout.roomHalfZ + 0.03, layout.roomHalfZ - 0.03].map((z) => (
             <mesh position={[0, 0, z]} key={z}>
               <boxGeometry args={[0.09, 2.2, 0.09]} />
               <meshStandardMaterial color="#728996" />
@@ -965,14 +1047,20 @@ function MeetingRoom({ active }: { active: boolean }) {
   );
 }
 
-function MeetingTable() {
+function MeetingTable({ capacity }: { capacity: OfficeCapacity }) {
+  const layout = officeLayout(capacity);
   return (
-    <group position={[0, 0, 2.65]}>
+    <group position={[0, 0, layout.tableZ]}>
       <mesh position={[0, 0.13, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <circleGeometry args={[1.55, 48]} />
         <meshStandardMaterial color="#405360" />
       </mesh>
-      <mesh position={[0, 1.02, 0]} castShadow receiveShadow>
+      <mesh
+        position={[0, 1.02, 0]}
+        scale={[1, 1, capacity === 12 ? 3 : 1]}
+        castShadow
+        receiveShadow
+      >
         <cylinderGeometry args={[0.8, 0.8, 0.12, 48]} />
         <meshStandardMaterial color="#9c7b58" />
       </mesh>
@@ -987,8 +1075,12 @@ function MeetingTable() {
         <boxGeometry args={[0.45, 0.015, 0.55]} />
         <meshStandardMaterial color="#9caaa9" />
       </mesh>
-      {MEETING_SEATS.map((p, i) => (
-        <group key={i} position={[p.x, 0, p.z - 2.65]} rotation={[0, i < 2 ? Math.PI : 0, 0]}>
+      {meetingSeats(capacity).map((p, i) => (
+        <group
+          key={i}
+          position={[p.x, 0, p.z - layout.tableZ]}
+          rotation={[0, p.facing + Math.PI, 0]}
+        >
           <RoundedBox args={[0.58, 0.13, 0.58]} radius={0.09} position={[0, 0.56, 0]} castShadow>
             <meshStandardMaterial color="#586976" />
           </RoundedBox>
