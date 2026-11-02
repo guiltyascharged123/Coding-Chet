@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { sourceHash, runtimeIdentity, runtimeMatches } from './runtime-identity.mjs';
+import { browserKey, pairedUrl } from './browser-key.mjs';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -106,7 +107,10 @@ try {
     process.env.CODESPACES === 'true' && process.env.CODESPACE_NAME
       ? `https://${process.env.CODESPACE_NAME}-${port}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN || 'app.github.dev'}`
       : '';
-  const displayUrl = forwardedUrl || localUrl;
+  const displayUrl = pairedUrl(
+    forwardedUrl || localUrl,
+    browserKey(process.env.WORKROOM_SETTINGS_ROOT || root),
+  );
   const childEnv = {
     ...process.env,
     PORT: String(port),

@@ -8,10 +8,38 @@ export class ApiError extends Error {
   }
 }
 let session: Promise<string> | undefined;
+let pairingKey = '';
+export class PairingRequired extends Error {}
+export function setBrowserKey(value: string) {
+  pairingKey = value.trim();
+  try {
+    sessionStorage.setItem('workroom-browser-key', pairingKey);
+  } catch {
+    /* The paired cookie still works without browser storage. */
+  }
+  session = undefined;
+}
+try {
+  pairingKey = sessionStorage.getItem('workroom-browser-key') || '';
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  if (fragment.has('workroom-key')) {
+    setBrowserKey(fragment.get('workroom-key') || '');
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+} catch {
+  /* Browser storage can be unavailable. */
+}
 function browserToken(refresh = false) {
   if (refresh) session = undefined;
-  return (session ||= fetch('/api/session', { cache: 'no-store' })
+  return (session ||= fetch('/api/session', {
+    cache: 'no-store',
+    headers: pairingKey ? { Authorization: `Bearer ${pairingKey}` } : {},
+  })
     .then(async (response) => {
+      if (response.status === 401)
+        throw new PairingRequired(
+          'Connect this browser using the private link in the Workroom terminal.',
+        );
       if (!response.ok)
         throw new Error('The browser session could not connect. Refresh and try again.');
       return (await response.json()).token as string;
@@ -30,10 +58,13 @@ export async function api<T = { ok: boolean }>(
     const token = await browserToken(refresh);
     const response = await fetch(`/api${path}`, {
       method,
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'X-Workroom-CSRF': token },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const data = await response.json();
+    if (response.status === 401 && data.code === 'BROWSER_PAIRING_REQUIRED' && !refresh)
+      return send(true);
     if (response.status === 403 && data.code === 'SESSION_REQUIRED' && !refresh) return send(true);
     if (!response.ok)
       throw new ApiError(data.error || `Request failed (${response.status}).`, data.action);
@@ -42,9 +73,7 @@ export async function api<T = { ok: boolean }>(
   return send();
 }
 export async function getState(): Promise<Bootstrap> {
-  const response = await fetch('/api/state');
-  if (!response.ok) throw new Error('The runtime is unavailable. Start the server and try again.');
-  return response.json();
+  return api<Bootstrap>('/state', undefined, 'GET');
 }
 export function relativeTime(time: number) {
   const secs = Math.max(0, Math.floor((Date.now() - time) / 1000));

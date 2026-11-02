@@ -28,7 +28,22 @@ export function commandKind(command: string): 'verification' | 'inspection' | un
   // Masked failures, pipelines and substitutions cannot establish that the
   // verification itself succeeded from the shell's final exit code.
   if (/[;|\n`]|\$\(/.test(unwrapped)) return undefined;
+  // Exit zero from help, listing or collection is not executed verification.
+  if (
+    /(?:^|\s)(?:--?(?:help|version|collect-only|co|listTests|list-tests|list|showConfig|show-config|print-config|listFiles|listEmittedFiles|show|dry-run)|-h|-V)(?:[=\s]|$)/i.test(
+      unwrapped,
+    )
+  )
+    return undefined;
+  if (/(?:^|\s)(?:--runInBand=false|--passWithNoTests)(?:[=\s]|$)/.test(unwrapped))
+    return undefined;
   const steps = unwrapped.split('&&').map((s) => s.trim());
+  if (
+    /\brg\s+.*--files(?:\s|$)|\bgit\s+(?:diff|show)\s+.*--(?:stat|name-only|name-status|numstat)(?:\s|$)/.test(
+      unwrapped,
+    )
+  )
+    return undefined;
   if (
     steps.some((s) =>
       /^(?:npm|pnpm|yarn)\s+(?:test\b|run\s+(?:test|build|lint|typecheck|check)\b)|^(?:npx\s+)?(?:tsc\b|vitest\b|jest\b|playwright\s+test\b)|^node\s+--test\b|^(?:python[\d.]*\s+-m\s+)?pytest\b|^(?:cargo|go|dotnet)\s+test\b|^python[\d.]*\s+-m\s+unittest\b/.test(
@@ -38,7 +53,11 @@ export function commandKind(command: string): 'verification' | 'inspection' | un
   )
     return 'verification';
   if (
-    steps.some((s) => /^(?:cat|head|tail|sed|rg|grep|find)\s+\S|^git\s+(?:diff|show|log)\b/.test(s))
+    steps.some((s) =>
+      /^(?:cat|head|tail|sed|rg|grep)\s+\S|^git\s+(?:diff|show)\b|^git\s+log\s+.*(?:-p|--patch)\b/.test(
+        s,
+      ),
+    )
   )
     return 'inspection';
   return undefined;
@@ -50,8 +69,17 @@ export function evidenceGaps(
   result?: WorkResult,
 ) {
   const gaps: string[] = [];
-  const has = (kind: Observation['kind']) => observations.some((o) => o.kind === kind);
-  if (!observations.length && task?.workType !== 'plan')
+  const useful = observations.filter((observation) =>
+    observation.kind === 'artifact'
+      ? !/(?:^|[\\/])\.(?:workroom-context|workroom-tmp)(?:[\\/]|$)/.test(observation.reference) &&
+        !/^(?:delete|deleted|remove|removed)$/.test(observation.detail)
+      : commandKind(observation.reference) === observation.kind &&
+        !/(?:\b0\s+(?:tests|passing)\b|\btests\s*[:=]?\s*0\b|no tests (?:found|collected)|collected 0 items)/i.test(
+          observation.detail,
+        ),
+  );
+  const has = (kind: Observation['kind']) => useful.some((o) => o.kind === kind);
+  if (!useful.length && task?.workType !== 'plan')
     gaps.push('No substantive file inspection, file change or verification command was observed.');
   if (task?.workType === 'implementation' && (!has('artifact') || !has('verification')))
     gaps.push(
@@ -67,9 +95,7 @@ export function evidenceGaps(
     if (!check || check.status !== 'met') continue;
     if (
       criterion.evidence !== 'report' &&
-      !observations.some(
-        (o) => o.kind === criterion.evidence && check.evidence.includes(o.reference),
-      )
+      !useful.some((o) => o.kind === criterion.evidence && check.evidence.includes(o.reference))
     )
       gaps.push(
         `Acceptance ${criterion.id} must cite an observed ${criterion.evidence} path or exact command in its evidence.`,

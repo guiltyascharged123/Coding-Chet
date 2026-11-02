@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Agent, Project, Task, ReasoningEffort } from '../../shared/types';
-import { api } from '../api';
+import { api, saveBlob } from '../api';
+import type { PlanTask } from '../../shared/plan-definition';
 import Modal from './Modal';
 import { useSavedDraft } from '../drafts';
 import { hasProjectTools } from '../../shared/capabilities';
@@ -21,6 +22,8 @@ export default function PlanEditor({
     `workroom-plan-draft-${project.id}`,
     {
       rows: structuredClone(tasks),
+      revision: project.planRevision || 0,
+      settingsRevision: project.settingsRevision || 0,
       network: !!project.toolNetwork,
       effort: project.reasoningEffort || ('medium' as ReasoningEffort),
       meetings: !!project.meetingPolicy?.enabled,
@@ -28,6 +31,7 @@ export default function PlanEditor({
       cadence: project.meetingPolicy?.everyTasks || 3,
       exploration: project.exploration || 'focused',
       timeout: project.requestTimeoutSeconds || 900,
+      deliveryMode: project.deliveryMode || 'build',
     },
   );
   const { rows, network, effort, meetings, cadence } = draft;
@@ -38,20 +42,55 @@ export default function PlanEditor({
   const setMeetings = (meetings: boolean) => saveDraft({ ...draft, meetings });
   const setCadence = (cadence: number) => saveDraft({ ...draft, cadence });
   const [error, setError] = useState('');
+  const [versions, setVersions] = useState<
+    { revision: number; createdAt: number; tasks: PlanTask[] }[]
+  >([]);
   const [busy, setBusy] = useState(false);
   function change(id: string, values: Partial<Task>) {
     setRows((r) => r.map((t) => (t.id === id ? { ...t, ...values } : t)));
   }
   async function save() {
+    if (draft.revision === undefined || draft.settingsRevision === undefined) {
+      setError(
+        'This draft predates revision tracking. Copy your edits, then reload the saved plan before merging them.',
+      );
+      return;
+    }
     setBusy(true);
     setError('');
     try {
+      if (JSON.stringify(rows) === JSON.stringify(tasks)) {
+        await api(
+          `/projects/${project.id}/collaboration`,
+          {
+            expectedRevision: draft.settingsRevision,
+            toolNetwork: network,
+            researchEnabled: draft.researchEnabled,
+            exploration: draft.exploration || 'focused',
+            requestTimeoutSeconds: draft.timeout === undefined ? 900 : draft.timeout,
+            reasoningEffort: effort,
+            meetingPolicy: { enabled: meetings, everyTasks: cadence },
+            ...(project.workflow === 'software'
+              ? { deliveryMode: draft.deliveryMode || 'build' }
+              : {}),
+          },
+          'PUT',
+        );
+        clearDraft();
+        onClose();
+        return;
+      }
       await api(
         `/projects/${project.id}/plan`,
         {
           tasks: rows,
+          expectedRevision: draft.revision,
+          expectedSettingsRevision: draft.settingsRevision,
           toolNetwork: network,
           collaboration: {
+            ...(project.workflow === 'software'
+              ? { deliveryMode: draft.deliveryMode || 'build' }
+              : {}),
             researchEnabled: draft.researchEnabled,
             exploration: draft.exploration || 'focused',
             requestTimeoutSeconds: draft.timeout === undefined ? 900 : draft.timeout,
@@ -81,8 +120,93 @@ export default function PlanEditor({
           Tasks that have already completed or reached review retain their results. Add follow-up
           tasks to extend a project. Changes take effect when you save.
         </p>
+        <details>
+          <summary>Saved plan versions</summary>
+          <button
+            className="button secondary small"
+            onClick={async () => {
+              try {
+                const page = await api<{ entries: typeof versions }>(
+                  `/projects/${project.id}/plan-history`,
+                  undefined,
+                  'GET',
+                );
+                setVersions(page.entries);
+              } catch (e) {
+                setError((e as Error).message);
+              }
+            }}
+          >
+            Load saved plan versions
+          </button>
+          {versions.map((version) => (
+            <details key={version.revision}>
+              <summary>
+                Version {version.revision} · {new Date(version.createdAt).toLocaleString()} ·{' '}
+                {version.tasks.length} tasks
+              </summary>
+              <ol>
+                {version.tasks.map((task) => (
+                  <li key={task.id}>
+                    <strong>{task.title}</strong>
+                    <p>{task.description}</p>
+                    <small>
+                      Owner: {team.find((agent) => agent.id === task.agentId)?.name || task.agentId}
+                    </small>
+                  </li>
+                ))}
+              </ol>
+              <button
+                className="text-button"
+                onClick={() =>
+                  saveBlob(
+                    `plan-version-${version.revision}.json`,
+                    new Blob([JSON.stringify(version, null, 2)], { type: 'application/json' }),
+                  )
+                }
+              >
+                Download this plan version
+              </button>
+            </details>
+          ))}
+          {!!versions.length && (
+            <button
+              className="text-button"
+              onClick={async () => {
+                try {
+                  const page = await api<{ entries: typeof versions }>(
+                    `/projects/${project.id}/plan-history?before=${versions.at(-1)!.revision}`,
+                    undefined,
+                    'GET',
+                  );
+                  setVersions([...versions, ...page.entries]);
+                  if (!page.entries.length) setError('No earlier saved plan versions.');
+                } catch (e) {
+                  setError((e as Error).message);
+                }
+              }}
+            >
+              Load earlier plan versions
+            </button>
+          )}
+        </details>
         <fieldset className="plan-row">
           <legend>Team workflow</legend>
+          {project.workflow === 'software' && (
+            <label>
+              Software outcome
+              <select
+                aria-label="Software outcome"
+                value={draft.deliveryMode || 'build'}
+                onChange={(event) =>
+                  saveDraft({ ...draft, deliveryMode: event.target.value as 'build' | 'design' })
+                }
+              >
+                <option value="build">Working software</option>
+                <option value="design">Design only</option>
+              </select>
+            </label>
+          )}
           <label>
             Working style
             <select

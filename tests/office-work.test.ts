@@ -115,3 +115,24 @@ test('planning is visible for legacy teams and only the actual meeting contribut
     /Verify behavior/,
   );
 });
+
+test('specialist meetings leave uninvited agents at their actual work instead of pretending they attend', () => {
+  const state = initialState(),
+    project = { ...state.projects[0], team: agents };
+  const meeting = {
+    id: 'subset',
+    projectId: project.id,
+    agenda: 'Review only the relevant comparison',
+    trigger: 'manual' as const,
+    status: 'running' as const,
+    checkpoint: 0,
+    participants: [agents[1], agents[3]],
+    contributions: [],
+    summary: '',
+    speakerId: agents[1].id,
+    createdAt: 1,
+  };
+  assert.equal(officeWork(agents[0], project, [], [], meeting).label, 'Available');
+  assert.equal(officeWork(agents[1], project, [], [], meeting).active, true);
+  assert.match(officeWork(agents[3], project, [], [], meeting).label, /Listening/);
+});

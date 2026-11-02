@@ -8,6 +8,7 @@ import { saveResponseIssue } from './work-results.js';
 
 export type GenerationContext = {
   onIdea?: (idea: import('../shared/ideas.js').IdeaProposal) => void;
+  onMeetingActions?: (actions: { taskId: string; action: string }[]) => void;
   store?: Store;
   project?: Project;
   task?: Task;
@@ -117,23 +118,22 @@ export function reserve(
   meetingId?: string,
 ): Attempt {
   const p = policy(store),
-    all = store.attempts(),
-    recent = all.filter((a) => a.status !== 'cached' && a.createdAt >= Date.now() - 86400000);
+    usage = store.usageSummary(project.id);
   if (inputBytes > p.maxInputBytes)
     throw new Error(
       'Input exceeds the configured context limit. Increase it in Workspace controls or reduce the assignment. No request was sent.',
     );
-  if (recent.length >= p.maxRequests24h)
+  if (usage.requests24h >= p.maxRequests24h)
     throw new Error(
       'The request limit for the last 24 hours has been reached. No request was sent.',
     );
-  if (all.filter((a) => a.status === 'running').length >= p.maxConcurrent)
+  if (usage.running >= p.maxConcurrent)
     throw new Error('Another worker is active. Wait for it to finish.');
-  if (task && all.some((a) => a.taskId === task.id && a.status === 'uncertain'))
+  if (task && store.hasUncertain('task_id', task.id))
     throw new Error(
       'An earlier attempt is uncertain. Acknowledge it in Usage before retrying; it may already have consumed usage.',
     );
-  if (meetingId && all.some((a) => a.meetingId === meetingId && a.status === 'uncertain'))
+  if (meetingId && store.hasUncertain('meeting_id', meetingId))
     throw new Error('Acknowledge uncertain meeting usage in Workspace controls before retrying.');
   let reservedUsd = 0;
   if (
@@ -156,11 +156,8 @@ export function reserve(
       Math.ceil(
         (inputBytes + 4096) * rate.inputPerMillion + p.maxOutputTokens * rate.outputPerMillion,
       ) / 1e6;
-    const value = (a: Attempt) => a.actualUsd ?? a.reservedUsd;
-    const daily = recent.reduce((sum, a) => sum + value(a), 0),
-      projectCost = all
-        .filter((a) => a.projectId === project.id)
-        .reduce((sum, a) => sum + value(a), 0);
+    const daily = usage.cost24h,
+      projectCost = usage.projectCost;
     if (daily + reservedUsd > p.dailyBudgetUsd || projectCost + reservedUsd > p.projectBudgetUsd)
       throw new Error(
         'The next request would exceed the workspace or project budget estimate. No request was sent.',

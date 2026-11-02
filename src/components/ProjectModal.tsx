@@ -20,6 +20,7 @@ type Draft = {
   exploration?: 'focused' | 'expansive';
   officeCapacity?: 4 | 8 | 12;
   members?: Agent[];
+  deliveryMode?: 'build' | 'design';
 };
 const fresh = (): Draft => ({
   title: '',
@@ -108,6 +109,7 @@ export default function ProjectModal({
         team: members,
         documentPack: 'office',
         collaboration: {
+          ...(draft.workflow === 'software' ? { deliveryMode: draft.deliveryMode || 'build' } : {}),
           researchEnabled: !!draft.researchEnabled,
           exploration: draft.exploration || 'focused',
           requestTimeoutSeconds: 900,
@@ -193,6 +195,23 @@ export default function ProjectModal({
           </select>
           <span className="field-hint">{WORKFLOWS[draft.workflow].description}</span>
         </label>
+        {draft.workflow === 'software' && (
+          <label>
+            Software outcome
+            <select
+              aria-label="Software outcome"
+              value={draft.deliveryMode || 'build'}
+              onChange={(event) =>
+                change({ deliveryMode: event.target.value as 'build' | 'design' })
+              }
+            >
+              <option value="build">
+                Working software · implementation, independent review and tests
+              </option>
+              <option value="design">Design only · architecture and implementation plan</option>
+            </select>
+          </label>
+        )}
         <div className="team-preview">
           {WORKFLOWS[draft.workflow].roles.map((role, i) => (
             <span key={role}>

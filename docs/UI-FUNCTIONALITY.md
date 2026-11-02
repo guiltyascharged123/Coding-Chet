@@ -56,3 +56,5 @@ Fixtures establish protocol behavior, not model quality. This development enviro
 ## Observable office work
 
 Workspace now shows live assignment and public tool/reply activity, rather than a generic progress label. Characters open their agent console; task links open saved work. Recorded dependency transfers visit the receiving desk and link to the source result, while actual model-backed meetings use the meeting room. Animation does not create extra model calls. See [AGENT-WORK.md](AGENT-WORK.md) for roles, source retrieval and the limits of autonomous business experiments.
+
+The [November audit repairs](AUDIT-REPAIRS.md) add protected plan/team/settings saves, inspectable plan history, full conversation/idea pagination, active standing directions, filtered usage recovery and private browser pairing. Meetings can select participants and track task-linked actions; software plans distinguish implementation from design-only work.

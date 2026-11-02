@@ -14,8 +14,10 @@ export function workspaceFolder(project: Project) {
   return `${slug}-${createHash('sha256').update(project.id).digest('hex').slice(0, 16)}`;
 }
 export function projectWorkspace(database: string, project: Project) {
-  const folder = workspaceFolder(project);
-  if (project.workspaceFolder && project.workspaceFolder !== folder)
+  const identity = createHash('sha256').update(project.id).digest('hex').slice(0, 16);
+  const folder = project.workspaceFolder || workspaceFolder(project);
+  // The creation slug is immutable; the display title may change later.
+  if (!/^[a-z0-9-]{1,160}$/.test(folder) || !folder.endsWith(`-${identity}`))
     throw new Error('Project folder does not match its identity.');
   const root = resolve(database === ':memory:' ? '.data' : dirname(database), 'projects');
   mkdirSync(root, { recursive: true, mode: 0o700 });

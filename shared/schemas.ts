@@ -49,6 +49,7 @@ export const policySchema = z.object({
 const id = z.string().min(1).max(100),
   text = z.string();
 export const collaborationSchema = z.object({
+  deliveryMode: z.enum(['build', 'design']).optional(),
   reasoningEffort: z.enum(['low', 'medium', 'high']).default('medium'),
   researchEnabled: z.boolean().default(false),
   exploration: z.enum(['focused', 'expansive']).default('focused'),
@@ -91,6 +92,20 @@ export const meetingSchema = z.object({
   error: text.max(4000).optional(),
   createdAt: z.number().finite(),
   completedAt: z.number().finite().optional(),
+  actions: z
+    .array(
+      z.object({
+        id,
+        taskId: id.optional(),
+        agentId: id.optional(),
+        action: text.max(800),
+        criterionId: text.max(40).optional(),
+        status: z.enum(['assigned', 'proposed', 'addressed']),
+        evidence: text.max(600).optional(),
+      }),
+    )
+    .max(4)
+    .optional(),
 });
 export const memorySchema = z.object({
   id,
@@ -117,6 +132,7 @@ export const stateSchema = z
     schemaVersion: z.number().int().optional(),
     provider: providerSchema,
     policy: policySchema.optional(),
+    policyRevision: z.number().int().nonnegative().optional(),
     memory: z.array(memorySchema).max(1000).optional(),
     meetings: z.array(meetingSchema).max(2000).optional(),
     projectMessages: z
@@ -128,11 +144,13 @@ export const stateSchema = z
           createdAt: z.number().finite(),
           responseTaskId: id.optional(),
           kind: z.enum(['direction', 'question', 'idea']).optional(),
+          active: z.boolean().optional(),
+          updatedAt: z.number().finite().optional(),
+          supersedesMessageId: id.optional(),
         }),
       )
-      .max(500)
       .optional(),
-    ideas: z.array(ideaSchema).max(500).optional(),
+    ideas: z.array(ideaSchema).optional(),
     agents: z
       .array(
         z.object({
@@ -180,6 +198,11 @@ export const stateSchema = z
           requestTimeoutSeconds: z.number().int().min(60).max(3600).optional(),
           restartedFrom: id.optional(),
           officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).optional(),
+          planRevision: z.number().int().nonnegative().optional(),
+          teamRevision: z.number().int().nonnegative().optional(),
+          settingsRevision: z.number().int().nonnegative().optional(),
+          instructionRevision: z.number().int().nonnegative().optional(),
+          deliveryMode: z.enum(['build', 'design']).optional(),
           instructionHistory: z
             .array(
               z.object({
@@ -275,6 +298,7 @@ export const stateSchema = z
             })
             .optional(),
           coordinationRounds: z.number().int().min(0).max(20).optional(),
+          dynamicCriteriaIds: z.array(text.max(40)).max(10).optional(),
           contextReport: z
             .object({
               inputBytes: z.number().int().min(0),
@@ -450,6 +474,41 @@ export const backupSchema = z.object({
   state: stateSchema,
   attempts: z.array(attemptSchema).max(50000),
   activityHistory: z.array(activitySchema).optional(),
+  planHistory: z
+    .array(
+      z.object({
+        projectId: id,
+        revision: z.number().int().nonnegative(),
+        createdAt: z.number().finite(),
+        tasks: z
+          .array(
+            z.object({
+              id,
+              title: text.min(1).max(100),
+              description: text.max(4000),
+              agentId: id,
+              dependencies: z.array(id).max(100),
+              requiresApproval: z.boolean(),
+              readOnly: z.boolean().optional(),
+              workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
+              acceptanceCriteria: acceptanceListSchema.optional(),
+              documentKind: z
+                .enum([
+                  'brief',
+                  'project_plan',
+                  'budget',
+                  'risk_register',
+                  'meeting_minutes',
+                  'status_report',
+                  'notes',
+                ])
+                .optional(),
+            }),
+          )
+          .max(100),
+      }),
+    )
+    .optional(),
   attemptResults: z
     .array(
       z.object({

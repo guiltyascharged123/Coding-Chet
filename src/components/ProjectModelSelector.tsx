@@ -17,6 +17,7 @@ export default function ProjectModelSelector({
   const [provider, setProvider] = useState(project.provider);
   const [model, setModel] = useState(project.model || '');
   const [tools, setTools] = useState(hasProjectTools(project));
+  const [revision, setRevision] = useState(project.settingsRevision || 0);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
   const list = useId();
@@ -24,7 +25,8 @@ export default function ProjectModelSelector({
     setProvider(project.provider);
     setModel(project.model || '');
     setTools(hasProjectTools(project));
-  }, [project.id, project.provider, project.model, project.workMode]);
+    setRevision(project.settingsRevision || 0);
+  }, [project.id]);
   const locked =
     !!data.connectionChange ||
     project.status === 'running' ||
@@ -47,11 +49,13 @@ export default function ProjectModelSelector({
     setBusy(true);
     setMessage('');
     try {
-      await api(`/projects/${project.id}/runtime`, {
+      const saved = await api<{ revision: number }>(`/projects/${project.id}/runtime`, {
         provider,
         model,
         workMode: tools && provider === 'codex' ? 'workspace' : 'text',
+        expectedRevision: revision,
       });
+      setRevision(saved.revision);
       const response = await fetch('/api/state');
       if (response.ok) onRefresh?.(await response.json());
       setMessage('Project model saved. Upcoming assignments will use this selection.');
@@ -73,6 +77,20 @@ export default function ProjectModelSelector({
       </p>
       <p>All roles in this project use this selection. Connected models are available choices.</p>
       <form onSubmit={save}>
+        <button
+          type="button"
+          className="text-button"
+          disabled={busy}
+          onClick={() => {
+            setProvider(project.provider);
+            setModel(project.model || '');
+            setTools(hasProjectTools(project));
+            setRevision(project.settingsRevision || 0);
+            setMessage('Saved project model reloaded.');
+          }}
+        >
+          Reload saved project model · discard edits
+        </button>
         <label>
           Project connection
           <select

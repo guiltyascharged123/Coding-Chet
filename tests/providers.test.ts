@@ -4,7 +4,7 @@ import { agents, initialState } from '../server/seed.js';
 import { planProject, runTask } from '../server/providers.js';
 import { result } from './work-fixtures.js';
 
-test('OpenAI planning validates assignments and enforces a downstream human gate', async () => {
+test('OpenAI planning preserves explicit dependency scope and validates assignments', async () => {
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = 'test-only-placeholder';
@@ -45,7 +45,11 @@ test('OpenAI planning validates assignments and enforces a downstream human gate
     }) as typeof fetch;
     const project = { ...initialState().projects[0], provider: 'openai' as const };
     const plan = await planProject(project, agents);
-    assert.ok(plan[2].dependencies.includes(plan[1].id));
+    assert.deepEqual(
+      plan[2].dependencies,
+      [plan[0].id],
+      'an unrelated approval must not invent a dependency',
+    );
     proposed.tasks[2].dependencies = [2];
     await assert.rejects(() => planProject(project, agents), /circular dependency/);
   } finally {

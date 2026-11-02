@@ -60,6 +60,7 @@ function TeamEditor({
   const [draft, save, clear, error] = useSavedDraft(`workroom-team-${project.id}`, {
     capacity: project.officeCapacity || 4,
     members: team,
+    expectedRevision: project.teamRevision || 0,
   });
   const locked = active || project.status === 'running' || project.planningStatus === 'planning';
   return (
@@ -70,6 +71,10 @@ function TeamEditor({
         setBusy(true);
         setMessage('');
         try {
+          if (draft.expectedRevision === undefined)
+            throw new Error(
+              'Copy your edits, then reload the saved team to update this older draft.',
+            );
           await api(`/projects/${project.id}/team`, draft, 'PUT');
           clear();
           onSaved();
@@ -89,7 +94,7 @@ function TeamEditor({
           onChange={(event) => {
             const capacity = Number(event.target.value) as OfficeCapacity;
             const fitting = draft.members.filter((agent) => agent.desk < capacity);
-            save({ capacity, members: expandTeam(fitting, capacity, project.workflow) });
+            save({ ...draft, capacity, members: expandTeam(fitting, capacity, project.workflow) });
           }}
         >
           {OFFICE_CAPACITIES.map((n) => (
@@ -137,6 +142,9 @@ function TeamEditor({
       </div>
       {locked && <p>Pause this project before saving office or role changes.</p>}
       {error && <p role="alert">{error}</p>}
+      <button type="button" className="text-button" disabled={busy} onClick={clear}>
+        Reload saved team · discard draft
+      </button>
       {message && <p role="alert">{message}</p>}
       <button className="button primary" disabled={busy || locked}>
         Save office and team

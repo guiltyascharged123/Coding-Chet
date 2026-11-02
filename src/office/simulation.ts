@@ -281,6 +281,8 @@ export class OfficeSimulation {
     for (const id of this.people.keys())
       if (!agents.some((agent) => agent.id === id)) this.people.delete(id);
     for (const [index, agent] of agents.entries()) {
+      const meetingIndex =
+        activeMeeting?.participants.findIndex((person) => person.id === agent.id) ?? -1;
       let person = this.people.get(agent.id);
       if (!person) {
         const goal = desk(agent);
@@ -317,16 +319,17 @@ export class OfficeSimulation {
           ? station('whiteboard', person.boardSlot || 0, this.capacity)
           : desk(agent);
       const taskKey = task ? `${task.id}:${task.status}` : '';
-      person.status = activeMeeting
-        ? activeMeeting.speakerId === agent.id
-          ? 'speaking'
-          : 'listening'
-        : task?.status;
-      if (activeMeeting) {
+      person.status =
+        activeMeeting && meetingIndex >= 0
+          ? activeMeeting.speakerId === agent.id
+            ? 'speaking'
+            : 'listening'
+          : task?.status;
+      if (activeMeeting && meetingIndex >= 0) {
         person.peer = undefined;
         person.taskKey = taskKey;
         if (changedMeeting || person.goal.action !== 'meeting')
-          this.send(person, station('meeting', index, this.capacity));
+          this.send(person, station('meeting', meetingIndex, this.capacity));
         continue;
       }
       if (changedMeeting) {

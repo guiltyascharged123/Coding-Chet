@@ -1,9 +1,11 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const directory = mkdtempSync(join(tmpdir(), 'workroom-browser-'));
+mkdirSync(join(directory, '.data'));
+writeFileSync(join(directory, '.data', 'browser-access-key'), 'b'.repeat(64), { mode: 0o600 });
 // Offline CLI protocol fixture. It never contacts OpenAI or uses a real login.
 const authFile = join(directory, 'codex-auth-state.json');
 const fakeCodex = join(directory, 'codex-fixture.mjs');
@@ -111,13 +113,20 @@ const modelServer = createServer(async (req, res) => {
       summary: 'Compared the supplied options and checked the arithmetic against the assignment.',
       deliverable:
         '# Cost comparison\n\nOption A costs $20 and option B costs $35. The difference is $15. Demand has not been validated; no external actions occurred.',
-      checks: [
-        {
-          criterion: 'Compare the supplied costs',
-          status: 'met',
-          evidence: '$35 minus $20 equals $15; the result is supplied text, not a transaction.',
-        },
-      ],
+      checks: input.task.acceptanceCriteria?.length
+        ? input.task.acceptanceCriteria.map((c) => ({
+            criterion: `${c.id}: ${c.description}`,
+            status: 'met',
+            evidence:
+              'Fixture supplied cost difference: $35 minus $20 equals $15; assumptions and missing buyer evidence remain explicit.',
+          }))
+        : [
+            {
+              criterion: 'Compare the supplied costs',
+              status: 'met',
+              evidence: '$35 minus $20 equals $15; the result is supplied text, not a transaction.',
+            },
+          ],
       handoff: {
         facts: ['Supplied costs are $20 and $35.'],
         assumptions: ['Demand is unverified.'],

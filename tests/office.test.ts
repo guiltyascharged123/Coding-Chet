@@ -234,3 +234,27 @@ test('all directed handoffs reach the recipient desk promptly without clipping f
       );
     }
 });
+
+test('only invited teammates move into a specialist meeting; everyone returns when it ends', () => {
+  const office = new OfficeSimulation();
+  const meeting = {
+    id: 'subset',
+    projectId: 'project',
+    agenda: 'Review the relevant evidence',
+    trigger: 'manual' as const,
+    status: 'running' as const,
+    checkpoint: 0,
+    participants: [agents[1], agents[3]],
+    contributions: [],
+    summary: '',
+    speakerId: agents[1].id,
+    createdAt: 1,
+  };
+  office.update(agents, [], [], meeting);
+  assert.equal(office.people.get(agents[0].id)!.goal.action, 'desk');
+  assert.equal(office.people.get(agents[2].id)!.goal.action, 'desk');
+  for (const agent of meeting.participants)
+    assert.equal(office.people.get(agent.id)!.goal.action, 'meeting');
+  office.update(agents, [], [], { ...meeting, status: 'completed' });
+  for (const agent of agents) assert.equal(office.people.get(agent.id)!.goal.action, 'desk');
+});

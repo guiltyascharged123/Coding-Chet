@@ -23,6 +23,15 @@ export interface Meeting {
   error?: string;
   createdAt: number;
   completedAt?: number;
+  actions?: {
+    id: string;
+    taskId?: string;
+    agentId?: string;
+    action: string;
+    criterionId?: string;
+    status: 'assigned' | 'proposed' | 'addressed';
+    evidence?: string;
+  }[];
 }
 export type DocumentKind =
   | 'brief'
@@ -83,6 +92,7 @@ export interface Task {
     truncated: boolean;
   };
   coordinationRounds?: number;
+  dynamicCriteriaIds?: string[];
   contextReport?: {
     inputBytes: number;
     originalBytes: number;
@@ -124,6 +134,11 @@ export interface Project {
   exploration?: 'focused' | 'expansive';
   requestTimeoutSeconds?: number;
   officeCapacity?: 4 | 8 | 12;
+  planRevision?: number;
+  teamRevision?: number;
+  settingsRevision?: number;
+  instructionRevision?: number;
+  deliveryMode?: 'build' | 'design';
 }
 export interface MemoryItem {
   id: string;
@@ -200,6 +215,7 @@ export interface WorkspaceState {
   provider: Provider;
   schemaVersion?: number;
   policy?: CostPolicy;
+  policyRevision?: number;
   memory?: MemoryItem[];
   meetings?: Meeting[];
   projectMessages?: {
@@ -209,6 +225,9 @@ export interface WorkspaceState {
     createdAt: number;
     responseTaskId?: string;
     kind?: 'direction' | 'question' | 'idea';
+    active?: boolean;
+    updatedAt?: number;
+    supersedesMessageId?: string;
   }[];
   ideas?: ProjectIdea[];
 }
@@ -235,6 +254,13 @@ export interface Bootstrap {
   state: WorkspaceState;
   runtime: RuntimeInfo;
   attempts?: Attempt[];
+  usage?: {
+    requests24h: number;
+    cost24h: number;
+    uncertain: number;
+    running: number;
+    projectCost: number;
+  };
 }
 export const PROVIDER_LABELS: Record<Provider, string> = {
   demo: 'Demo runtime',

@@ -15,6 +15,7 @@ export const ideaSchema = ideaProposalSchema.extend({
   authorRole: z.string().max(50),
   createdBy: z.enum(['user', 'model']),
   createdAt: z.number().finite(),
+  updatedAt: z.number().finite().optional(),
   sourceTaskId: z.string().max(100).optional(),
   sourceMeetingId: z.string().max(100).optional(),
   investigationTaskId: z.string().max(100).optional(),

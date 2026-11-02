@@ -1,6 +1,6 @@
 # Reliability, saved history and work evidence
 
-This stabilization pass addresses the October 29, 2026 audit. Workroom remains a single-user local application. The browser request protections described here do not provide accounts, classroom permissions or multi-user project isolation.
+This guide includes the October 29 stabilization and [November 1 audit repairs](AUDIT-REPAIRS.md). Workroom remains a single-user local application. The browser request protections described here do not provide accounts, classroom permissions or multi-user project isolation.
 
 ## Activity history is not agent memory
 
@@ -28,7 +28,7 @@ Provider reachability is separate from exact project-model availability. An inst
 
 Startup compares the running server's code, effective configuration and database identity. If a previous server differs, stop its terminal with Ctrl+C and run `npm run local` again. The launcher reports the conflict before installation/downloads and does not terminate an unverified process. Codespaces uses the same launcher checks; use `npm run codespace:restart` for the helper-owned process. The health endpoint exposes fingerprints rather than keys or local database paths.
 
-Edits to an idle project's plan and collaboration settings can proceed while another project works. Workroom preserves the active task objects. Shared team meetings still require the workspace's active work to stop; the error identifies the blocking project. The workspace-wide compute limit and prohibition on assigning one avatar to simultaneous tasks remain in effect.
+Edits to an idle project's plan and collaboration settings can proceed while another project works. Workroom preserves the active task objects. Meetings require their own project's active work to stop; unrelated projects can continue within available concurrency. Pending human decisions block dependent assignments, while independent ready work can continue. The workspace-wide compute limit and prohibition on assigning one avatar to simultaneous tasks remain in effect.
 
 ## Completion evidence
 
@@ -40,11 +40,11 @@ For managed coding tasks, Edit plan exposes work type and acceptance evidence. S
 - Planning can produce an actionable report without artificial tool calls.
 - Criteria requesting tool evidence must cite an observed exact command or file path. Report evidence remains a model assertion.
 
-Recognized commands include common test/build/lint/type-check tools (Node, npm/pnpm/yarn, pytest/unittest, Cargo, Go and .NET), and common file-inspection tools. `pwd`, `ls` and `echo` do not count as substantive verification. Other toolchains may need an adapter; Workroom reports the evidence gap rather than pretending they passed. Receipts confirm tool events and exits, not that tests are comprehensive or that an entire business goal has succeeded. Independent review and real-world validation still matter. Existing assignments retain their saved results and can be given more specific evidence requirements in Edit plan.
+Recognized commands include common test/build/lint/type-check tools (Node, npm/pnpm/yarn, pytest/unittest, Cargo, Go and .NET), and common file-inspection tools. `pwd`, `ls`, `echo`, help/version/listing/collection-only invocations and zero-test runs do not count as substantive verification. Scratch/context files and delete-only changes do not establish implementation. Other toolchains may need an adapter; Workroom reports the evidence gap rather than pretending they passed. Receipts confirm tool events and exits, not that tests are comprehensive or that an entire business goal has succeeded. Independent review and real-world validation still matter. Existing assignments retain their saved results and can be given more specific evidence requirements in Edit plan.
 
 ## Browser boundary and maintenance
 
-Untrusted Host values and cross-origin browser requests are rejected before body parsing. Browser writes require an expiring signed session cookie plus an anti-CSRF header; the browser obtains these automatically. Compressed request bodies are disabled. External runners continue to require their separate server-configured bearer token, also checked before parsing. A trusted reverse proxy must have an exact `WORKROOM_ORIGIN`; keep Codespaces ports private. These measures are not authentication for public hosting.
+Untrusted Host values and cross-origin browser requests are rejected before body parsing. Browser API reads require a paired session, and writes also require an anti-CSRF header. The private link printed by the launcher pairs a browser using a capability kept outside managed project folders. Existing paired sessions survive server restarts and expire normally. An unpaired local HTTP client cannot obtain a control session or read project/settings data. Compressed request bodies are disabled. External runners continue to require their separate server-configured bearer token, also checked before parsing. A trusted reverse proxy must have an exact `WORKROOM_ORIGIN`; keep Codespaces ports private. These measures are not authentication for public hosting.
 
 Production dependencies were updated to patched body-parser and Zod releases, including the Zod 4 migration. CI checks high-severity dependency advisories, unit/integration behavior and the browser flows. A clean dependency scan describes the advisories known at scan time.
 
@@ -57,3 +57,5 @@ Deterministic tests cover protocols, persistence, recovery, request guards and b
 3. A managed Codex software task: implement a small function, run meaningful tests, independently inspect the files, introduce a failing check and verify that completion is blocked.
 
 Record accepted deliverables, unsupported claims, unnecessary interruptions, corrections, latency and calls/tokens per accepted result. Run locally first with one active task and keep spending limits enabled. Do not treat a passing fixture or a model-size label as proof that a real model performs these tasks well.
+
+Conversations, ideas and usage also have paginated history; the previous 100/500 storage caps no longer stop a workspace. Plan revisions are retained for inspection/download. Usage totals query the full ledger even when the browser shows one page. See [the audit repair guide](AUDIT-REPAIRS.md) for migration, stale edits and active-direction handling.

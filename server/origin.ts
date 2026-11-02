@@ -42,7 +42,7 @@ export function allowedOrigin(origin: string, host: string | undefined, configur
 // A signed, expiring double-submit token binds writes to a same-origin browser
 // session. No server-side session list or persistent bearer credential is exposed.
 export class BrowserSessions {
-  private secret = randomBytes(32);
+  constructor(private secret = randomBytes(32)) {}
   private valid(token: string | undefined) {
     if (!token || token.length > 200) return false;
     const [nonce, expiry, signature, extra] = token.split('.');
@@ -51,6 +51,7 @@ export class BrowserSessions {
     const expected = createHmac('sha256', this.secret).update(`${nonce}.${expiry}`).digest('hex');
     return (
       !!signature &&
+      /^[a-f0-9]{64}$/.test(signature) &&
       signature.length === expected.length &&
       timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
     );
@@ -68,12 +69,15 @@ export class BrowserSessions {
     const payload = `${randomBytes(24).toString('hex')}.${Date.now() + 12 * 3600_000}`;
     return `${payload}.${createHmac('sha256', this.secret).update(payload).digest('hex')}`;
   }
+  authenticated(cookie?: string) {
+    return this.valid(this.cookie(cookie));
+  }
   accepts(cookie: string | undefined, header: string | undefined) {
     const token = this.cookie(cookie);
     return (
       this.valid(token) &&
       !!header &&
-      header.length === token!.length &&
+      Buffer.byteLength(header) === Buffer.byteLength(token!) &&
       timingSafeEqual(Buffer.from(header), Buffer.from(token!))
     );
   }

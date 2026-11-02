@@ -1,3 +1,4 @@
+import UsageHistory from './UsageHistory';
 import { useState, type FormEvent } from 'react';
 import type { Bootstrap, CostPolicy, Project } from '../../shared/types';
 import { defaultPolicy } from '../../shared/schemas';
@@ -33,6 +34,7 @@ export default function WorkspaceControls({
     ),
     [message, setMessage] = useState(''),
     [busy, setBusy] = useState(false);
+  const [policyRevision, setPolicyRevision] = useState(data.state.policyRevision || 0);
   const [memoryDraft, saveMemoryDraft, clearMemoryDraft, memoryDraftError] = useSavedDraft(
     `workroom-memory-draft-${project.id}`,
     { content: '', source: '' },
@@ -45,7 +47,11 @@ export default function WorkspaceControls({
     [confirmed, setConfirmed] = useState(false);
   const [instructions, saveInstructions, clearInstructions, instructionError] = useSavedDraft(
     `workroom-instructions-${project.id}`,
-    { text: project.instructionHistory?.at(-1)?.text || '', reason: '' },
+    {
+      text: project.instructionHistory?.at(-1)?.text || '',
+      reason: '',
+      expectedRevision: project.instructionRevision || 0,
+    },
   );
   async function act(fn: () => Promise<unknown>, success: string) {
     setBusy(true);
@@ -67,8 +73,6 @@ export default function WorkspaceControls({
       await response.blob(),
     );
   }
-  const attempts = data.attempts || [],
-    recent = attempts.filter((a) => a.status !== 'cached' && a.createdAt >= Date.now() - 86400000);
   const fields: [keyof CostPolicy, string, number, number][] = [
     ['maxConcurrent', 'Active tasks across the workspace', 1, 4],
     ['maxTasks', 'Tasks allowed per project', 1, 100],
@@ -116,11 +120,28 @@ export default function WorkspaceControls({
             <form
               onSubmit={(e: FormEvent) => {
                 e.preventDefault();
-                act(() => api('/policy', draft), 'Workspace limits saved.');
+                act(async () => {
+                  const result = await api<{ revision: number }>('/policy', {
+                    ...draft,
+                    expectedRevision: policyRevision,
+                  });
+                  setPolicyRevision(result.revision);
+                }, 'Workspace limits saved.');
               }}
               className="control-section"
             >
               <h3>Economy limits</h3>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setDraft(structuredClone(data.state.policy || defaultPolicy));
+                  setPolicyRevision(data.state.policyRevision || 0);
+                  setMessage('Saved limits reloaded.');
+                }}
+              >
+                Reload saved limits · discard edits
+              </button>
               <p>
                 One active task is the economical default. Limits pause work instead of discarding
                 tasks. Planning, retries, and subscription jobs count toward request limits. Codex
@@ -230,63 +251,7 @@ export default function WorkspaceControls({
             </form>
           </>
         )}
-        {tab === 'usage' && (
-          <section className="control-section">
-            <h3>Recorded requests</h3>
-            <p>
-              {recent.length} recorded requests in the last 24 hours (up to 500 recent receipts
-              shown). Cached documents do not count. Subscription allowance and unrelated
-              provider-account spending are not available here. Acknowledging an uncertain request
-              permits retry; its reservation and request count remain.
-            </p>
-            {!attempts.length ? (
-              <p>No model or worker requests recorded yet.</p>
-            ) : (
-              <div className="usage-list">
-                {attempts.map((a) => (
-                  <article key={a.id}>
-                    <strong>
-                      {PROVIDER_LABELS[a.provider]} · {a.phase} · {a.status}
-                    </strong>
-                    <span>
-                      {data.state.projects.find((p) => p.id === a.projectId)?.title ||
-                        'Earlier workspace'}{' '}
-                      · {new Date(a.createdAt).toLocaleString()}
-                    </span>
-                    <p>
-                      {a.model ? `${a.model} · ` : ''}
-                      {a.provider === 'codex'
-                        ? 'Subscription usage; remaining allowance unknown.'
-                        : a.provider === 'external'
-                          ? 'External worker usage is not metered.'
-                          : a.provider === 'ollama' || a.billing === 'local'
-                            ? 'Local computation; uses your hardware.'
-                            : `API estimate held: $${a.reservedUsd.toFixed(4)}${a.actualUsd !== undefined ? ` · receipt estimate $${a.actualUsd.toFixed(4)}` : ''}`}
-                      {a.inputTokens !== undefined
-                        ? ` · input ${a.inputTokens}, output ${a.outputTokens ?? 'unknown'} tokens`
-                        : ''}
-                    </p>
-                    {a.error && <p>{a.error}</p>}
-                    {a.status === 'uncertain' && (
-                      <button
-                        className="button secondary small"
-                        disabled={busy}
-                        onClick={() =>
-                          act(
-                            () => api(`/attempts/${a.id}/acknowledge`),
-                            'Uncertain attempt acknowledged. Retry remains subject to limits.',
-                          )
-                        }
-                      >
-                        Acknowledge uncertain usage
-                      </button>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+        {tab === 'usage' && <UsageHistory data={data} projectId={selectedProject?.id} />}
         {tab === 'memory' && (
           <section className="control-section">
             <h3>Memory for {project.title}</h3>
@@ -494,13 +459,28 @@ export default function WorkspaceControls({
               disabled={busy || instructions.reason.trim().length < 5}
               onClick={() =>
                 act(async () => {
-                  await api(`/projects/${project.id}/instructions`, instructions, 'PUT');
+                  if (instructions.expectedRevision === undefined)
+                    throw new Error(
+                      'Copy your edits, then reload saved instructions to update this older draft.',
+                    );
+                  const saved = await api<{ revision: number }>(
+                    `/projects/${project.id}/instructions`,
+                    instructions,
+                    'PUT',
+                  );
                   clearInstructions();
-                  saveInstructions({ text: instructions.text, reason: '' });
+                  saveInstructions({
+                    text: instructions.text,
+                    reason: '',
+                    expectedRevision: saved.revision,
+                  });
                 }, 'New team instruction version saved.')
               }
             >
               Save instruction version
+            </button>
+            <button className="text-button" onClick={clearInstructions}>
+              Reload saved instructions · discard draft
             </button>
             <h3>Agent improvement proposals</h3>
             {data.state.tasks
@@ -524,6 +504,7 @@ export default function WorkspaceControls({
                           return;
                         }
                         saveInstructions({
+                          ...instructions,
                           text: combined,
                           reason: `Proposal from ${t.title}: ${v.problem}`.slice(0, 1000),
                         });
@@ -546,6 +527,7 @@ export default function WorkspaceControls({
                   onClick={() =>
                     saveInstructions({
                       text: v.text,
+                      expectedRevision: project.instructionRevision || 0,
                       reason: `Restore instructions from ${new Date(v.createdAt).toLocaleString()}`,
                     })
                   }

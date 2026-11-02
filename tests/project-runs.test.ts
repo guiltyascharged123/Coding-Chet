@@ -48,6 +48,12 @@ function fixture(respond?: (input: any) => any) {
               },
             ],
           });
+    if (input.task?.acceptanceCriteria?.length && value.outcome === 'complete')
+      value.checks = input.task.acceptanceCriteria.map((criterion: any) => ({
+        criterion: `${criterion.id}: ${criterion.description}`,
+        status: 'met',
+        evidence: '$35 minus $20 equals $15; demand remains unverified.',
+      }));
     return Response.json({
       choices: [{ message: { content: JSON.stringify(value) } }],
       usage: { prompt_tokens: 100, completion_tokens: 100 },

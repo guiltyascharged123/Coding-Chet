@@ -7,11 +7,17 @@ import { defaultPolicy, backupSchema, stateSchema } from '../shared/schemas.js';
 import { initialState } from './seed.js';
 import { CONSOLE_LIMITS, type ConsoleEntry } from '../shared/console.js';
 import { consoleText } from './console.js';
+import type { PlanTask } from '../shared/plan-definition.js';
 
 export class Store {
   private db: DatabaseSync;
   state: WorkspaceState;
   revision = 0;
+  private journalSignatures = new Map<string, string>();
+  private pendingPlans = new Map<
+    string,
+    { projectId: string; revision: number; createdAt: number; tasks: PlanTask[] }
+  >();
   constructor(public path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
@@ -24,11 +30,38 @@ export class Store {
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS activity_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, project_id TEXT NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL); CREATE INDEX IF NOT EXISTS activity_project ON activity_events(project_id, sequence); CREATE INDEX IF NOT EXISTS activity_type ON activity_events(project_id, type, sequence); CREATE TABLE IF NOT EXISTS attempt_results (attempt_id TEXT PRIMARY KEY, payload TEXT NOT NULL)',
     );
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS plan_versions (project_id TEXT NOT NULL, revision INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(project_id, revision))',
+    );
+    const columns = new Set(
+      (this.db.prepare('PRAGMA table_info(attempts)').all() as { name: string }[]).map(
+        (column) => column.name,
+      ),
+    );
+    for (const [name, type] of Object.entries({
+      created_at: 'INTEGER',
+      status: 'TEXT',
+      project_id: 'TEXT',
+      task_id: 'TEXT',
+      meeting_id: 'TEXT',
+      reserved_usd: 'REAL',
+      actual_usd: 'REAL',
+    }))
+      if (!columns.has(name)) this.db.exec(`ALTER TABLE attempts ADD COLUMN ${name} ${type}`);
+    this.db.exec(
+      "UPDATE attempts SET created_at=json_extract(payload,'$.createdAt'), status=json_extract(payload,'$.status'), project_id=json_extract(payload,'$.projectId'), task_id=json_extract(payload,'$.taskId'), meeting_id=json_extract(payload,'$.meetingId'), reserved_usd=json_extract(payload,'$.reservedUsd'), actual_usd=json_extract(payload,'$.actualUsd') WHERE created_at IS NULL",
+    );
+    this.db.exec(
+      'CREATE INDEX IF NOT EXISTS attempts_created ON attempts(created_at DESC,id DESC); CREATE INDEX IF NOT EXISTS attempts_status ON attempts(status,created_at DESC,id DESC); CREATE INDEX IF NOT EXISTS attempts_task ON attempts(task_id,status); CREATE INDEX IF NOT EXISTS attempts_meeting ON attempts(meeting_id,status); CREATE INDEX IF NOT EXISTS attempts_project ON attempts(project_id,created_at)',
+    );
+    this.db.exec(
+      'CREATE TABLE IF NOT EXISTS project_journal (kind TEXT NOT NULL,id TEXT NOT NULL,project_id TEXT NOT NULL,created_at INTEGER NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(kind,id)); CREATE INDEX IF NOT EXISTS journal_page ON project_journal(kind,project_id,created_at DESC,id DESC)',
+    );
     const row = this.db.prepare('SELECT payload FROM workspace WHERE id=1').get() as
       { payload: string } | undefined;
     this.state = row ? JSON.parse(row.payload) : initialState(process.env.WORKROOM_DEMO === '1');
-    if (row && (this.state.schemaVersion || 1) < 5) this.snapshot('before-upgrade');
-    this.state.schemaVersion = 5;
+    if (row && (this.state.schemaVersion || 1) < 6) this.snapshot('before-upgrade');
+    this.state.schemaVersion = 6;
     if (
       this.state.policy?.maxTasks === 6 &&
       Object.entries(defaultPolicy).every(
@@ -39,6 +72,22 @@ export class Store {
       )
     )
       this.state.policy.maxTasks = defaultPolicy.maxTasks;
+    for (const [kind, field] of [
+      ['message', 'projectMessages'],
+      ['idea', 'ideas'],
+    ] as const) {
+      const records = new Map((this.state[field] || []).map((record) => [record.id, record]));
+      for (const row of this.db
+        .prepare('SELECT payload FROM project_journal WHERE kind=? ORDER BY created_at,id')
+        .all(kind) as { payload: string }[]) {
+        const record = JSON.parse(row.payload);
+        records.set(record.id, record);
+        this.journalSignatures.set(`${kind}:${record.id}`, row.payload);
+      }
+      (this.state as any)[field] = [...records.values()].sort(
+        (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+      );
+    }
     this.state.policy ||= structuredClone(defaultPolicy);
     this.state.memory ||= [];
     this.state.meetings ||= [];
@@ -60,7 +109,7 @@ export class Store {
       if (task.status === 'working') {
         // Any dispatched work requires explicit recovery, even when usage was confirmed.
         // A completed receipt alone must never requeue tool work or consume another request.
-        const attempt = this.attempts().find((a) => a.id === task.attemptId);
+        const attempt = task.attemptId ? this.getAttempt(task.attemptId) : undefined;
         task.status = 'failed';
         task.error = 'Interrupted work needs review before retrying. No request was replayed.';
         if (attempt) {
@@ -83,6 +132,23 @@ export class Store {
     return (this.db.prepare('SELECT payload FROM attempts').all() as { payload: string }[]).map(
       (r) => JSON.parse(r.payload),
     );
+  }
+  recordPlan(projectId: string, revision: number, tasks: PlanTask[]) {
+    this.pendingPlans.set(`${projectId}:${revision}`, {
+      projectId,
+      revision,
+      tasks: structuredClone(tasks),
+      createdAt: Date.now(),
+    });
+  }
+  planVersions(projectId: string, before = Number.MAX_SAFE_INTEGER) {
+    return (
+      this.db
+        .prepare(
+          'SELECT payload FROM plan_versions WHERE project_id=? AND revision<? ORDER BY revision DESC LIMIT 20',
+        )
+        .all(projectId, before) as { payload: string }[]
+    ).map((row) => JSON.parse(row.payload));
   }
   consoleEntries(projectId: string): ConsoleEntry[] {
     return (
@@ -144,10 +210,156 @@ export class Store {
   putAttempt(attempt: Attempt) {
     this.db
       .prepare(
-        'INSERT INTO attempts(id,payload) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
+        `INSERT INTO attempts(id,payload,created_at,status,project_id,task_id,meeting_id,reserved_usd,actual_usd) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,created_at=excluded.created_at,status=excluded.status,project_id=excluded.project_id,task_id=excluded.task_id,meeting_id=excluded.meeting_id,reserved_usd=excluded.reserved_usd,actual_usd=excluded.actual_usd`,
       )
-      .run(attempt.id, JSON.stringify(attempt));
+      .run(
+        attempt.id,
+        JSON.stringify(attempt),
+        attempt.createdAt,
+        attempt.status,
+        attempt.projectId,
+        attempt.taskId || null,
+        attempt.meetingId || null,
+        attempt.reservedUsd,
+        attempt.actualUsd ?? null,
+      );
   }
+  getAttempt(id: string): Attempt | undefined {
+    const row = this.db.prepare('SELECT payload FROM attempts WHERE id=?').get(id) as
+      { payload: string } | undefined;
+    return row && JSON.parse(row.payload);
+  }
+  hasUncertain(field: 'task_id' | 'meeting_id', id: string) {
+    return !!this.db
+      .prepare(`SELECT 1 FROM attempts WHERE ${field}=? AND status='uncertain' LIMIT 1`)
+      .get(id);
+  }
+  usageSummary(projectId = '') {
+    const day = this.db
+      .prepare(
+        "SELECT COUNT(*) AS requests24h,COALESCE(SUM(COALESCE(actual_usd,reserved_usd)),0) AS cost24h FROM attempts WHERE created_at>=? AND status!='cached'",
+      )
+      .get(Date.now() - 86400000) as { requests24h: number; cost24h: number };
+    const states = this.db
+      .prepare(
+        "SELECT SUM(status='uncertain') AS uncertain,SUM(status='running') AS running FROM attempts",
+      )
+      .get() as { uncertain: number; running: number };
+    const cost = this.db
+      .prepare(
+        'SELECT COALESCE(SUM(COALESCE(actual_usd,reserved_usd)),0) AS cost FROM attempts WHERE project_id=?',
+      )
+      .get(projectId) as { cost: number };
+    return {
+      ...day,
+      uncertain: states.uncertain || 0,
+      running: states.running || 0,
+      projectCost: cost.cost,
+    };
+  }
+  private cursor(before?: string): [number, string] {
+    if (!before) return [Number.MAX_SAFE_INTEGER, '\uffff'];
+    let value;
+    try {
+      value = JSON.parse(Buffer.from(before, 'base64url').toString());
+    } catch {
+      throw new Error('Invalid history cursor.');
+    }
+    if (
+      !Array.isArray(value) ||
+      !Number.isFinite(value[0]) ||
+      typeof value[1] !== 'string' ||
+      value[1].length > 100
+    )
+      throw new Error('Invalid history cursor.');
+    return [value[0], value[1]];
+  }
+  attemptsPage(
+    options: {
+      before?: string;
+      status?: string;
+      projectId?: string;
+      taskId?: string;
+      limit?: number;
+    } = {},
+  ) {
+    const [time, id] = this.cursor(options.before),
+      where = ['(created_at<? OR (created_at=? AND id<?))'],
+      params: any[] = [time, time, id];
+    for (const [field, value] of [
+      ['status', options.status],
+      ['project_id', options.projectId],
+      ['task_id', options.taskId],
+    ])
+      if (value) {
+        where.push(`${field}=?`);
+        params.push(value);
+      }
+    const limit = Math.min(500, Math.max(1, options.limit || 50));
+    const rows = this.db
+      .prepare(
+        `SELECT payload FROM attempts WHERE ${where.join(' AND ')} ORDER BY created_at DESC,id DESC LIMIT ?`,
+      )
+      .all(...params, limit + 1) as { payload: string }[];
+    const entries = rows.slice(0, limit).map((row) => JSON.parse(row.payload) as Attempt),
+      last = entries.at(-1);
+    return {
+      entries,
+      nextCursor:
+        rows.length > limit && last
+          ? Buffer.from(JSON.stringify([last.createdAt, last.id])).toString('base64url')
+          : null,
+    };
+  }
+  recentAttempts() {
+    const rows = [
+      ...this.attemptsPage({ limit: 500 }).entries,
+      ...this.attemptsPage({ status: 'uncertain', limit: 100 }).entries,
+    ];
+    return [...new Map(rows.map((row) => [row.id, row])).values()].sort(
+      (a, b) => b.createdAt - a.createdAt,
+    );
+  }
+  historyPage(kind: 'message' | 'idea', projectId: string, before?: string, limit = 50) {
+    const [time, id] = this.cursor(before);
+    const rows = this.db
+      .prepare(
+        'SELECT payload FROM project_journal WHERE kind=? AND project_id=? AND (created_at<? OR (created_at=? AND id<?)) ORDER BY created_at DESC,id DESC LIMIT ?',
+      )
+      .all(kind, projectId, time, time, id, limit + 1) as { payload: string }[];
+    const entries = rows.slice(0, limit).map((row) => JSON.parse(row.payload)),
+      last = entries.at(-1);
+    return {
+      entries,
+      nextCursor:
+        rows.length > limit && last
+          ? Buffer.from(JSON.stringify([last.createdAt, last.id])).toString('base64url')
+          : null,
+    };
+  }
+  private saveJournals(state: WorkspaceState) {
+    const changed = new Map<string, string>();
+    for (const [kind, field] of [
+      ['message', 'projectMessages'],
+      ['idea', 'ideas'],
+    ] as const)
+      for (const record of state[field] || []) {
+        const key = `${kind}:${record.id}`,
+          payload = JSON.stringify(record);
+        if (this.journalSignatures.get(key) === payload) continue;
+        this.db
+          .prepare(
+            'INSERT INTO project_journal VALUES(?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload',
+          )
+          .run(kind, record.id, record.projectId, record.createdAt, payload);
+        changed.set(key, payload);
+      }
+    return changed;
+  }
+  private payload(state: WorkspaceState) {
+    return JSON.stringify({ ...state, projectMessages: [], ideas: [] });
+  }
+
   completeAttempt(
     attempt: Attempt,
     result: { text: string; outputLimitReached?: boolean; observations?: Observation[] },
@@ -228,6 +440,11 @@ export class Store {
         }[]
       ).map((r) => ({ attemptId: r.attempt_id, ...JSON.parse(r.payload) })),
       activityHistory: [...history.values()].sort((a, b) => b.createdAt - a.createdAt),
+      planHistory: (
+        this.db.prepare('SELECT payload FROM plan_versions ORDER BY project_id,revision').all() as {
+          payload: string;
+        }[]
+      ).map((row) => JSON.parse(row.payload)),
     });
   }
   snapshot(label: string) {
@@ -251,7 +468,26 @@ export class Store {
       if (!existing.has(a.id))
         existing.set(a.id, { ...a, status: a.status === 'running' ? 'uncertain' : a.status });
     const restored = structuredClone(parsed.state);
-    restored.schemaVersion = 5;
+    restored.schemaVersion = 6;
+    // A restore must invalidate open editors, even when the imported counters
+    // happen to match an older browser draft (an otherwise silent stale write).
+    restored.policyRevision =
+      Math.max(this.state.policyRevision || 0, restored.policyRevision || 0) + 1;
+    for (const project of restored.projects) {
+      const previous = this.state.projects.find((previous) => previous.id === project.id);
+      for (const field of [
+        'planRevision',
+        'teamRevision',
+        'settingsRevision',
+        'instructionRevision',
+      ] as const)
+        project[field] = Math.max(project[field] || 0, previous?.[field] || 0) + 1;
+      project.updatedAt = Math.max(
+        Date.now(),
+        (project.updatedAt || project.createdAt) + 1,
+        (previous?.updatedAt || previous?.createdAt || 0) + 1,
+      );
+    }
     restored.policy = { ...structuredClone(defaultPolicy), ...restored.policy, allowPaid: false };
     restored.memory ||= [];
     this.recoverProjects(restored);
@@ -272,30 +508,41 @@ export class Store {
         delete t.leaseExpiresAt;
       }
     this.db.exec('BEGIN IMMEDIATE');
+    const oldSignatures = this.journalSignatures;
+    this.journalSignatures = new Map();
     try {
-      this.db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(restored));
+      this.db.exec('DELETE FROM project_journal');
+      const journalChanges = this.saveJournals(restored);
+      this.db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(this.payload(restored));
       for (const a of existing.values()) this.putAttempt(a);
       this.db.exec('DELETE FROM cache; DELETE FROM activity_events; DELETE FROM attempt_results');
-      for (const r of parsed.attemptResults || [])
+      this.db.exec('DELETE FROM plan_versions');
+      for (const version of parsed.planHistory || [])
         this.db
-          .prepare('INSERT OR REPLACE INTO attempt_results VALUES(?,?)')
-          .run(
-            r.attemptId,
-            JSON.stringify({
-              text: r.text,
-              outputLimitReached: r.outputLimitReached,
-              observations: r.observations,
-            }),
-          );
+          .prepare('INSERT INTO plan_versions VALUES(?,?,?)')
+          .run(version.projectId, version.revision, JSON.stringify(version));
+      for (const r of parsed.attemptResults || [])
+        this.db.prepare('INSERT OR REPLACE INTO attempt_results VALUES(?,?)').run(
+          r.attemptId,
+          JSON.stringify({
+            text: r.text,
+            outputLimitReached: r.outputLimitReached,
+            observations: r.observations,
+          }),
+        );
       for (const a of [...(parsed.activityHistory || []), ...restored.activities].sort(
         (a, b) => a.createdAt - b.createdAt,
       ))
         this.recordActivity(a);
       restored.activities = this.activityHistory().slice(0, 250);
-      this.db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(restored));
+      this.db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(this.payload(restored));
       this.db.exec('COMMIT');
       this.state = restored;
+      this.journalSignatures = journalChanges;
+      this.pendingPlans.clear();
+      this.revision++;
     } catch (error) {
+      this.journalSignatures = oldSignatures;
       this.db.exec('ROLLBACK');
       throw error;
     }
@@ -303,15 +550,22 @@ export class Store {
   save() {
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      const journalChanges = this.saveJournals(this.state);
       for (const activity of [...this.state.activities].reverse()) this.recordActivity(activity);
+      for (const version of this.pendingPlans.values())
+        this.db
+          .prepare('INSERT OR IGNORE INTO plan_versions VALUES(?,?,?)')
+          .run(version.projectId, version.revision, JSON.stringify(version));
       this.state.activities = this.state.activities.slice(0, 250);
       this.db
         .prepare(
           'INSERT INTO workspace(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
         )
-        .run(JSON.stringify(this.state));
+        .run(this.payload(this.state));
       this.db.exec('COMMIT');
       this.revision++;
+      this.pendingPlans.clear();
+      for (const [key, payload] of journalChanges) this.journalSignatures.set(key, payload);
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;

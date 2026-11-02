@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Meeting, Project } from '../../shared/types';
+import type { Meeting, Project, Task } from '../../shared/types';
 import { api } from '../api';
 import { useSavedDraft } from '../drafts';
 import DocumentActions from './DocumentActions';
@@ -9,12 +9,16 @@ import DocumentActions from './DocumentActions';
 export default function Collaboration({
   project,
   meetings,
+  tasks,
+  onTask,
   onSettings,
   onUsage,
   focusId,
 }: {
   project: Project;
   meetings: Meeting[];
+  tasks: Task[];
+  onTask: (id: string) => void;
   onSettings: () => void;
   onUsage: () => void;
   focusId?: string;
@@ -28,6 +32,12 @@ export default function Collaboration({
   );
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const [participants, setParticipants] = useState(() =>
+    (project.team || []).map((agent) => agent.id),
+  );
+  const selectedParticipants = participants.filter((id) =>
+    project.team?.some((agent) => agent.id === id),
+  );
   async function act(action: () => Promise<unknown>) {
     setBusy(true);
     setError('');
@@ -55,7 +65,7 @@ export default function Collaboration({
       <p className="field-hint">
         {project.provider === 'demo'
           ? 'Demo meetings are labeled simulations; no AI is called.'
-          : `This team normally uses ${(project.team?.length || 4) + 1} model requests per meeting; malformed replies can add one correction per turn. Existing limits apply. Contributions are generated one at a time.`}{' '}
+          : `A meeting uses one model request per selected participant, plus one for the chair; malformed replies can add one correction per turn. Existing limits apply. Contributions are generated one at a time.`}{' '}
         Automatic meetings:{' '}
         {project.meetingPolicy?.enabled
           ? `kickoff and after every ${project.meetingPolicy.everyTasks} completed tasks`
@@ -67,6 +77,29 @@ export default function Collaboration({
       </p>
       <details className="meeting-agenda-editor" open={!meetings.length}>
         <summary>{meetings.length ? 'Start another meeting' : 'Meeting agenda'}</summary>
+        <fieldset>
+          <legend>Meeting participants</legend>
+          {(project.team || []).map((agent) => (
+            <label key={agent.id} className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={selectedParticipants.includes(agent.id)}
+                onChange={(e) =>
+                  setParticipants((previous) =>
+                    e.target.checked
+                      ? [...previous, agent.id]
+                      : previous.filter((id) => id !== agent.id),
+                  )
+                }
+              />
+              {agent.name} · {agent.role}
+            </label>
+          ))}
+          <p className="field-hint">
+            {selectedParticipants.length} participants · normally {selectedParticipants.length + 1}{' '}
+            requests. The first selected teammate chairs. Automatic meetings include the full team.
+          </p>
+        </fieldset>
         <label>
           Meeting agenda
           <textarea
@@ -87,11 +120,18 @@ export default function Collaboration({
         <button
           className="button primary"
           disabled={
-            busy || !!active || project.provider === 'external' || agenda.trim().length < 10
+            busy ||
+            !!active ||
+            project.provider === 'external' ||
+            agenda.trim().length < 10 ||
+            !selectedParticipants.length
           }
           onClick={() =>
             act(async () => {
-              await api(`/projects/${project.id}/meetings`, { agenda });
+              await api(`/projects/${project.id}/meetings`, {
+                agenda,
+                participants: selectedParticipants,
+              });
               clearAgenda();
             })
           }
@@ -156,6 +196,34 @@ export default function Collaboration({
               <div className="markdown">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{meeting.summary}</ReactMarkdown>
               </div>
+            </section>
+          )}
+          {!!meeting.actions?.length && (
+            <section className="meeting-actions">
+              <h3>Tracked actions</h3>
+              {meeting.actions.map((action) => {
+                const task = tasks.find((task) => task.id === action.taskId);
+                const owner = project.team?.find((agent) => agent.id === action.agentId);
+                return (
+                  <div className="meeting-action" key={action.id}>
+                    <strong>
+                      {action.status === 'addressed'
+                        ? 'Reported check met'
+                        : action.status === 'assigned'
+                          ? 'Assigned check'
+                          : 'Proposed · not assigned'}
+                      {owner ? ` · ${owner.name}` : ''}
+                    </strong>
+                    <p>{action.action}</p>
+                    {action.evidence && <p>Saved evidence: {action.evidence}</p>}
+                    {task && (
+                      <button className="button secondary small" onClick={() => onTask(task.id)}>
+                        Open assignment: {task.title}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </section>
           )}
           {meeting.contributions.map((c, i) => (

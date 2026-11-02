@@ -504,7 +504,17 @@ test('agents schedule focused teammate work, consume its evidence and resume the
         );
       if (input.task.title === original.title)
         assert.match(input.teammateOutputs[0].output, /\$15/);
-      return response(result());
+      return response(
+        result({
+          checks: (input.task.acceptanceCriteria || [])
+            .map((criterion: any) => ({
+              criterion: `${criterion.id}: ${criterion.description}`,
+              status: 'met',
+              evidence: '$35 minus $20 equals $15.',
+            }))
+            .concat(input.task.acceptanceCriteria?.length ? [] : result().checks),
+        }),
+      );
     }) as typeof fetch;
     h.engine.start();
     h.engine.runProject(project.id);

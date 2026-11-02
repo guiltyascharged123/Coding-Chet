@@ -552,7 +552,7 @@ export function codexCodingOptions(
       .map((p) => `${JSON.stringify(p)} = "read"`)
       .join(
         ', ',
-      )}, ${JSON.stringify(directory)} = "${readOnly ? 'read' : 'write'}"${readOnly ? `, ${JSON.stringify(scratch)} = "write"` : ''} }`,
+      )}, ${JSON.stringify(directory)} = "${readOnly ? 'read' : 'write'}"${readOnly ? `, ${JSON.stringify(scratch)} = "write"` : ''}, ${JSON.stringify(resolve(process.env.WORKROOM_SETTINGS_ROOT || '.', '.data/browser-access-key'))} = "deny" }`,
   ];
   options.env = {
     ...options.env,

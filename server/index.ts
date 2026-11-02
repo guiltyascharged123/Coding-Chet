@@ -11,6 +11,8 @@ import { Store } from './store.js';
 import { allowedHost, allowedOrigin, BrowserSessions } from './origin.js';
 // @ts-expect-error Shared Node bootstrap module is intentionally dependency-free JavaScript.
 import { runtimeIdentity } from '../scripts/runtime-identity.mjs';
+// @ts-expect-error Shared dependency-free launcher capability helper.
+import { browserKey, pairedUrl } from '../scripts/browser-key.mjs';
 import { acceptanceListSchema } from '../shared/verification.js';
 import { collaborationSchema, providerSchema } from '../shared/schemas.js';
 import { AGENT_IDS, teamMemberSchema } from '../shared/team.js';
@@ -21,10 +23,15 @@ import { projectWorkspace, workspaceFiles, workspaceFile, workspaceZip } from '.
 
 const app = express();
 app.disable('x-powered-by');
-const sessions = new BrowserSessions();
+const accessKey = browserKey(resolve(process.env.WORKROOM_SETTINGS_ROOT || '.'));
+const sessions = new BrowserSessions(Buffer.from(accessKey, 'hex'));
 // Validate authority and browser session before reading potentially expensive bodies.
 app.use((req, res, next) => {
+  // Express routes are case-insensitive by default. The boundary must use the
+  // same interpretation, including session issuance and the runner protocol.
+  const path = req.path.toLowerCase();
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'same-origin');
   if (!allowedHost(req.headers.host, process.env.WORKROOM_ORIGIN))
     return res
@@ -35,8 +42,21 @@ app.use((req, res, next) => {
     !allowedOrigin(req.headers.origin, req.headers.host, process.env.WORKROOM_ORIGIN)
   )
     return res.status(403).json({ error: 'Cross-origin requests are not allowed.' });
+  if (path.startsWith('/api/') && path !== '/api/health' && !path.startsWith('/api/runner/')) {
+    const supplied = req.headers.authorization?.replace(/^Bearer /i, '') || '';
+    const pairing =
+      path === '/api/session' &&
+      Buffer.byteLength(supplied) === Buffer.byteLength(accessKey) &&
+      timingSafeEqual(Buffer.from(supplied), Buffer.from(accessKey));
+    if (!pairing && !sessions.authenticated(req.headers.cookie))
+      return res.status(401).json({
+        code: 'BROWSER_PAIRING_REQUIRED',
+        error:
+          'Connect this browser using the private Workroom link printed in the server terminal.',
+      });
+  }
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
-    if (req.path.startsWith('/api/runner/')) {
+    if (path.startsWith('/api/runner/')) {
       const expected = process.env.RUNNER_TOKEN || '';
       const supplied = req.headers.authorization?.replace(/^Bearer /i, '') || '';
       if (
@@ -112,6 +132,70 @@ app.get('/api/health', (_req, res) =>
   }),
 );
 app.get('/api/state', (_req, res) => res.json(engine.bootstrap()));
+app.get(
+  '/api/projects/:id/directions',
+  route((req, res) => {
+    const project = engine.project(param(req, 'id'));
+    res.json({
+      entries: (engine.state.projectMessages || []).filter(
+        (message) =>
+          message.projectId === project.id &&
+          message.active !== false &&
+          (message.kind === 'direction' || (!message.kind && !message.responseTaskId)),
+      ),
+    });
+  }),
+);
+app.get(
+  '/api/projects/:id/plan-history',
+  route((req, res) => {
+    engine.project(param(req, 'id'));
+    const before = z.coerce.number().int().nonnegative().optional().parse(req.query.before);
+    res.json({ entries: store.planVersions(param(req, 'id'), before) });
+  }),
+);
+app.get(
+  '/api/attempts',
+  route((req, res) => {
+    const query = z
+      .object({
+        before: z.string().max(300).optional(),
+        status: z.enum(['uncertain', 'completed', 'running', 'cached', 'acknowledged']).optional(),
+        projectId: z.string().max(100).optional(),
+        taskId: z.string().max(100).optional(),
+      })
+      .parse(req.query);
+    res.json({ ...store.attemptsPage(query), usage: store.usageSummary(query.projectId) });
+  }),
+);
+for (const [path, kind] of [
+  ['messages', 'message'],
+  ['ideas', 'idea'],
+] as const)
+  app.get(
+    `/api/projects/:id/${path}`,
+    route((req, res) => {
+      engine.project(param(req, 'id'));
+      res.json(
+        store.historyPage(
+          kind,
+          param(req, 'id'),
+          z.string().max(300).optional().parse(req.query.before),
+        ),
+      );
+    }),
+  );
+app.patch(
+  '/api/projects/:id/messages/:messageId',
+  route((req, res) => {
+    engine.setDirection(
+      param(req, 'id'),
+      param(req, 'messageId'),
+      z.boolean().parse(req.body.active),
+    );
+    res.json({ ok: true });
+  }),
+);
 app.get(
   '/api/projects/:id/activity',
   route((req, res) => {
@@ -257,6 +341,7 @@ app.put(
     const body = z
       .object({
         capacity: z.union([z.literal(4), z.literal(8), z.literal(12)]),
+        expectedRevision: z.number().int().nonnegative(),
         members: z
           .array(
             z.object({
@@ -273,7 +358,7 @@ app.put(
           .max(12),
       })
       .parse(req.body);
-    engine.configureTeam(param(req, 'id'), body.capacity, body.members);
+    engine.configureTeam(param(req, 'id'), body.capacity, body.members, body.expectedRevision);
     res.json({ ok: true });
   }),
 );
@@ -287,6 +372,7 @@ app.post(
         askCoordinator: z.boolean(),
         kind: z.enum(['direction', 'question']).optional(),
         respondAsAgentId: z.enum(AGENT_IDS).optional(),
+        supersedesMessageId: z.string().optional(),
       })
       .parse(req.body);
     res.status(201).json({
@@ -295,7 +381,11 @@ app.post(
         body.id,
         body.content,
         body.askCoordinator,
-        { kind: body.kind, respondAsAgentId: body.respondAsAgentId },
+        {
+          kind: body.kind,
+          respondAsAgentId: body.respondAsAgentId,
+          supersedesMessageId: body.supersedesMessageId,
+        },
       ),
     });
   }),
@@ -360,6 +450,17 @@ app.put(
           requiresApproval: z.boolean(),
           readOnly: z.boolean().optional(),
           workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
+          documentKind: z
+            .enum([
+              'brief',
+              'project_plan',
+              'budget',
+              'risk_register',
+              'meeting_minutes',
+              'status_report',
+              'notes',
+            ])
+            .optional(),
           acceptanceCriteria: acceptanceListSchema.optional(),
         }),
       )
@@ -371,6 +472,10 @@ app.put(
       rows as import('../shared/types.js').Task[],
       z.boolean().optional().parse(req.body.toolNetwork),
       req.body.collaboration,
+      z.number().int().nonnegative().parse(req.body.expectedRevision),
+      req.body.collaboration !== undefined || req.body.toolNetwork !== undefined
+        ? z.number().int().nonnegative().parse(req.body.expectedSettingsRevision)
+        : undefined,
     );
     res.json({ ok: true });
   }),
@@ -378,15 +483,27 @@ app.put(
 app.put(
   '/api/projects/:id/collaboration',
   route((req, res) => {
-    engine.configureCollaboration(param(req, 'id'), req.body);
+    engine.configureCollaboration(
+      param(req, 'id'),
+      req.body,
+      z.number().int().nonnegative().parse(req.body.expectedRevision),
+      z.boolean().optional().parse(req.body.toolNetwork),
+    );
     res.json({ ok: true });
   }),
 );
 app.post(
   '/api/projects/:id/meetings',
   route((req, res) => {
-    const { agenda } = z.object({ agenda: z.string().trim().min(10).max(3000) }).parse(req.body);
-    res.status(201).json({ meeting: engine.startMeeting(param(req, 'id'), agenda) });
+    const { agenda, participants } = z
+      .object({
+        agenda: z.string().trim().min(10).max(3000),
+        participants: z.array(z.enum(AGENT_IDS)).min(1).max(12).optional(),
+      })
+      .parse(req.body);
+    res
+      .status(201)
+      .json({ meeting: engine.startMeeting(param(req, 'id'), agenda, 'manual', participants) });
   }),
 );
 app.post(
@@ -473,9 +590,10 @@ app.patch(
         desk: z.number().int().min(0).max(11),
         goal: z.string().trim().max(1000).optional(),
         projectId: z.string().optional(),
+        expectedRevision: z.number().int().nonnegative(),
       })
       .parse(req.body);
-    engine.updateAgent(param(req, 'id'), body, body.projectId);
+    engine.updateAgent(param(req, 'id'), body, body.projectId, body.expectedRevision);
     res.json({ ok: true });
   }),
 );
@@ -504,8 +622,8 @@ app.post(
 app.post(
   '/api/policy',
   route((req, res) => {
-    engine.updatePolicy(req.body);
-    res.json({ ok: true });
+    engine.updatePolicy(req.body, z.number().int().nonnegative().parse(req.body.expectedRevision));
+    res.json({ ok: true, revision: engine.state.policyRevision || 0 });
   }),
 );
 app.post(
@@ -523,10 +641,17 @@ app.post(
         provider: providerSchema,
         model: z.string().trim().max(150).optional(),
         workMode: z.enum(['text', 'workspace']).optional(),
+        expectedRevision: z.number().int().nonnegative(),
       })
       .parse(req.body);
-    engine.setProjectProvider(param(req, 'id'), value.provider, value.model, value.workMode);
-    res.json({ ok: true });
+    engine.setProjectProvider(
+      param(req, 'id'),
+      value.provider,
+      value.model,
+      value.workMode,
+      value.expectedRevision,
+    );
+    res.json({ ok: true, revision: engine.project(param(req, 'id')).settingsRevision });
   }),
 );
 app.put(
@@ -535,8 +660,13 @@ app.put(
     const value = z
       .object({ text: z.string().trim().max(4000), reason: z.string().trim().min(5).max(1000) })
       .parse(req.body);
-    engine.updateInstructions(param(req, 'id'), value.text, value.reason);
-    res.json({ ok: true });
+    engine.updateInstructions(
+      param(req, 'id'),
+      value.text,
+      value.reason,
+      z.number().int().nonnegative().parse(req.body.expectedRevision),
+    );
+    res.json({ ok: true, revision: engine.project(param(req, 'id')).instructionRevision });
   }),
 );
 app.get('/api/connections/settings', (_req, res) => {
@@ -720,6 +850,9 @@ app.use(
 const server = app.listen(Number(process.env.PORT || 3001), process.env.HOST || '127.0.0.1', () => {
   engine.start();
   console.log(`Workroom runtime listening on port ${process.env.PORT || 3001}`);
+  console.log(
+    `Open Workroom: ${pairedUrl(process.env.WORKROOM_ORIGIN || `http://127.0.0.1:${process.env.PORT || 3001}`, accessKey)}`,
+  );
 });
 for (const signal of ['SIGINT', 'SIGTERM'])
   process.on(signal, () => {

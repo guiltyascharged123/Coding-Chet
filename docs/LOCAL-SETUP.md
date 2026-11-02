@@ -42,7 +42,7 @@ execution-policy change is necessary. A downloaded GitHub branch ZIP also works.
 
 The old `npm run demo` command is now a compatibility alias for the real workspace. If only the older `.data/demo.sqlite` exists, its records open automatically in real-model mode. If both databases exist, the current workspace takes precedence; import the older backup or deliberately set `DATABASE_PATH=.data/demo.sqlite` to open it. Legacy simulation projects need a real project connection before execution.
 
-Use the address printed by the server. Codespaces now forwards **3001** by default and skips automatic cloud model installation; configure an available connection there. It cannot reach a laptop's Ollama through its own localhost.
+Use the private link printed by the server; it pairs the browser. If a forwarded Ports URL shows **Connect this browser**, paste that private link there. Keep the link private. Codespaces now forwards **3001** by default and skips automatic cloud model installation; configure an available connection there. It cannot reach a laptop's Ollama through its own localhost.
 
 ## Bring existing work home from Codespaces
 

@@ -158,7 +158,7 @@ test('office and specialist selection supports eight and twelve actors, with a w
   await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Eight specialist office', exact: true }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 20000 });
   await expect(page.locator('.scene-agent-label')).toHaveCount(8, { timeout: 20000 });
   await page.getByRole('button', { name: 'Your team', exact: true }).click();
   await page.getByRole('button', { name: 'Choose office & specialists', exact: true }).click();

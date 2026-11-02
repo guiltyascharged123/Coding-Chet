@@ -12,7 +12,7 @@ npm run local
 
 First startup installs app dependencies, builds the interface, creates `.env` if missing, installs/starts Ollama as needed, and downloads **`huihui_ai/qwen3.5-abliterated:4B`**. Linux installation may request sudo permission; Windows requires winget or a separately installed Ollama application. The model download needs internet and several GB of disk space. Later starts reuse installed dependencies and weights. Existing environments and saved Codex/API/external defaults are preserved.
 
-Open the URL printed in the terminal, normally **http://127.0.0.1:3001**. Keep the terminal open; Ctrl+C stops Workroom. Ollama may remain running for reuse. On Windows, the same command works in PowerShell or Command Prompt; use `npm.cmd run local` if PowerShell blocks npm scripts.
+Open the URL printed in the terminal, normally **http://127.0.0.1:3001**. The launcher normally opens a private link that pairs your browser automatically. If you see **Connect this browser**, use the private link printed in that terminal. Keep the terminal open; Ctrl+C stops Workroom. Ollama may remain running for reuse. On Windows, the same command works in PowerShell or Command Prompt; use `npm.cmd run local` if PowerShell blocks npm scripts.
 
 If local model setup needs attention:
 
@@ -108,3 +108,5 @@ MIT license for the application. Model weights and third-party services retain t
 See [Reliability, history and work evidence](docs/STABILITY.md) for activity retention, interrupted-result recovery, startup conflicts and verification limits.
 
 Use **Models & sign-in** for the full Connections page, provider configuration, official ChatGPT/Codex sign-in and local model instructions. Click the current project title to edit its brief. See [the easy Connections guide](docs/CONNECTIONS.md).
+
+The [November audit repairs](docs/AUDIT-REPAIRS.md) cover protected edits, full saved history, receipt recovery, private browser pairing and accountable meeting actions. Use the [model evaluation guide](docs/MODEL-EVALUATION.md) to check actual usefulness before a larger run.

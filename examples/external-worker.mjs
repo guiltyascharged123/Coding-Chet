@@ -44,6 +44,7 @@ async function perform({
   agentContext,
   projectConversation,
   ideaBoard,
+  knowledge,
 }) {
   if (process.env.WORKER_PROVIDER !== 'openai') {
     const endpoint = new URL(process.env.OLLAMA_URL || 'http://127.0.0.1:11434');
@@ -78,6 +79,7 @@ async function perform({
               agentContext,
               projectConversation,
               ideaBoard,
+              knowledge,
             }),
           },
         ],
@@ -121,6 +123,7 @@ async function perform({
             agentContext,
             projectConversation,
             ideaBoard,
+            knowledge,
           }),
         },
       ],

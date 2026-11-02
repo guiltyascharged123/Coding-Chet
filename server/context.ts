@@ -21,6 +21,8 @@ const fields = [
   'requestedSources',
   'projectConversation',
   'ideaBoard',
+  'boardDecisions',
+  'archiveIndex',
 ];
 const textKeys = ['feedback', 'output', 'decisions', 'content', 'result', 'text'];
 const size = (value: unknown) =>
@@ -68,7 +70,9 @@ export function assembleContext(system: string, data: Data, limit: number) {
       i,
       priority: source.id.startsWith('requested:')
         ? 0
-        : source.id.startsWith('approval:') || source.id.startsWith('message:')
+        : source.id.startsWith('approval:') ||
+            source.id.startsWith('message:') ||
+            source.id === 'board-decisions'
           ? 1
           : source.id.startsWith('memory:')
             ? 2
@@ -164,7 +168,7 @@ export function assembleContext(system: string, data: Data, limit: number) {
 
 export function retrieveSources(
   sources: SavedSource[],
-  requests: { sourceId: string; offset: number }[],
+  requests: { sourceId: string; offset: number; query?: string }[],
   pageSize: number,
 ) {
   return requests.map((request) => {
@@ -183,14 +187,27 @@ export function retrieveSources(
         text: 'Unknown source ID. Use the identifiers in the supplied context.',
       };
     const chars = Array.from(source.text);
+    let offset = request.offset;
+    if (request.query?.trim()) {
+      const found = source.text
+        .toLocaleLowerCase()
+        .indexOf(request.query.trim().toLocaleLowerCase(), chars.slice(0, offset).join('').length);
+      if (found < 0)
+        return {
+          sourceId: `requested:${source.id}:search`,
+          title: source.label,
+          text: 'No matching passage found for this query. Try a different search or use an offset.',
+        };
+      offset = Math.max(0, Array.from(source.text.slice(0, found)).length - 150);
+    }
     return {
-      sourceId: `requested:${source.id}:${request.offset}`,
+      sourceId: `requested:${source.id}:${offset}`,
       originalSourceId: source.id,
-      title: `${source.label} · passage at ${request.offset}`,
-      offset: request.offset,
-      nextOffset: Math.min(chars.length, request.offset + pageSize),
+      title: `${source.label} · passage at ${offset}`,
+      offset,
+      nextOffset: Math.min(chars.length, offset + pageSize),
       totalCharacters: chars.length,
-      text: chars.slice(request.offset, request.offset + pageSize).join(''),
+      text: chars.slice(offset, offset + pageSize).join(''),
     };
   });
 }

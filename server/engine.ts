@@ -2,6 +2,9 @@ import { EventEmitter } from 'node:events';
 import { AGENT_IDS, expandTeam, type OfficeCapacity } from '../shared/team.js';
 import type { IdeaProposal, ProjectIdea } from '../shared/ideas.js';
 import { agentContext } from '../shared/agent-context.js';
+import { planDefinition } from '../shared/plan-definition.js';
+import { isDirection, projectKnowledge } from './knowledge.js';
+import { deliveryPlanIssues } from './delivery-plan.js';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type {
@@ -86,16 +89,22 @@ export class Engine extends EventEmitter {
       revision: this.store.revision,
       state: {
         ...this.state,
+        projectMessages: [...(this.state.projectMessages || [])]
+          .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))
+          .slice(0, 200)
+          .sort((a, b) => a.createdAt - b.createdAt),
+        ideas: [...(this.state.ideas || [])]
+          .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))
+          .slice(0, 200)
+          .sort((a, b) => a.createdAt - b.createdAt),
         memory: (this.state.memory || []).map((m) => ({
           ...m,
           stale: !memoryCurrent(m, this.state.tasks),
         })),
       },
       runtime: runtimeInfo(this.state.projects),
-      attempts: this.store
-        .attempts()
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .slice(0, 500),
+      attempts: this.store.recentAttempts(),
+      usage: this.store.usageSummary(),
     };
   }
   commit() {
@@ -210,6 +219,7 @@ export class Engine extends EventEmitter {
       researchEnabled?: boolean;
       exploration?: 'focused' | 'expansive';
       requestTimeoutSeconds?: number;
+      deliveryMode?: 'build' | 'design';
       reasoningEffort: ReasoningEffort;
       meetingPolicy: { enabled: boolean; everyTasks: number };
     },
@@ -248,6 +258,10 @@ export class Engine extends EventEmitter {
       exploration: collaboration?.exploration || 'focused',
       requestTimeoutSeconds: collaboration?.requestTimeoutSeconds || 900,
       officeCapacity,
+      deliveryMode:
+        workflow === 'software'
+          ? collaboration?.deliveryMode || (planning === 'template' ? undefined : 'build')
+          : undefined,
       team: workflow ? projectTeam(workflow, this.state.agents) : undefined,
       model:
         this.state.provider === 'demo' || this.state.provider === 'external'
@@ -307,7 +321,7 @@ export class Engine extends EventEmitter {
     if (mode === 'replan' && source.provider === 'external')
       throw new AppError('External workers require a saved task plan. Choose reuse current plan.');
     const sourceTasks = this.state.tasks.filter((t) => t.projectId === id);
-    const priorTasks = sourceTasks.filter((t) => !t.conversationMessageId);
+    const priorTasks = planDefinition(sourceTasks);
     if (
       mode === 'reuse' &&
       priorTasks.some((task) => !team.some((agent) => agent.id === task.agentId))
@@ -324,6 +338,9 @@ export class Engine extends EventEmitter {
       task.status = 'failed';
       task.error = 'Conversation response stopped for a fresh project run.';
     }
+    for (const meeting of this.state.meetings || [])
+      if (meeting.projectId === id && this.conferences.has(meeting.id))
+        this.stopMeeting(meeting.id);
     if (source.status !== 'completed' || sourceTasks.some((t) => t.status === 'working'))
       this.pauseProject(id);
     const stillStopping = () =>
@@ -371,6 +388,7 @@ export class Engine extends EventEmitter {
       exploration: source.exploration,
       requestTimeoutSeconds: source.requestTimeoutSeconds,
       officeCapacity: capacity,
+      deliveryMode: source.deliveryMode,
       instructionHistory: structuredClone(source.instructionHistory),
       restartedFrom: id,
     };
@@ -401,6 +419,7 @@ export class Engine extends EventEmitter {
           readOnly: task.readOnly,
           workType: task.workType,
           acceptanceCriteria: structuredClone(task.acceptanceCriteria),
+          documentKind: task.documentKind,
           status: 'queued',
           output: '',
           feedback: '',
@@ -500,6 +519,7 @@ export class Engine extends EventEmitter {
     project.planningStatus = 'ready';
     delete project.planningError;
     project.status = 'ready';
+    this.recordPlan(project);
     this.event(
       project.id,
       'system',
@@ -518,7 +538,7 @@ export class Engine extends EventEmitter {
       return;
     }
     if (this.planners.has(project.id)) throw new AppError('Planning is already active.', 409);
-    if (this.state.tasks.some((t) => t.projectId === project.id))
+    if (this.state.tasks.some((t) => t.projectId === project.id && !t.conversationMessageId))
       throw new AppError('Edit the existing plan instead of replacing it.');
     if (!modelReadiness(runtimeInfo(), project.provider, project.model).ready) {
       project.planningStatus = 'failed';
@@ -582,13 +602,41 @@ export class Engine extends EventEmitter {
   }
   starterPlan(id: string) {
     const project = this.project(id);
-    if (this.planners.has(id) || this.state.tasks.some((t) => t.projectId === id))
+    if (
+      this.planners.has(id) ||
+      this.state.tasks.some((t) => t.projectId === id && !t.conversationMessageId)
+    )
       throw new AppError('Stop planning first, or edit the existing plan.');
     project.planning = 'manual';
     this.finishPlan(project, []);
   }
-  editPlan(id: string, rows: Task[], toolNetwork?: boolean, collaboration?: unknown) {
+  private checkRevision(actual: number | undefined, expected: number | undefined, scope: string) {
+    if (expected !== undefined && expected !== (actual || 0))
+      throw new AppError(
+        `${scope} changed since this draft was opened. Your edits are retained. Reload the saved version or copy your changes before merging them.`,
+        409,
+      );
+  }
+  private recordPlan(project: Project) {
+    project.planRevision = (project.planRevision || 0) + 1;
+    this.store.recordPlan(
+      project.id,
+      project.planRevision,
+      planDefinition(this.state.tasks.filter((task) => task.projectId === project.id)),
+    );
+  }
+  editPlan(
+    id: string,
+    rows: Task[],
+    toolNetwork?: boolean,
+    collaboration?: unknown,
+    expectedRevision?: number,
+    expectedSettingsRevision?: number,
+  ) {
     const project = this.project(id);
+    this.checkRevision(project.planRevision, expectedRevision, 'The task plan');
+    if (collaboration !== undefined || toolNetwork !== undefined)
+      this.checkRevision(project.settingsRevision, expectedSettingsRevision, 'Project settings');
     if (
       this.projectMeetingActive(id) ||
       this.planners.has(id) ||
@@ -644,6 +692,7 @@ export class Engine extends EventEmitter {
         agentId: row.agentId,
         dependencies: row.dependencies,
         requiresApproval: row.requiresApproval,
+        documentKind: original?.documentKind || row.documentKind,
         conversationMessageId: original?.conversationMessageId,
         conversationPending: original?.conversationPending,
         requestedByTaskId: original?.requestedByTaskId,
@@ -668,6 +717,7 @@ export class Engine extends EventEmitter {
     });
     const settings =
       collaboration === undefined ? undefined : collaborationSchema.parse(collaboration);
+    this.store.recordPlan(id, project.planRevision || 0, planDefinition(old));
     // Preserve task objects held by workers in other projects. Validation clones them.
     this.state.tasks = [
       ...this.state.tasks.filter((t) => t.projectId !== id || t.conversationMessageId),
@@ -675,9 +725,13 @@ export class Engine extends EventEmitter {
     ];
     if (settings) Object.assign(project, settings);
     if (hasProjectTools(project) && toolNetwork !== undefined) project.toolNetwork = toolNetwork;
+    if (settings || toolNetwork !== undefined)
+      project.settingsRevision = (project.settingsRevision || 0) + 1;
     project.planningStatus = 'ready';
     delete project.planningError;
     project.status = 'paused';
+    this.recordPlan(project);
+    this.checkCompletion(project);
     this.event(
       id,
       'system',
@@ -708,8 +762,10 @@ export class Engine extends EventEmitter {
     provider: Provider,
     model?: string,
     workMode?: 'text' | 'workspace',
+    expectedRevision?: number,
   ) {
     const p = this.project(id);
+    this.checkRevision(p.settingsRevision, expectedRevision, 'Project settings');
     if (
       this.projectMeetingActive(id) ||
       this.planners.has(id) ||
@@ -746,6 +802,7 @@ export class Engine extends EventEmitter {
     p.workspaceFolder = folder;
     p.provider = provider;
     p.model = provider === 'demo' || provider === 'external' ? undefined : selected;
+    p.settingsRevision = (p.settingsRevision || 0) + 1;
     this.event(
       id,
       'system',
@@ -753,8 +810,9 @@ export class Engine extends EventEmitter {
     );
     this.commit();
   }
-  updateInstructions(id: string, text: string, reason: string) {
+  updateInstructions(id: string, text: string, reason: string, expectedRevision?: number) {
     const project = this.project(id);
+    this.checkRevision(project.instructionRevision, expectedRevision, 'Team instructions');
     if (
       project.status === 'running' ||
       this.planners.has(id) ||
@@ -771,6 +829,7 @@ export class Engine extends EventEmitter {
     for (const task of this.state.tasks.filter((t) => t.projectId === id)) delete task.recovery;
     project.instructionHistory ||= [];
     project.instructionHistory.push({ id: randomUUID(), text, reason, createdAt: Date.now() });
+    project.instructionRevision = (project.instructionRevision || 0) + 1;
     this.event(
       id,
       'system',
@@ -778,12 +837,14 @@ export class Engine extends EventEmitter {
     );
     this.commit();
   }
-  updatePolicy(value: unknown) {
+  updatePolicy(value: unknown, expectedRevision?: number) {
+    this.checkRevision(this.state.policyRevision, expectedRevision, 'Workspace limits');
     this.state.policy = policySchema.parse(value);
+    this.state.policyRevision = (this.state.policyRevision || 0) + 1;
     this.commit();
   }
   acknowledge(id: string) {
-    const a = this.store.attempts().find((a) => a.id === id);
+    const a = this.store.getAttempt(id);
     if (!a || a.status !== 'uncertain')
       throw new AppError('Only uncertain attempts can be acknowledged.');
     this.store.putAttempt({ ...a, status: 'acknowledged' });
@@ -836,7 +897,14 @@ export class Engine extends EventEmitter {
     id: string,
     values: Pick<Agent, 'name' | 'role' | 'specialty' | 'desk'> & { goal?: string },
     projectId?: string,
+    expectedRevision?: number,
   ) {
+    if (projectId)
+      this.checkRevision(
+        this.project(projectId).teamRevision,
+        expectedRevision,
+        'The specialist team',
+      );
     if (
       values.desk >=
       (projectId ? this.project(projectId).officeCapacity || 4 : this.state.agents.length)
@@ -853,18 +921,27 @@ export class Engine extends EventEmitter {
           (task) =>
             task.projectId === projectId && (task.status === 'working' || this.active.has(task.id)),
         ) ||
-        this.conferences.size)
+        this.projectMeetingActive(projectId))
     )
       throw new AppError('Pause the project before editing its team.');
     const agent = team.find((a) => a.id === id);
     if (!agent) throw new AppError('Agent not found.', 404);
     const other = team.find((a) => a.desk === values.desk && a.id !== id);
     if (other) other.desk = agent.desk;
-    Object.assign(agent, values);
+    Object.assign(agent, {
+      name: values.name,
+      role: values.role,
+      specialty: values.specialty,
+      goal: values.goal ?? agent.goal,
+      desk: values.desk,
+    });
+    if (projectId)
+      this.project(projectId).teamRevision = (this.project(projectId).teamRevision || 0) + 1;
     this.commit();
   }
-  configureTeam(id: string, capacity: OfficeCapacity, members: Agent[]) {
+  configureTeam(id: string, capacity: OfficeCapacity, members: Agent[], expectedRevision?: number) {
     const project = this.project(id);
+    this.checkRevision(project.teamRevision, expectedRevision, 'The specialist team');
     if (
       project.status === 'running' ||
       this.planners.has(id) ||
@@ -890,6 +967,7 @@ export class Engine extends EventEmitter {
     });
     project.officeCapacity = capacity;
     project.team = structuredClone(members);
+    project.teamRevision = (project.teamRevision || 0) + 1;
     this.event(
       id,
       'system',
@@ -902,7 +980,11 @@ export class Engine extends EventEmitter {
     messageId: string,
     content: string,
     askCoordinator: boolean,
-    options?: { respondAsAgentId?: string; kind?: 'direction' | 'question' | 'idea' },
+    options?: {
+      respondAsAgentId?: string;
+      kind?: 'direction' | 'question' | 'idea';
+      supersedesMessageId?: string;
+    },
   ) {
     const project = this.project(id);
     const responseAgent = (project.team || this.state.agents).find(
@@ -917,6 +999,7 @@ export class Engine extends EventEmitter {
         existing.projectId !== id ||
         existing.content !== content ||
         !!existing.responseTaskId !== askCoordinator ||
+        existing.supersedesMessageId !== options?.supersedesMessageId ||
         (options?.kind && existing.kind !== options.kind) ||
         (options?.respondAsAgentId &&
           existing.responseTaskId &&
@@ -925,24 +1008,21 @@ export class Engine extends EventEmitter {
         throw new AppError('This message ID belongs to different content.', 409);
       return existing;
     }
-    if (
-      messages.length >= 500 ||
-      messages.filter((message) => message.projectId === id).length >= 100
-    )
-      throw new AppError(
-        messages.length >= 500
-          ? 'Workspace conversation storage is full (500 messages). Earlier messages are retained. Export a backup and use a separate workspace database to continue conversations.'
-          : 'This project conversation is full (100 messages). Earlier messages are retained; start a new run for a fresh conversation.',
-      );
+    const replaced = options?.supersedesMessageId
+      ? messages.find(
+          (message) =>
+            message.id === options.supersedesMessageId &&
+            message.projectId === id &&
+            isDirection(message),
+        )
+      : undefined;
+    if (options?.supersedesMessageId && (!replaced || options.kind !== 'direction'))
+      throw new AppError('Choose an existing standing direction in this project to replace.');
     if (askCoordinator) {
       this.assertConnectionsStable();
       if (project.provider === 'external')
         throw new AppError(
           'Use Save direction for external workers; coordinator replies need a direct model connection.',
-        );
-      if (this.state.tasks.filter((t) => t.projectId === id).length >= policy(this.store).maxTasks)
-        throw new AppError(
-          'A coordinator response needs a task slot. Increase Tasks allowed per project, or save direction without requesting a reply.',
         );
     }
     const taskId = askCoordinator ? randomUUID() : undefined;
@@ -953,7 +1033,15 @@ export class Engine extends EventEmitter {
       createdAt: Date.now(),
       responseTaskId: taskId,
       kind: options?.kind || (askCoordinator ? 'question' : 'direction'),
+      ...(options?.kind === 'direction' || (!options?.kind && !askCoordinator)
+        ? { active: true }
+        : {}),
+      supersedesMessageId: options?.supersedesMessageId,
     };
+    if (replaced) {
+      replaced.active = false;
+      replaced.updatedAt = Date.now();
+    }
     messages.push(message);
     if (taskId) {
       const agent = responseAgent;
@@ -985,6 +1073,21 @@ export class Engine extends EventEmitter {
     if (askCoordinator) this.tick();
     return message;
   }
+  setDirection(projectId: string, messageId: string, active: boolean) {
+    const message = this.state.projectMessages?.find(
+      (message) =>
+        message.projectId === projectId && message.id === messageId && isDirection(message),
+    );
+    if (!message) throw new AppError('Standing direction not found.', 404);
+    message.active = active;
+    message.updatedAt = Date.now();
+    this.event(
+      projectId,
+      'system',
+      `Standing direction ${active ? 'activated' : 'revoked'}. Its original text remains saved.`,
+    );
+    this.commit();
+  }
   private recordIdeas(
     project: Project,
     agent: Agent,
@@ -1002,17 +1105,6 @@ export class Engine extends EventEmitter {
         )
       )
         continue;
-      if (
-        ideas.length >= 500 ||
-        ideas.filter((idea) => idea.projectId === project.id).length >= 100
-      ) {
-        this.event(
-          project.id,
-          'system',
-          'The idea board is full. Additional proposals remain in their saved source results.',
-        );
-        break;
-      }
       ideas.push({
         ...proposal,
         ...source,
@@ -1036,12 +1128,6 @@ export class Engine extends EventEmitter {
         throw new AppError('This idea ID belongs to another proposal.', 409);
       return existing;
     }
-    if (ideas.length >= 500 || ideas.filter((idea) => idea.projectId === id).length >= 100)
-      throw new AppError(
-        ideas.length >= 500
-          ? 'Workspace idea storage is full (500 cards). Existing ideas are retained. Export a backup and use a separate workspace database for a new board.'
-          : 'This board is full (100 cards). Existing ideas are retained; start a new run to create another board.',
-      );
     const idea: ProjectIdea = {
       ...proposal,
       id: ideaId,
@@ -1060,6 +1146,7 @@ export class Engine extends EventEmitter {
     const idea = this.state.ideas?.find((idea) => idea.id === id && idea.projectId === projectId);
     if (!idea) throw new AppError('Idea not found.', 404);
     idea.status = status;
+    idea.updatedAt = Date.now();
     this.event(
       projectId,
       'system',
@@ -1080,6 +1167,7 @@ export class Engine extends EventEmitter {
     );
     if (idea.status !== 'selected' && idea.status !== 'rejected') idea.status = 'investigating';
     idea.investigationTaskId = message.responseTaskId;
+    idea.updatedAt = Date.now();
     this.commit();
     return this.task(message.responseTaskId!);
   }
@@ -1117,8 +1205,31 @@ export class Engine extends EventEmitter {
         400,
         'connections',
       );
-    if (project.status === 'completed')
-      throw new AppError('This project is complete. Create a new project to run another brief.');
+    const mainTasks = this.state.tasks.filter(
+      (task) => task.projectId === id && !task.conversationMessageId,
+    );
+    const definition = planDefinition(mainTasks),
+      positions = new Map(definition.map((task, index) => [task.id, index]));
+    const contractIssues = deliveryPlanIssues(
+      project,
+      definition.map((task) => ({
+        ...task,
+        dependencies: task.dependencies.map((id) => positions.get(id)!),
+      })),
+    );
+    if (contractIssues.length)
+      throw new AppError(
+        'The saved plan does not meet the selected delivery contract. ' +
+          contractIssues.join(' ') +
+          ' Edit the plan or select Design only when implementation is not intended. No model request was sent.',
+      );
+    if (mainTasks.length && mainTasks.every((task) => task.status === 'done')) {
+      this.checkCompletion(project);
+      this.commit();
+      throw new AppError(
+        'This plan is complete. View its results, add a follow-up assignment, or restart for a fresh run.',
+      );
+    }
     if (
       this.state.tasks.some(
         (t) => t.projectId === id && !t.conversationMessageId && t.status === 'failed',
@@ -1134,7 +1245,10 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'A saved task needs attention before this project can progress. Retry that task, recover its saved result, or use Restart project for a fresh run.',
       );
-    if (this.state.tasks.filter((t) => t.projectId === id).length > policy(this.store).maxTasks)
+    if (
+      this.state.tasks.filter((t) => t.projectId === id && !t.conversationMessageId).length >
+      policy(this.store).maxTasks
+    )
       throw new AppError(
         'This plan exceeds the task limit. Increase the limit in Workspace controls; no tasks have been discarded.',
       );
@@ -1252,7 +1366,7 @@ export class Engine extends EventEmitter {
     if (task.status !== 'failed') throw new AppError('Only failed tasks can be retried.');
     if (this.active.has(id))
       throw new AppError('Wait for the cancelled worker to stop before retrying.');
-    if (this.store.attempts().some((a) => a.taskId === id && a.status === 'uncertain'))
+    if (this.store.hasUncertain('task_id', id))
       throw new AppError('Acknowledge uncertain usage in Workspace controls before retrying.');
     const target = this.project(task.projectId);
     if (
@@ -1343,8 +1457,14 @@ export class Engine extends EventEmitter {
     this.commit();
     this.tick();
   }
-  configureCollaboration(id: string, value: unknown) {
+  configureCollaboration(
+    id: string,
+    value: unknown,
+    expectedRevision?: number,
+    toolNetwork?: boolean,
+  ) {
     const project = this.project(id);
+    this.checkRevision(project.settingsRevision, expectedRevision, 'Project settings');
     if (
       project.status === 'running' ||
       this.state.tasks.some((t) => t.projectId === id && this.active.has(t.id)) ||
@@ -1353,6 +1473,8 @@ export class Engine extends EventEmitter {
     )
       throw new AppError('Pause this project before changing collaboration settings.');
     Object.assign(project, collaborationSchema.parse(value));
+    if (hasProjectTools(project) && toolNetwork !== undefined) project.toolNetwork = toolNetwork;
+    project.settingsRevision = (project.settingsRevision || 0) + 1;
     this.commit();
   }
   private projectMeetingActive(id: string) {
@@ -1365,14 +1487,24 @@ export class Engine extends EventEmitter {
     if (!meeting) throw new AppError('Meeting not found.', 404);
     return meeting;
   }
-  startMeeting(projectId: string, agenda: string, trigger: Meeting['trigger'] = 'manual') {
+  startMeeting(
+    projectId: string,
+    agenda: string,
+    trigger: Meeting['trigger'] = 'manual',
+    participantIds?: string[],
+  ) {
     this.assertConnectionsStable();
     const project = this.project(projectId);
     if (
-      this.active.size ||
-      this.planners.size ||
-      this.conferences.size ||
-      this.state.tasks.some((t) => t.status === 'working')
+      this.planners.has(projectId) ||
+      this.projectMeetingActive(projectId) ||
+      this.state.tasks.some(
+        (t) => t.projectId === projectId && (t.status === 'working' || this.active.has(t.id)),
+      ) ||
+      this.conferences.size +
+        this.planners.size +
+        this.state.tasks.filter((t) => t.status === 'working').length >=
+        policy(this.store).maxConcurrent
     )
       throw new AppError(
         `Wait for active work to finish, or pause it, before starting a team meeting. Active projects: ${this.state.projects
@@ -1396,15 +1528,26 @@ export class Engine extends EventEmitter {
       );
     if ((this.state.meetings || []).some((m) => m.projectId === projectId && m.status === 'failed'))
       throw new AppError('Retry or skip the saved failed meeting first.');
+    const team = project.team || this.state.agents;
+    if (
+      participantIds &&
+      (!participantIds.length ||
+        new Set(participantIds).size !== participantIds.length ||
+        participantIds.some((id) => !team.some((agent) => agent.id === id)))
+    )
+      throw new AppError('Choose at least one unique teammate from this project.');
     const meeting: Meeting = {
       id: randomUUID(),
       projectId,
       agenda,
       trigger,
       status: 'gathering',
-      checkpoint: this.state.tasks.filter((t) => t.projectId === projectId && t.status === 'done')
-        .length,
-      participants: structuredClone(project.team || this.state.agents),
+      checkpoint: this.state.tasks.filter(
+        (t) => t.projectId === projectId && t.status === 'done' && !t.conversationMessageId,
+      ).length,
+      participants: structuredClone(
+        participantIds ? participantIds.map((id) => team.find((agent) => agent.id === id)!) : team,
+      ),
       contributions: [],
       summary: '',
       createdAt: Date.now(),
@@ -1418,10 +1561,16 @@ export class Engine extends EventEmitter {
     const meeting = this.meeting(id);
     if (meeting.status !== 'failed') throw new AppError('Only failed meetings can be retried.');
     if (
-      this.active.size ||
-      this.planners.size ||
-      this.conferences.size ||
-      this.state.tasks.some((t) => t.status === 'working')
+      this.planners.has(meeting.projectId) ||
+      this.projectMeetingActive(meeting.projectId) ||
+      this.state.tasks.some(
+        (t) =>
+          t.projectId === meeting.projectId && (t.status === 'working' || this.active.has(t.id)),
+      ) ||
+      this.conferences.size +
+        this.planners.size +
+        this.state.tasks.filter((t) => t.status === 'working').length >=
+        policy(this.store).maxConcurrent
     )
       throw new AppError('Pause active work before retrying a meeting.');
     if (this.store.attempts().some((a) => a.meetingId === id && a.status === 'uncertain'))
@@ -1511,13 +1660,57 @@ export class Engine extends EventEmitter {
         }
         meeting.speakerId = meeting.participants[0].id;
         this.commit();
+        let actions: { taskId: string; action: string }[] = [];
         const summary = await this.discuss(project, meeting, meeting.participants[0], true, {
           store: this.store,
           project,
           signal: controller.signal,
+          onMeetingActions: (value) => {
+            actions = value;
+          },
           ...this.tracing(project, 'meeting', undefined, meeting.participants[0].id, meeting.id),
         });
         if (controller.signal.aborted) return;
+        meeting.actions = actions.map((action, index) => {
+          const task = this.state.tasks.find(
+            (task) =>
+              task.id === action.taskId &&
+              task.projectId === project.id &&
+              ['queued', 'failed'].includes(task.status),
+          );
+          const id = `m_${meeting.id.replaceAll('-', '')}_${index}`;
+          if (!task || (task.acceptanceCriteria?.length || 0) >= 10)
+            return {
+              id,
+              action: action.action,
+              taskId: task?.id,
+              agentId: task?.agentId,
+              status: 'proposed' as const,
+            };
+          const evidence = hasProjectTools(project)
+            ? task.workType === 'review'
+              ? 'inspection'
+              : ['implementation', 'tests'].includes(task.workType || '')
+                ? 'verification'
+                : 'report'
+            : 'report';
+          (task.acceptanceCriteria ||= []).push({
+            id,
+            description: action.action.slice(0, 240),
+            evidence,
+          });
+          (task.dynamicCriteriaIds ||= []).push(id);
+          delete task.recovery;
+          project.planRevision = (project.planRevision || 0) + 1;
+          return {
+            id,
+            action: action.action,
+            taskId: task.id,
+            agentId: task.agentId,
+            criterionId: id,
+            status: 'assigned' as const,
+          };
+        });
         meeting.summary = summary.slice(0, 20000);
         meeting.status = 'completed';
         meeting.completedAt = Date.now();
@@ -1545,15 +1738,19 @@ export class Engine extends EventEmitter {
   }
   private scheduleMeetings() {
     if (
-      this.active.size ||
-      this.planners.size ||
-      this.conferences.size ||
-      this.state.tasks.some((t) => t.status === 'working')
+      this.conferences.size +
+        this.planners.size +
+        this.state.tasks.filter((t) => t.status === 'working').length >=
+      policy(this.store).maxConcurrent
     )
       return;
     for (const project of this.state.projects) {
       if (
         project.status !== 'running' ||
+        this.planners.has(project.id) ||
+        this.state.tasks.some(
+          (t) => t.projectId === project.id && (t.status === 'working' || this.active.has(t.id)),
+        ) ||
         !project.meetingPolicy?.enabled ||
         project.provider === 'external' ||
         !modelReadiness(runtimeInfo(), project.provider, project.model).ready
@@ -1566,7 +1763,9 @@ export class Engine extends EventEmitter {
         )
       )
         continue;
-      const tasks = this.state.tasks.filter((t) => t.projectId === project.id),
+      const tasks = this.state.tasks.filter(
+          (t) => t.projectId === project.id && !t.conversationMessageId,
+        ),
         done = tasks.filter((t) => t.status === 'done').length;
       if (
         !tasks.some(
@@ -1589,7 +1788,7 @@ export class Engine extends EventEmitter {
   }
   private runnable(task: Task) {
     return (
-      !this.conferences.size &&
+      !this.projectMeetingActive(task.projectId) &&
       (!!task.conversationMessageId ||
         !(this.state.meetings || []).some(
           (m) => m.projectId === task.projectId && m.status === 'failed',
@@ -1599,7 +1798,8 @@ export class Engine extends EventEmitter {
         hasProjectTools(this.project(task.projectId)) &&
         this.state.tasks.some((t) => t.projectId === task.projectId && t.status === 'working')
       ) &&
-      (this.project(task.projectId).status === 'running' || !!task.conversationPending) &&
+      (['running', 'needs_input'].includes(this.project(task.projectId).status) ||
+        !!task.conversationPending) &&
       task.dependencies.every((id) => this.task(id).status === 'done') &&
       !this.state.tasks.some(
         (t) =>
@@ -1718,7 +1918,7 @@ export class Engine extends EventEmitter {
           project,
           task,
           toolNetwork: !!project.toolNetwork,
-          readOnly: !!task.readOnly,
+          readOnly: !!task.readOnly || project.deliveryMode === 'design',
           workspace: hasProjectTools(project)
             ? projectWorkspace(this.store.path, project)
             : undefined,
@@ -1777,6 +1977,16 @@ export class Engine extends EventEmitter {
     }
   }
   private handoff(task: Task) {
+    for (const meeting of this.state.meetings || [])
+      for (const action of meeting.actions || []) {
+        const check = task.result?.checks.find(
+          (check) => check.criterion.startsWith(`${action.criterionId}:`) && check.status === 'met',
+        );
+        if (task.status === 'done' && action.taskId === task.id && check) {
+          action.status = 'addressed';
+          action.evidence = check.evidence;
+        }
+      }
     const next = this.state.tasks.find((t) => t.dependencies.includes(task.id));
     this.event(
       task.projectId,
@@ -1800,7 +2010,14 @@ export class Engine extends EventEmitter {
         'The internal follow-up limit was reached. The partial work is saved; inspect the outstanding checks before extending the plan or revision limit.',
       );
     if (
-      this.state.tasks.filter((t) => t.projectId === task.projectId).length + followUps.length >
+      this.state.tasks.filter(
+        (t) =>
+          t.projectId === task.projectId &&
+          (task.conversationMessageId
+            ? t.conversationMessageId === task.conversationMessageId
+            : !t.conversationMessageId),
+      ).length +
+        followUps.length >
       limits.maxTasks
     )
       throw new AppError(
@@ -1808,6 +2025,56 @@ export class Engine extends EventEmitter {
       );
     let dependencies = [...task.dependencies];
     const created: Task[] = followUps.map((f) => {
+      const project = this.project(task.projectId),
+        owner = team.find((agent) => agent.id === f.agentId)!;
+      const tools = project.provider === 'codex' && hasProjectTools(project);
+      const workType =
+        f.workType ||
+        (!tools
+          ? 'plan'
+          : /review|quality/.test(owner.role.toLowerCase())
+            ? 'review'
+            : /test/.test(owner.role.toLowerCase())
+              ? 'tests'
+              : !task.readOnly && /engineer|developer/.test(owner.role.toLowerCase())
+                ? 'implementation'
+                : 'plan');
+      if (
+        (!tools &&
+          (workType !== 'plan' || f.acceptanceCriteria?.some((c) => c.evidence !== 'report'))) ||
+        (task.readOnly && workType === 'implementation')
+      )
+        throw new AppError(
+          'The proposed follow-up requires tools or write access unavailable to this assignment. Its proposal is saved; use a separately authorized implementation assignment or select the required project tools.',
+        );
+      const acceptanceCriteria = structuredClone(f.acceptanceCriteria || []);
+      const required =
+        workType === 'implementation'
+          ? ['artifact', 'verification']
+          : workType === 'review'
+            ? ['inspection']
+            : workType === 'tests'
+              ? ['verification']
+              : ['report'];
+      for (const evidence of required)
+        if (!acceptanceCriteria.some((c) => c.evidence === evidence)) {
+          let index = 1;
+          while (acceptanceCriteria.some((c) => c.id === `auto${index}`)) index++;
+          if (acceptanceCriteria.length >= 10)
+            throw new AppError(
+              'The follow-up needs an acceptance check for ' +
+                evidence +
+                '. Correct its proposed criteria before retrying.',
+            );
+          acceptanceCriteria.push({
+            id: `auto${index}`,
+            description:
+              evidence === 'verification'
+                ? 'Execute meaningful checks of the assigned behavior.'
+                : f.description.slice(0, 300),
+            evidence: evidence as 'artifact' | 'verification' | 'inspection' | 'report',
+          });
+        }
       const next: Task = {
         ...f,
         id: randomUUID(),
@@ -1815,7 +2082,9 @@ export class Engine extends EventEmitter {
         requestedByTaskId: task.id,
         conversationMessageId: task.conversationMessageId,
         conversationPending: !!task.conversationMessageId,
-        readOnly: task.readOnly,
+        readOnly: !!task.readOnly || !!f.readOnly || workType === 'plan' || workType === 'review',
+        workType,
+        acceptanceCriteria,
         dependencies,
         status: 'queued',
         requiresApproval: false,
@@ -1827,6 +2096,8 @@ export class Engine extends EventEmitter {
     });
     task.dependencies = [...new Set([...task.dependencies, ...dependencies])];
     task.coordinationRounds = (task.coordinationRounds || 0) + 1;
+    const project = this.project(task.projectId);
+    project.planRevision = (project.planRevision || 0) + 1;
     task.status = 'queued';
     if (task.conversationMessageId) task.conversationPending = true;
     this.consoleEvent(
@@ -1864,6 +2135,7 @@ export class Engine extends EventEmitter {
     )) {
       if (idea.status === 'investigating') idea.status = 'evaluated';
       idea.evaluation = (task.result?.summary || output).slice(0, 1200);
+      idea.updatedAt = Date.now();
     }
     const decision = task.result?.outcome === 'needs_input' ? task.result.decision : undefined;
     if (
@@ -1949,7 +2221,7 @@ export class Engine extends EventEmitter {
     const tasks = this.state.tasks.filter(
       (t) => t.projectId === project.id && !t.conversationMessageId,
     );
-    if (tasks.length && tasks.every((t) => t.status === 'done')) {
+    if (tasks.length && tasks.every((t) => t.status === 'done') && project.status !== 'completed') {
       project.status = 'completed';
       this.event(
         project.id,
@@ -1999,6 +2271,7 @@ export class Engine extends EventEmitter {
       projectConversation: (this.state.projectMessages || [])
         .filter((message) => message.projectId === task.projectId)
         .slice(-12),
+      knowledge: projectKnowledge(this.project(task.projectId), this.state),
       ideaBoard: (this.state.ideas || [])
         .filter((idea) => idea.projectId === task.projectId)
         .slice(-12),

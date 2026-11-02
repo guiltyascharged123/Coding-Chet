@@ -45,5 +45,9 @@ test('matching untrusted Host and Origin never establish trust; session writes r
   assert.equal(sessions.accepts(`workroom_session=${token}`, undefined), false);
   assert.equal(sessions.accepts(`workroom_session=${token}`, token + 'x'), false);
   assert.equal(sessions.accepts(`workroom_session=${token}`, token), true);
+  assert.equal(sessions.accepts(`workroom_session=${token}`, 'é'.repeat(token.length)), false);
+  const persistent = Buffer.alloc(32, 7);
+  const saved = new BrowserSessions(persistent).issue();
+  assert.equal(new BrowserSessions(persistent).authenticated(`workroom_session=${saved}`), true);
   assert.equal(new BrowserSessions().accepts(`workroom_session=${token}`, token), false);
 });

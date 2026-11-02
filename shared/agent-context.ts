@@ -18,7 +18,7 @@ export function agentContext(
     capabilities: {
       text: true,
       fileInspection: files,
-      fileEditing: files && !task.readOnly,
+      fileEditing: files && !task.readOnly && project.deliveryMode !== 'design',
       commands: files,
       webResearch: project.provider === 'codex' && !!project.researchEnabled,
       externalTransactions: false,

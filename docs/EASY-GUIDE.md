@@ -70,7 +70,7 @@ Agents sit in their assigned chairs when they are at their desks, type while a t
 
 ### Let any Codex team build useful files
 
-A venture, research or office project can need implementation too. Pause it, click **Model: … · Change**, choose Codex, check **Enable managed project tools**, then **Set project connection**. All four roles share a managed project folder. Open **Outputs → Project files** for actual files and a source ZIP. Disabling tools retains those files. Software delivery uses these tools automatically.
+A venture, research or office project can need implementation too. Pause it, click **Model: … · Change**, choose Codex, check **Enable managed project tools**, then **Set project connection**. All selected teammates share a managed project folder. Open **Outputs → Project files** for actual files and a source ZIP. Disabling tools retains those files. Software delivery uses these tools automatically.
 
 The native coding sandbox must pass its offline check; otherwise work stops with the readiness message. File/command tools remain limited to the managed project and allowed system tooling. **Edit plan → Allow tool network** controls dependency downloads and network access by executed code. **Allow Codex web research** independently permits built-in read-only searches with cited sources, including for tool-enabled projects. Meetings do not browse or edit files. OpenAI, Gemini, Ollama and compatible text adapters do not acquire file tools from a role name.
 
@@ -82,7 +82,7 @@ These are versioned project directions, not model training or unrestricted self-
 
 ### Team discussions, specialists and reasoning
 
-Open **Team discussions** to start a meeting with your own agenda. Each of the four specialists makes a public proposal or critique, then the chair writes a decision record with objections, evidence gaps, owners and next actions. Contributions appear as they finish and remain saved after reload. Upcoming tasks receive recent completed meeting decisions as context. These are requested public contributions, not a display of private model reasoning.
+Open **Team discussions** to start a meeting with your own agenda. Each selected specialist makes a public proposal or critique, then the chair writes a decision record with objections, evidence gaps, owners and next actions. Contributions appear as they finish and remain saved after reload. Upcoming tasks receive recent completed meeting decisions as context. These are requested public contributions, not a display of private model reasoning.
 
 For automatic meetings, open **Edit plan**, enable **Automatic team meetings**, set the number of completed tasks between meetings, and **Save plan**. They run at kickoff and progress milestones when more work is ready. The queue waits during a meeting. A completed or paused project does not hold recurring meetings. New projects created in the dashboard offer this setting enabled; older projects retain their configuration until you change it. External workers do not use this built-in meeting protocol.
 
@@ -90,7 +90,7 @@ A normal meeting adds **five model requests** (four contributions and a chair su
 
 Characters now travel for assignments, reviews, handoffs and saved meetings. They stay at their desks during focused work and idle time. The glass meeting room shows the current speaker and listeners; the transcript carries the actual collaboration. Pausing office movement affects animation only.
 
-**Edit plan → Codex reasoning effort** offers Economy (low), Balanced (medium, the new default), and Deep work (high). High can improve difficult work and use more allowance; choose an effort supported by your model. These settings do not change a non-Codex provider's reasoning configuration. Use **Your team → Edit role & desk → Specialist preset** for software engineering, architecture, project management, coordination, independent code review, testing, market research, commercial strategy, finance/risk, or product/UX. There are four active seats; presets supply role-specific goals and instructions, not separate trained models.
+**Edit plan → Codex reasoning effort** offers Economy (low), Balanced (medium, the new default), and Deep work (high). High can improve difficult work and use more allowance; choose an effort supported by your model. These settings do not change a non-Codex provider's reasoning configuration. Use **Your team → Edit role & desk → Specialist preset** for software engineering, architecture, project management, coordination, independent code review, testing, market research, commercial strategy, finance/risk, or product/UX. Offices support 4, 8 or 12 active seats; presets supply role-specific goals and instructions, not separate trained models.
 
 For broad money-making goals, choose **Venture & opportunity validation**. The team compares distinct approaches, identifies a buyer/problem and distribution route, challenges AI substitutes and weak differentiation, checks estimated economics, and proposes a low-cost test with go/stop criteria. Supply your budget, skills/assets, available time and success measures in the brief or verified project memory. Market demand and income cannot be assumed or guaranteed by stronger prompts.
 
@@ -200,7 +200,7 @@ not govern Codex account usage. Keep the single-task default and start with one
 small project while checking your account's usage. The paid-API checkbox is under
 **Workspace controls → Limits & connections**.
 
-**Keep the dashboard private.** It has no dashboard login. `npm run local` binds
+**Keep the dashboard private.** The launcher opens a private browser-pairing link; this is a local access credential, not a multi-user account system. `npm run local` binds
 to your computer; do not expose it through a public tunnel or public forwarded
 port. Text workflows disable file and command execution; opted-in Codex research permits read-only web search. Software delivery allows file changes and commands in its managed folder, with read access to system tooling. Commands and dependency scripts can change or delete files inside that folder; keep copies of valuable work. Tool network is enabled only if you choose it in Edit plan. Keep credentials out of managed project folders.
 
@@ -289,3 +289,7 @@ If terminal Codex login succeeded but Workroom still says sign-in is pending, us
 For role procedures, real-time office behavior, saved-result handoffs and source-reading failures, see [How agents work](AGENT-WORK.md).
 
 For the current model selector, 4/8/12-person offices, specialist templates, conversation, idea board and restarting a saved project, see [Teams and workflow](TEAMS-AND-WORKFLOW.md).
+
+## Current reliability controls
+
+Use the private link printed by `npm run local` if a fresh browser asks to connect. Plans and shared editors now detect stale saves and keep your draft; copy/reload it to merge newer changes. **Edit plan → Saved plan versions** lets you inspect and download earlier assignments. **Usage** can load older receipts, including unresolved ones. Conversation and ideas retain older pages without the previous storage caps. **Active standing directions** shows the instructions that continue to apply. Manual meetings can invite a subset of specialists; assigned actions become task checks rather than disappearing into a summary. See [audit repairs](AUDIT-REPAIRS.md).

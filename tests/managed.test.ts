@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Codex, ThreadEvent } from '@openai/codex-sdk';
 import {
   codexEnvironment,
@@ -111,6 +111,12 @@ test('the native CLI accepts writable and inspection coding profiles without inf
       );
       assert.match(options.configOverrides![0], /":root" = "deny"/);
       assert.ok(!options.configOverrides![0].includes('"/proc" = "read"'));
+      assert.ok(
+        options.configOverrides![0].includes(
+          `${JSON.stringify(resolve(process.env.WORKROOM_SETTINGS_ROOT || '.', '.data/browser-access-key'))} = "deny"`,
+        ),
+        'The browser capability stays denied even under a readable system path.',
+      );
       assert.ok(
         options.configOverrides![0].includes(
           `${JSON.stringify(directory)} = "${readOnly ? 'read' : 'write'}"`,

@@ -106,7 +106,22 @@ test('meeting contributions survive failure and retry; usage is counted and comp
       assert.equal(input.teamDecisions[0].decisions, meeting.summary);
       assert.match(input.humanDirection[0].feedback, /undifferentiated copywriting/);
       return Response.json({
-        choices: [{ message: { content: JSON.stringify(result()) } }],
+        choices: [
+          {
+            message: {
+              content: JSON.stringify(
+                result({
+                  checks:
+                    input.task.acceptanceCriteria?.map((c: any) => ({
+                      criterion: `${c.id}: ${c.description}`,
+                      status: 'met',
+                      evidence: 'Fixture comparison: $35 minus $20 is $15; demand remains unknown.',
+                    })) || result().checks,
+                }),
+              ),
+            },
+          },
+        ],
       });
     }) as typeof fetch;
     await runTask('openai', project, task, project.team![0], [], new AbortController().signal, {

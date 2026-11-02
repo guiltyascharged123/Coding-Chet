@@ -36,7 +36,11 @@ export function officeWork(
     tasks.find((t) => t.agentId === agent.id && t.status === 'working') ||
     tasks.find((t) => t.agentId === agent.id && t.status === 'review');
   const liveMeeting =
-    meeting && ['gathering', 'running'].includes(meeting.status) ? meeting : undefined;
+    meeting &&
+    meeting.participants.some((person) => person.id === agent.id) &&
+    ['gathering', 'running'].includes(meeting.status)
+      ? meeting
+      : undefined;
   const planning =
     project.planningStatus === 'planning' &&
     (project.team ? agent.id === project.team[0]?.id : agent.desk === 0);

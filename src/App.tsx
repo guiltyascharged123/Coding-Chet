@@ -1,3 +1,5 @@
+import ConnectBrowser from './components/ConnectBrowser';
+import { PairingRequired } from './api';
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   Activity as ActivityIcon,
@@ -141,6 +143,7 @@ export default function App() {
     `workroom-retry-${taskId || 'none'}`,
     '',
   );
+  const [pairingRequired, setPairingRequired] = useState(false);
   const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -182,33 +185,36 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false;
-    getState()
+    let source: EventSource | undefined;
+    void getState()
       .then((result) => {
-        if (!disposed) {
-          setData(result);
+        if (disposed) return;
+        setData(result);
+        setInitialError('');
+        source = new EventSource('/api/events');
+        source.onopen = () => {
+          setConnected(true);
           setInitialError('');
-        }
+        };
+        source.onerror = () => setConnected(false);
+        source.onmessage = (e) => {
+          try {
+            const next = JSON.parse(e.data) as Bootstrap;
+            if (!disposed) setData(next);
+          } catch {
+            setConnected(false);
+          }
+        };
       })
       .catch((error) => {
-        if (!disposed) setInitialError(error.message);
+        if (!disposed) {
+          setInitialError(error.message);
+          setPairingRequired(error instanceof PairingRequired);
+        }
       });
-    const source = new EventSource('/api/events');
-    source.onopen = () => {
-      setConnected(true);
-      setInitialError('');
-    };
-    source.onerror = () => setConnected(false);
-    source.onmessage = (e) => {
-      try {
-        const next = JSON.parse(e.data) as Bootstrap;
-        if (!disposed) setData(next);
-      } catch {
-        setConnected(false);
-      }
-    };
     return () => {
       disposed = true;
-      source.close();
+      source?.close();
     };
   }, []);
   useEffect(() => {
@@ -292,6 +298,8 @@ export default function App() {
         : 'Reviews will appear inside Workroom. You can enable browser alerts in browser settings.',
     );
   }
+
+  if (pairingRequired) return <ConnectBrowser />;
 
   if (!data || !state)
     return (
@@ -760,10 +768,10 @@ export default function App() {
               }
               onClick={() => setModal('plan')}
             >
-              Edit plan · {tasks.length} tasks
+              Edit plan · {planTasks.length} tasks
             </button>
           </section>
-          {project.planningStatus === 'ready' && !tasks.length && (
+          {project.planningStatus === 'ready' && !planTasks.length && (
             <p className="plan-notice" role="status">
               Your manual plan is empty. Use Edit plan to add tasks, owners and acceptance criteria
               before running.
@@ -875,6 +883,8 @@ export default function App() {
               key={project.id}
               project={project}
               meetings={meetings}
+              tasks={tasks}
+              onTask={setTaskId}
               focusId={meetingFocus}
               onUsage={() => {
                 setControlsTab('usage');
@@ -1174,7 +1184,8 @@ export default function App() {
               <div className="board-heading">
                 <span>
                   <ClipboardList size={17} />
-                  {tasks.length} tasks <span>·</span> {done} completed
+                  {tasks.length} assignments <span>·</span>{' '}
+                  {tasks.filter((task) => task.status === 'done').length} completed
                 </span>
                 <span className="tag">Dependencies enforced</span>
               </div>
@@ -1551,6 +1562,7 @@ export default function App() {
           agent={selectedAgent}
           projectId={project.id}
           officeCapacity={project.officeCapacity || 4}
+          teamRevision={project.teamRevision || 0}
           onClose={() => setAgentId(undefined)}
           onSaved={() => {
             setAgentId(undefined);
@@ -1790,17 +1802,20 @@ function AgentCard({
 function AgentModal({
   agent,
   projectId,
+  teamRevision = 0,
   officeCapacity = 4,
   onClose,
   onSaved,
 }: {
   agent: Agent;
   projectId?: string;
+  teamRevision?: number;
   officeCapacity?: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [name, setName] = useState(agent.name);
+  const [expectedRevision] = useState(teamRevision);
   const [role, setRole] = useState(agent.role);
   const [specialty, setSpecialty] = useState(agent.specialty);
   const [goal, setGoal] = useState(agent.goal || '');
@@ -1811,7 +1826,11 @@ function AgentModal({
     e.preventDefault();
     setSaving(true);
     try {
-      await api(`/agents/${agent.id}`, { name, role, specialty, desk, goal, projectId }, 'PATCH');
+      await api(
+        `/agents/${agent.id}`,
+        { name, role, specialty, desk, goal, projectId, expectedRevision },
+        'PATCH',
+      );
       onSaved();
     } catch (err) {
       setError((err as Error).message);

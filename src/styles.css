@@ -4790,7 +4790,8 @@ button.connection:hover {
   color: #bfcdd7;
   font-size: 14px;
 }
-.meeting-contribution {
+.meeting-contribution,
+.meeting-action {
   border-left: 3px solid #6c8595;
   padding: 16px 18px;
   background: #293843;
@@ -4810,7 +4811,8 @@ button.connection:hover {
   height: 12px;
   border-radius: 50%;
 }
-.meeting-decision {
+.meeting-decision,
+.meeting-actions {
   padding: 20px;
   background: #344e52;
   border: 1px solid #6f9793;
@@ -4822,7 +4824,8 @@ button.connection:hover {
     padding: 14px;
   }
   .meeting-record,
-  .meeting-decision {
+  .meeting-decision,
+  .meeting-actions {
     padding: 14px;
   }
   .meeting-record > header,
@@ -5495,4 +5498,31 @@ button.connection:hover {
   .idea-card-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.meeting-action .button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.meeting-agenda-editor fieldset {
+  min-width: 0;
+  margin: 16px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+.meeting-agenda-editor label.checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.meeting-agenda-editor input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-top: 4px;
 }

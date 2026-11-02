@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { Bootstrap, Project } from '../../shared/types';
 import { useSavedDraft } from '../drafts';
 import { api } from '../api';
+import { useHistory } from '../useHistory';
+import type { ProjectIdea } from '../../shared/ideas';
 
 export default function IdeaBoard({
   data,
@@ -30,7 +32,11 @@ export default function IdeaBoard({
     [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
-  const ideas = (data.state.ideas || []).filter((idea) => idea.projectId === project.id);
+  const history = useHistory<ProjectIdea>(
+    `/projects/${project.id}/ideas`,
+    (data.state.ideas || []).filter((idea) => idea.projectId === project.id),
+  );
+  const ideas = history.entries;
   async function act(fn: () => Promise<unknown>, text = '') {
     setBusy(true);
     setMessage('');
@@ -155,6 +161,12 @@ export default function IdeaBoard({
         </p>
       )}
       <div className="idea-card-grid">
+        {history.more && (
+          <button className="button secondary" disabled={history.busy} onClick={history.loadOlder}>
+            Load older ideas
+          </button>
+        )}
+        {history.error && <p role="alert">{history.error}</p>}
         {ideas.map((idea) => {
           const task = data.state.tasks.find((task) => task.id === idea.investigationTaskId);
           return (
