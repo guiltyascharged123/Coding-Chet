@@ -1,3 +1,4 @@
+import { INPUT_LIMITS } from '../../shared/limits';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Loader2, Plus } from 'lucide-react';
 import type { Agent, Project, Provider, Workflow, ReasoningEffort } from '../../shared/types';
@@ -157,13 +158,17 @@ export default function ProjectModal({
         <label>
           Project name
           <input
+            aria-label="Project name"
             autoFocus
             required
             minLength={2}
-            maxLength={80}
+            maxLength={INPUT_LIMITS.projectTitle}
             value={draft.title}
             onChange={(e) => change({ title: e.target.value })}
           />
+          <small className="field-hint">
+            Project name: 2–{INPUT_LIMITS.projectTitle} characters.
+          </small>
         </label>
         <label>
           The brief
@@ -171,14 +176,19 @@ export default function ProjectModal({
             Goal, requested deliverables, constraints, available evidence, and what success means.
           </span>
           <textarea
+            aria-label="The brief"
             required
             minLength={20}
-            maxLength={6000}
+            maxLength={INPUT_LIMITS.projectBrief}
             rows={7}
             value={draft.brief}
             onChange={(e) => change({ brief: e.target.value })}
             placeholder="What should this team accomplish?"
           />
+          <small className="field-hint">
+            {draft.brief.length} / {INPUT_LIMITS.projectBrief} characters; at least 20. Add ongoing
+            direction in Project conversation.
+          </small>
         </label>
         <label>
           Team & workflow

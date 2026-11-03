@@ -1,3 +1,5 @@
+import LimitsReference from './LimitsReference';
+import { POLICY_FIELDS } from '../../shared/limits';
 import UsageHistory from './UsageHistory';
 import { useState, type FormEvent } from 'react';
 import type { Bootstrap, CostPolicy, Project } from '../../shared/types';
@@ -30,7 +32,7 @@ export default function WorkspaceControls({
   };
   const [tab, setTab] = useState(initialTab),
     [draft, setDraft] = useState<CostPolicy>(() =>
-      structuredClone(data.state.policy || defaultPolicy),
+      structuredClone({ ...defaultPolicy, ...data.state.policy }),
     ),
     [message, setMessage] = useState(''),
     [busy, setBusy] = useState(false);
@@ -73,16 +75,7 @@ export default function WorkspaceControls({
       await response.blob(),
     );
   }
-  const fields: [keyof CostPolicy, string, number, number][] = [
-    ['maxConcurrent', 'Active tasks across the workspace', 1, 4],
-    ['maxTasks', 'Tasks allowed per project', 1, 100],
-    ['maxRevisions', 'Revisions allowed per task', 0, 20],
-    ['maxRequests24h', 'Requests in the last 24 hours', 1, 10000],
-    ['maxInputBytes', 'Maximum input bytes', 2000, 200000],
-    ['maxOutputTokens', 'Maximum output tokens (API/local)', 256, 16000],
-    ['dailyBudgetUsd', 'API estimate budget, rolling 24 hours ($)', 0, 1000],
-    ['projectBudgetUsd', 'API estimate budget per project ($)', 0, 1000],
-  ];
+  const fields = POLICY_FIELDS;
   return (
     <Modal
       title="Workspace controls"
@@ -94,6 +87,7 @@ export default function WorkspaceControls({
         <div className="controls-tabs" role="tablist" aria-label="Workspace controls">
           {[
             ['limits', 'Limits & connections'],
+            ['reference', 'Limits reference'],
             ['usage', 'Usage'],
             ['memory', 'Project memory'],
             ['instructions', 'Team instructions'],
@@ -135,12 +129,15 @@ export default function WorkspaceControls({
                 type="button"
                 className="text-button"
                 onClick={() => {
-                  setDraft(structuredClone(data.state.policy || defaultPolicy));
+                  setDraft(structuredClone({ ...defaultPolicy, ...data.state.policy }));
                   setPolicyRevision(data.state.policyRevision || 0);
                   setMessage('Saved limits reloaded.');
                 }}
               >
                 Reload saved limits · discard edits
+              </button>
+              <button type="button" className="text-button" onClick={() => setTab('reference')}>
+                See all field, model and storage limits
               </button>
               <p>
                 One active task is the economical default. Limits pause work instead of discarding
@@ -156,10 +153,11 @@ export default function WorkspaceControls({
                 Enable separately billed API requests
               </label>
               <div className="controls-grid">
-                {fields.map(([name, label, min, max]) => (
+                {fields.map(([name, label, min, max, why]) => (
                   <label key={name}>
                     {label}
                     <NumberField
+                      aria-label={label}
                       min={min}
                       max={max}
                       step={name.endsWith('Usd') ? '0.01' : '1'}
@@ -167,6 +165,9 @@ export default function WorkspaceControls({
                       required
                       onValue={(value) => setDraft({ ...draft, [name]: value })}
                     />
+                    <small className="field-hint">
+                      Allowed range: {min}–{max}. {why}
+                    </small>
                   </label>
                 ))}
               </div>
@@ -250,6 +251,9 @@ export default function WorkspaceControls({
               </button>
             </form>
           </>
+        )}
+        {tab === 'reference' && (
+          <LimitsReference projectId={selectedProject?.id} onEdit={() => setTab('limits')} />
         )}
         {tab === 'usage' && <UsageHistory data={data} projectId={selectedProject?.id} />}
         {tab === 'memory' && (

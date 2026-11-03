@@ -485,10 +485,6 @@ export class Engine extends EventEmitter {
         409,
       );
     if (values.title === project.title && values.brief === project.brief) return project;
-    if ((project.briefHistory?.length || 0) >= 100)
-      throw new AppError(
-        'This project has 100 saved versions. Export its history before creating a new project.',
-      );
     const briefChanged = values.brief !== project.brief;
     const changedAt = Math.max(Date.now(), (project.updatedAt ?? project.createdAt) + 1);
     (project.briefHistory ||= []).push({
@@ -540,6 +536,7 @@ export class Engine extends EventEmitter {
     if (this.planners.has(project.id)) throw new AppError('Planning is already active.', 409);
     if (this.state.tasks.some((t) => t.projectId === project.id && !t.conversationMessageId))
       throw new AppError('Edit the existing plan instead of replacing it.');
+    project.planningStartedAt = Date.now();
     if (!modelReadiness(runtimeInfo(), project.provider, project.model).ready) {
       project.planningStatus = 'failed';
       project.planningError =
@@ -559,7 +556,7 @@ export class Engine extends EventEmitter {
       store: this.store,
       project,
       signal: controller.signal,
-      ...this.tracing(project, 'plan'),
+      ...this.tracing(project, 'plan', undefined, (project.team || this.state.agents)[0]?.id),
     })
       .then((tasks) => {
         if (!controller.signal.aborted) {
@@ -822,10 +819,6 @@ export class Engine extends EventEmitter {
       )
     )
       throw new AppError('Pause the project before changing team instructions.');
-    if ((project.instructionHistory?.length || 0) >= 50)
-      throw new AppError(
-        'This project has reached its 50 saved instruction versions. Export a backup before starting a new project.',
-      );
     for (const task of this.state.tasks.filter((t) => t.projectId === id)) delete task.recovery;
     project.instructionHistory ||= [];
     project.instructionHistory.push({ id: randomUUID(), text, reason, createdAt: Date.now() });
@@ -1250,7 +1243,7 @@ export class Engine extends EventEmitter {
       policy(this.store).maxTasks
     )
       throw new AppError(
-        'This plan exceeds the task limit. Increase the limit in Workspace controls; no tasks have been discarded.',
+        `This plan has ${this.state.tasks.filter((task) => task.projectId === id && !task.conversationMessageId).length} tasks; Tasks allowed per project is ${policy(this.store).maxTasks}. Increase it in Workspace controls; no tasks have been discarded.`,
       );
     if (!modelReadiness(runtimeInfo(), project.provider, project.model).ready)
       throw new AppError(modelReadiness(runtimeInfo(), project.provider, project.model).message);
@@ -1419,7 +1412,7 @@ export class Engine extends EventEmitter {
     const task = this.task(approval.taskId);
     if (decision === 'revise' && (task.revisions || 0) >= policy(this.store).maxRevisions)
       throw new AppError(
-        'The revision limit is reached. Increase it explicitly in Workspace controls before requesting another revision.',
+        `The revision limit is reached: this task has used ${task.revisions || 0} of ${policy(this.store).maxRevisions} revisions. Increase Revisions allowed per task in Workspace controls before requesting another revision.`,
       );
     approval.status = decision === 'approve' ? 'approved' : 'revision';
     approval.feedback =
@@ -1614,6 +1607,7 @@ export class Engine extends EventEmitter {
       controller = new AbortController();
     this.conferences.set(meeting.id, controller);
     meeting.status = 'gathering';
+    meeting.startedAt = Date.now();
     delete meeting.error;
     this.event(
       project.id,
@@ -2291,6 +2285,7 @@ export class Engine extends EventEmitter {
       limits: {
         maxOutputTokens: policy(this.store).maxOutputTokens,
         maxInputBytes: policy(this.store).maxInputBytes,
+        localContextTokens: policy(this.store).localContextTokens ?? 32768,
       },
     };
   }

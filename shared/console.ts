@@ -5,7 +5,18 @@ export const CONSOLE_LIMITS = {
   workspaceEntries: 1000,
   workspaceCharacters: 2000000,
 };
+export type ModelProgress = {
+  stage: 'preparing' | 'waiting' | 'streaming' | 'validating';
+  purpose?: 'initial' | 'correction' | 'retrieval';
+  inputBytes?: number;
+  contextLimitBytes?: number;
+  outputLimitTokens?: number;
+  timeoutSeconds?: number;
+  sourceCount?: number;
+  receivedCharacters?: number;
+};
 export type ConsoleEvent = {
+  progress?: ModelProgress;
   id?: string;
   type: 'request' | 'response' | 'command' | 'tool' | 'status' | 'error';
   text: string;

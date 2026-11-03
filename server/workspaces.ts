@@ -1,3 +1,4 @@
+import { RESOURCE_LIMITS } from '../shared/limits.js';
 import { createHash } from 'node:crypto';
 import { mkdirSync, lstatSync, readdirSync, realpathSync, readFileSync } from 'node:fs';
 import { resolve, dirname, join, relative, isAbsolute } from 'node:path';
@@ -43,7 +44,10 @@ const excluded = (name: string) =>
 export function workspaceFiles(root: string) {
   const files: { path: string; bytes: number }[] = [];
   function walk(folder: string, depth: number) {
-    if (depth > 15) return;
+    if (depth > RESOURCE_LIMITS.projectDepth)
+      throw new Error(
+        `The folder tree exceeds ${RESOURCE_LIMITS.projectDepth} levels, the browser file/export depth limit. No incomplete ZIP was created. Use the local folder directly.`,
+      );
     for (const e of readdirSync(folder, { withFileTypes: true })) {
       if (excluded(e.name) || e.isSymbolicLink()) continue;
       const path = join(folder, e.name);
@@ -53,7 +57,7 @@ export function workspaceFiles(root: string) {
           path: relative(root, path).split('\\').join('/'),
           bytes: lstatSync(path).size,
         });
-      if (files.length > 2000)
+      if (files.length > RESOURCE_LIMITS.projectFiles)
         throw new Error(
           'The project exceeds the 2,000-file browser export limit. Use the local folder directly.',
         );
@@ -62,7 +66,11 @@ export function workspaceFiles(root: string) {
   walk(root, 0);
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
-export function workspaceFile(root: string, name: string, max = 256000) {
+export function workspaceFile(
+  root: string,
+  name: string,
+  max: number = RESOURCE_LIMITS.filePreviewBytes,
+) {
   if (
     !name ||
     isAbsolute(name) ||
@@ -77,14 +85,18 @@ export function workspaceFile(root: string, name: string, max = 256000) {
   }
   const info = lstatSync(path);
   if (!info.isFile() || info.size > max)
-    throw new Error('Use the local folder for large or non-file items.');
+    throw new Error(
+      `File size ${info.size} bytes exceeds the browser preview limit ${max} bytes, or the selection is not a file. Use the local project folder for large items.`,
+    );
   return readFileSync(path);
 }
 export function workspaceZip(root: string) {
   const files = workspaceFiles(root);
-  if (files.reduce((n, f) => n + f.bytes, 0) > 25 * 1024 * 1024)
+  if (files.reduce((n, f) => n + f.bytes, 0) > RESOURCE_LIMITS.sourceZipBytes)
     throw new Error('Use the local folder for projects larger than 25 MB.');
   return zipSync(
-    Object.fromEntries(files.map((f) => [f.path, workspaceFile(root, f.path, 25 * 1024 * 1024)])),
+    Object.fromEntries(
+      files.map((f) => [f.path, workspaceFile(root, f.path, RESOURCE_LIMITS.sourceZipBytes)]),
+    ),
   );
 }

@@ -65,7 +65,7 @@ export default function Collaboration({
       <p className="field-hint">
         {project.provider === 'demo'
           ? 'Demo meetings are labeled simulations; no AI is called.'
-          : `A meeting uses one model request per selected participant, plus one for the chair; malformed replies can add one correction per turn. Existing limits apply. Contributions are generated one at a time.`}{' '}
+          : `A meeting uses one model request per selected participant, plus one for the chair; malformed replies use the format-correction allowance in Workspace controls. Existing limits apply. Contributions are generated one at a time.`}{' '}
         Automatic meetings:{' '}
         {project.meetingPolicy?.enabled
           ? `kickoff and after every ${project.meetingPolicy.everyTasks} completed tasks`
@@ -241,6 +241,17 @@ export default function Collaboration({
               </div>
             </section>
           ))}
+          {meeting.responseIssue && (
+            <details>
+              <summary>Rejected meeting reply · saved validation details</summary>
+              <ul>
+                {meeting.responseIssue.issues.map((issue, index) => (
+                  <li key={index}>{issue}</li>
+                ))}
+              </ul>
+              <pre className="rejected-meeting-reply">{meeting.responseIssue.response}</pre>
+            </details>
+          )}
           {meeting.error && (
             <p className="form-error" role="alert">
               {meeting.error}

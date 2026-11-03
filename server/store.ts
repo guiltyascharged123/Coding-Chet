@@ -62,6 +62,7 @@ export class Store {
     this.state = row ? JSON.parse(row.payload) : initialState(process.env.WORKROOM_DEMO === '1');
     if (row && (this.state.schemaVersion || 1) < 6) this.snapshot('before-upgrade');
     this.state.schemaVersion = 6;
+    this.state.policy = { ...structuredClone(defaultPolicy), ...this.state.policy };
     if (
       this.state.policy?.maxTasks === 6 &&
       Object.entries(defaultPolicy).every(

@@ -262,7 +262,7 @@ test('help, listing, zero-test results and scratch changes cannot certify softwa
 
 test('failed planning can recover on the same project after a real conversation reply', async () => {
   let plans = 0;
-  const h = fixture((input) => (!input.task && plans++ === 0 ? { tasks: [] } : undefined));
+  const h = fixture((input) => (!input.task && plans++ < 2 ? { tasks: [] } : undefined));
   try {
     const p = await h.create('Retry after a question', 'ai');
     await until(() => p.planningStatus === 'failed');

@@ -1,3 +1,4 @@
+import ModelActivity from './components/ModelActivity';
 import ConnectBrowser from './components/ConnectBrowser';
 import { PairingRequired } from './api';
 import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
@@ -171,7 +172,8 @@ export default function App() {
   const selectedTask = state?.tasks.find((t) => t.id === taskId);
   const selectedAgent = state?.agents.find((a) => a.id === agentId);
   const selectedReview = state?.approvals.find((a) => a.id === reviewId && a.status === 'pending');
-  const officeConsole = useProjectConsole(view === 'workspace' ? project?.id : undefined);
+  const [outputReconnect, setOutputReconnect] = useState(0);
+  const officeConsole = useProjectConsole(project?.id, outputReconnect);
   const work = Object.fromEntries(
     (project ? state?.agents || [] : []).map((agent) => [
       agent.id,
@@ -728,6 +730,27 @@ export default function App() {
                       : 'Run team'}
             </button>
           </section>
+          <ModelActivity
+            data={data}
+            projectId={project.id}
+            entries={officeConsole.entries}
+            connected={officeConsole.connected}
+            busy={busy}
+            onConsole={(job) => {
+              setConsoleFocus({ projectId: project.id, taskId: job.taskId, agentId: job.agentId });
+              setView('console');
+            }}
+            onPause={() =>
+              act(
+                () => api(`/projects/${project.id}/pause`),
+                'Project work paused. Review saved output and usage before retrying interrupted jobs.',
+              )
+            }
+            onLimits={() => {
+              setControlsTab('reference');
+              setModal('controls');
+            }}
+          />
           {(project.briefRevision || 0) > 0 &&
             tasks.some(
               (task) => task.output && (task.briefRevision || 0) < (project.briefRevision || 0),
@@ -797,6 +820,33 @@ export default function App() {
               <div>
                 <strong>Planning needs attention. Your project and brief are saved.</strong>
                 <p>{project.planningError}</p>
+                {project.planningIssue && (
+                  <details className="planning-rejection">
+                    <summary>Rejected plan · saved validation details</summary>
+                    <ul>
+                      {project.planningIssue.issues.map((issue, index) => (
+                        <li key={index}>{issue}</li>
+                      ))}
+                    </ul>
+                    <p>
+                      {project.planningIssue.truncated
+                        ? 'Saved display excerpt; retained request receipts and console may contain additional context.'
+                        : 'This generated plan has not been accepted. Your original brief remains saved.'}
+                    </p>
+                    <pre>{project.planningIssue.response}</pre>
+                    <button
+                      className="button secondary small"
+                      onClick={() =>
+                        download(
+                          `${project.title}-rejected-plan.json`,
+                          project.planningIssue!.response,
+                        )
+                      }
+                    >
+                      Download rejected plan
+                    </button>
+                  </details>
+                )}
               </div>
               <div className="file-actions">
                 <button className="button secondary small" onClick={() => openConnections()}>
@@ -1420,6 +1470,8 @@ export default function App() {
           )}
           {view === 'console' && (
             <LiveConsole
+              stream={officeConsole}
+              onReconnect={() => setOutputReconnect((value) => value + 1)}
               key={project.id}
               project={project}
               team={state.agents}

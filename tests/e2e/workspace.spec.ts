@@ -47,6 +47,9 @@ test('workspace limits, verified memory, backup downloads and validated restore 
 test('a project runs through revision, human approval, outputs, and persistent reload', async ({
   page,
 }) => {
+  // Two approval waits and the final handoff each have their own 15-second
+  // allowance, followed by native export and reload on software-rendered WebGL.
+  test.setTimeout(75000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
@@ -305,6 +308,9 @@ test('walking agents, readable surfaces, office documents, and native exports wo
   const { project: officeProject } = await created.json();
   await page.evaluate((id) => localStorage.setItem('workroom-project', id), officeProject.id);
   await page.reload();
+  // The movement checks above exercise WebGL. Use the board for the document
+  // workflow so software-rendered 3D does not contend with export/approval clicks.
+  await page.getByRole('button', { name: 'Task board', exact: true }).click();
   await page.getByRole('button', { name: 'Run team', exact: true }).click();
   await page.getByRole('button', { name: 'Review work', exact: true }).click({ timeout: 15000 });
   await expect(page.getByRole('dialog')).toContainText('Milestone schedule');
@@ -1418,7 +1424,7 @@ test('office shows real assignment activity, opens the agent console and depicts
   await expect(office).toContainText('Waiting for Mira');
   await expect(page.locator('.scene-agent-label[data-active="true"]')).toHaveCount(0);
   await page.getByRole('button', { name: /^(Run|Resume) team$/ }).click();
-  await expect(office.locator('[data-agent-id="mira"]')).toContainText('model processing');
+  await expect(office.locator('[data-agent-id="mira"]')).toContainText('Waiting for model reply');
   await expect(page.locator('.scene-agent-label[data-agent-id="mira"]')).toHaveAttribute(
     'data-behavior',
     'reading',

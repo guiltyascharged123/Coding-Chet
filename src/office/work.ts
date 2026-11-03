@@ -116,6 +116,30 @@ export function officeWork(
   };
   if (!entry) return result;
   const model = providers[project.provider] || 'model';
+  if (entry.progress?.stage === 'preparing')
+    return {
+      ...result,
+      label: 'Preparing model request',
+      detail: 'Selecting the saved brief, role instructions and supporting evidence.',
+    };
+  if (entry.progress?.stage === 'waiting')
+    return {
+      ...result,
+      label:
+        entry.progress.purpose === 'correction'
+          ? 'Waiting for corrected reply'
+          : entry.progress.purpose === 'retrieval'
+            ? 'Waiting after source retrieval'
+            : 'Waiting for model reply',
+      detail: 'The request is in flight; no public reply has arrived yet.',
+    };
+  if (entry.progress?.stage === 'validating')
+    return {
+      ...result,
+      label: 'Checking model reply',
+      detail: 'A response arrived; its work has not yet been accepted.',
+    };
+
   if (entry.type === 'command')
     return {
       ...result,

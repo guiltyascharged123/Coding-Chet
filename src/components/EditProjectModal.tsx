@@ -1,3 +1,4 @@
+import { INPUT_LIMITS } from '../../shared/limits';
 import { useState, type FormEvent } from 'react';
 import type { Project } from '../../shared/types';
 import { WORKFLOWS } from '../../shared/workflows';
@@ -58,7 +59,7 @@ export default function EditProjectModal({
             aria-label="Project name"
             required
             minLength={2}
-            maxLength={80}
+            maxLength={INPUT_LIMITS.projectTitle}
             value={draft.title}
             onChange={(e) => setDraft({ ...draft, title: e.target.value })}
           />
@@ -69,11 +70,15 @@ export default function EditProjectModal({
             aria-label="Project brief"
             required
             minLength={20}
-            maxLength={6000}
+            maxLength={INPUT_LIMITS.projectBrief}
             rows={7}
             value={draft.brief}
             onChange={(e) => setDraft({ ...draft, brief: e.target.value })}
           />
+          <small className="field-hint">
+            {draft.brief.length} / {INPUT_LIMITS.projectBrief} characters; at least 20. Earlier
+            versions remain saved.
+          </small>
         </label>
         <label>
           What changed? (optional)

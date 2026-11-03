@@ -26,6 +26,7 @@ setInterval(() => {}, 1000);
 chmodSync(fakeCodex, 0o700);
 // Local deterministic model protocol fixture; no real accounts or inference.
 const seen = new Set();
+const plannerFailures = new Map();
 const modelServer = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   if (req.url === '/__codex-fixture') {
@@ -54,6 +55,43 @@ const modelServer = createServer(async (req, res) => {
     seen.add(input.brief);
     res.statusCode = 503;
     res.end('{}');
+    return;
+  }
+  if (
+    !input.task &&
+    (input.brief?.includes('E2E visible model progress') ||
+      input.brief?.includes('E2E visible correction'))
+  ) {
+    const key = input.projectScope.projectId,
+      count = (plannerFailures.get(key) || 0) + 1;
+    plannerFailures.set(key, count);
+    const invalid = input.brief.includes('E2E visible correction') && count === 1;
+    if (!invalid) await new Promise((resolve) => setTimeout(resolve, 5000));
+    const tasks = [
+      {
+        title: 'Compare the supplied costs',
+        description: 'Calculate the supported difference and label demand unknown.',
+        agentId: input.team[0].id,
+        dependencies: [],
+        requiresApproval: false,
+        workType: 'plan',
+        acceptanceCriteria: [
+          {
+            id: 'cost',
+            description: invalid
+              ? 'x'.repeat(301)
+              : 'Report $15 difference and missing demand evidence.',
+            evidence: 'report',
+          },
+        ],
+      },
+    ];
+    res.end(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ tasks }) } }],
+        usage: { prompt_tokens: 100, completion_tokens: 100 },
+      }),
+    );
     return;
   }
   if (input.meeting) {
@@ -95,6 +133,44 @@ const modelServer = createServer(async (req, res) => {
           },
         ],
         usage: { prompt_tokens: 100, completion_tokens: 50 },
+      }),
+    );
+    return;
+  }
+  if (
+    !input.task &&
+    (input.brief?.includes('E2E overlong planner title') ||
+      input.brief?.includes('E2E invalid planner details'))
+  ) {
+    const title =
+      'Competitive and market research: competitor analysis, acquisition effort/cost, delivery cost, unit economics, time‑to‑first‑validation';
+    const invalid = input.brief.includes('E2E invalid planner details');
+    const key = input.projectScope.projectId,
+      count = (plannerFailures.get(key) || 0) + 1;
+    plannerFailures.set(key, count);
+    const tasks = Array.from({ length: invalid ? 1 : 12 }, (_, index) => ({
+      title: index === 1 ? title : `Evidence-based assignment ${index + 1}`,
+      description:
+        'Compare supplied prices and clearly identify missing evidence. Do not invent demand or transactions.',
+      agentId: input.team[index % input.team.length].id,
+      dependencies: index ? [index - 1] : [],
+      requiresApproval: false,
+      workType: 'plan',
+      acceptanceCriteria: [
+        {
+          id: `c${index + 1}`,
+          description:
+            invalid && count <= 2
+              ? 'x'.repeat(301)
+              : 'Report the supported price difference and unverified demand.',
+          evidence: 'report',
+        },
+      ],
+    }));
+    res.end(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ tasks }) } }],
+        usage: { prompt_tokens: 100, completion_tokens: 200 },
       }),
     );
     return;

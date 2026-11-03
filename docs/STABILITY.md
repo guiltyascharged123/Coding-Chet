@@ -59,3 +59,5 @@ Deterministic tests cover protocols, persistence, recovery, request guards and b
 Record accepted deliverables, unsupported claims, unnecessary interruptions, corrections, latency and calls/tokens per accepted result. Run locally first with one active task and keep spending limits enabled. Do not treat a passing fixture or a model-size label as proof that a real model performs these tasks well.
 
 Conversations, ideas and usage also have paginated history; the previous 100/500 storage caps no longer stop a workspace. Plan revisions are retained for inspection/download. Usage totals query the full ledger even when the browser shows one page. See [the audit repair guide](AUDIT-REPAIRS.md) for migration, stale edits and active-direction handling.
+
+See [Model activity, limits and planning recovery](LIMITS-AND-MODEL-ACTIVITY.md) for visible request stages, the long-title repair, editable retrieval/correction/context settings, field-level diagnostics and removal of arbitrary record-count stops.

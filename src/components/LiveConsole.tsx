@@ -23,12 +23,16 @@ export default function LiveConsole({
   tasks,
   focus = {},
   meetingActive = false,
+  stream,
+  onReconnect,
 }: {
   project: Project;
   team: Agent[];
   tasks: Task[];
   focus?: { agentId?: string; taskId?: string };
   meetingActive?: boolean;
+  stream?: ReturnType<typeof useProjectConsole>;
+  onReconnect?: () => void;
 }) {
   const [agent, setAgent] = useState(focus.agentId || '');
   const [task, setTask] = useState(focus.taskId || '');
@@ -38,7 +42,8 @@ export default function LiveConsole({
   const [follow, setFollow] = useState(true);
   const [reconnect, setReconnect] = useState(0);
   const viewport = useRef<HTMLDivElement>(null);
-  const { entries, connected, message: streamMessage } = useProjectConsole(project.id, reconnect);
+  const ownedStream = useProjectConsole(stream ? undefined : project.id, reconnect);
+  const { entries, connected, message: streamMessage } = stream || ownedStream;
   const [feedback, setMessage] = useState('');
   const message = streamMessage || feedback;
   const filtered = entries.filter(
@@ -152,7 +157,8 @@ export default function LiveConsole({
           className="button secondary small"
           onClick={() => {
             setMessage('');
-            setReconnect((n) => n + 1);
+            if (onReconnect) onReconnect();
+            else setReconnect((n) => n + 1);
           }}
         >
           Reconnect

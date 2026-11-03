@@ -19,9 +19,11 @@ export interface Meeting {
   participants: Agent[];
   contributions: { agentId: string; role: string; content: string; createdAt: number }[];
   summary: string;
+  responseIssue?: Task['responseIssue'];
   speakerId?: string;
   error?: string;
   createdAt: number;
+  startedAt?: number;
   completedAt?: number;
   actions?: {
     id: string;
@@ -121,6 +123,8 @@ export interface Project {
   planning?: 'template' | 'ai' | 'manual';
   planningStatus?: 'planning' | 'failed' | 'ready';
   planningError?: string;
+  planningStartedAt?: number;
+  planningIssue?: NonNullable<Task['responseIssue']> & { contextHash?: string };
   workflow?: Workflow;
   team?: Agent[];
   workspaceFolder?: string;
@@ -155,6 +159,9 @@ export interface CostPolicy {
   maxConcurrent: number;
   maxTasks: number;
   maxRevisions: number;
+  maxFormatCorrections?: number;
+  maxRetrievalRounds?: number;
+  localContextTokens?: number;
   maxRequests24h: number;
   maxInputBytes: number;
   maxOutputTokens: number;

@@ -1,3 +1,4 @@
+import { RESOURCE_LIMITS } from '../shared/limits.js';
 import { createHash } from 'node:crypto';
 import { codexReadiness } from './codex-readiness.js';
 import type { CodexAuthProof } from '../shared/codex-connection.js';
@@ -310,7 +311,11 @@ export async function localGenerate(
   signal?: AbortSignal,
   json = false,
   outputSchema?: Record<string, unknown>,
-  progress?: { onTrace?: (event: ConsoleEvent) => void; timeoutSeconds?: number },
+  progress?: {
+    onTrace?: (event: ConsoleEvent) => void;
+    timeoutSeconds?: number;
+    contextTokens?: number;
+  },
 ): Promise<Generated> {
   const seconds = progress?.timeoutSeconds || 900;
   const timeout = AbortSignal.timeout(seconds * 1000);
@@ -339,7 +344,10 @@ export async function localGenerate(
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        options: { num_predict: maxTokens, num_ctx: localContextTokens(system, user, maxTokens) },
+        options: {
+          num_predict: maxTokens,
+          num_ctx: localContextTokens(system, user, maxTokens, progress?.contextTokens),
+        },
       }),
     });
     if (!response.ok)
@@ -352,9 +360,9 @@ export async function localGenerate(
           'Ollama reported a generation error. Check its terminal output and available memory.',
         );
       if (typeof data.message?.content === 'string') text += data.message.content;
-      if (text.length > 200000)
+      if (text.length > RESOURCE_LIMITS.modelReplyCharacters)
         throw new Error(
-          'The local reply exceeded the result size limit. The partial public reply is in Live output. Reduce the output limit before retrying.',
+          `The local reply exceeded ${RESOURCE_LIMITS.modelReplyCharacters} characters, the application result-size limit. The partial public reply is in Live output. Request a smaller deliverable or lower Maximum output tokens before retrying.`,
         );
       final = { ...final, ...data };
       if (text && (data.done || Date.now() - last > 200)) {
@@ -364,6 +372,10 @@ export async function localGenerate(
           type: 'response',
           text,
           status: data.done ? 'completed' : 'in_progress',
+          progress: {
+            stage: data.done ? 'validating' : 'streaming',
+            receivedCharacters: text.length,
+          },
         });
       }
     };
@@ -379,8 +391,10 @@ export async function localGenerate(
         while (true) {
           const chunk = await reader.read();
           pending += decoder.decode(chunk.value, { stream: !chunk.done });
-          if (pending.length > 1000000)
-            throw new Error('Ollama returned an oversized stream item.');
+          if (pending.length > RESOURCE_LIMITS.ollamaStreamLineCharacters)
+            throw new Error(
+              `Ollama returned a stream line larger than ${RESOURCE_LIMITS.ollamaStreamLineCharacters} characters. The partial public reply is saved; lower Maximum output tokens or split the assignment.`,
+            );
           const lines = pending.split('\n');
           pending = lines.pop() || '';
           for (const line of lines) if (line.trim()) receive(JSON.parse(line));
@@ -416,11 +430,16 @@ export async function localGenerate(
   }
 }
 
-export function localContextTokens(system: string, user: string, maxTokens: number) {
+export function localContextTokens(
+  system: string,
+  user: string,
+  maxTokens: number,
+  ceiling: number = RESOURCE_LIMITS.ollamaContextTokens,
+) {
   // A byte-based estimate, with space for the output and schema. The transport
   // is also capped before dispatch; actual tokenization depends on the model.
   return Math.min(
-    32768,
+    ceiling,
     Math.max(
       8192,
       Math.ceil((Buffer.byteLength(system + user) / 3 + maxTokens + 1024) / 4096) * 4096,
@@ -680,12 +699,13 @@ export async function codexWork(
   research = false,
   onTrace?: (event: ConsoleEvent) => void,
   assignment?: Pick<Task, 'workType' | 'acceptanceCriteria'>,
+  timeoutSeconds: number = RESOURCE_LIMITS.nativeJobSeconds,
 ): Promise<Generated> {
   if (!managedInfo.codexReady) throw new CodexWorkerError('CODEX_AUTH');
   const controller = new AbortController();
   const combined = AbortSignal.any([
     controller.signal,
-    AbortSignal.timeout(15 * 60_000),
+    AbortSignal.timeout(timeoutSeconds * 1000),
     ...(signal ? [signal] : []),
   ]);
   try {

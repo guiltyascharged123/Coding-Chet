@@ -1,0 +1,100 @@
+import type { CostPolicy } from './types.js';
+
+export const INPUT_LIMITS = {
+  taskTitle: 100,
+  taskDescription: 4000,
+  projectTitle: 80,
+  projectBrief: 6000,
+} as const;
+export const RESOURCE_LIMITS = {
+  requestBytes: 1024 * 1024,
+  restoreBytes: 25 * 1024 * 1024,
+  projectFiles: 2000,
+  projectDepth: 15,
+  filePreviewBytes: 256000,
+  sourceZipBytes: 25 * 1024 * 1024,
+  modelReplyCharacters: 200000,
+  ollamaStreamLineCharacters: 1000000,
+  ollamaContextTokens: 32768,
+  nativeJobSeconds: 900,
+  browserSessionHours: 12,
+} as const;
+export const POLICY_FIELDS: [keyof CostPolicy, string, number, number, string][] = [
+  [
+    'maxConcurrent',
+    'Active tasks across the workspace',
+    1,
+    4,
+    'Limits simultaneous jobs to control RAM and account usage. Coding tasks sharing a folder remain serial.',
+  ],
+  [
+    'maxTasks',
+    'Tasks allowed per project',
+    1,
+    100,
+    'Caps main-plan assignments plus internal follow-ups; conversation threads have their own task allowance.',
+  ],
+  [
+    'maxRevisions',
+    'Revisions allowed per task',
+    0,
+    20,
+    'Applies to human-requested revisions and internal delegation rounds; existing work remains saved.',
+  ],
+  [
+    'maxFormatCorrections',
+    'Automatic format corrections per response',
+    0,
+    2,
+    'Extra same-model calls allowed for invalid planner, text-task or meeting JSON. Coding tool jobs are never repeated automatically.',
+  ],
+  [
+    'maxRetrievalRounds',
+    'Source retrieval rounds per task',
+    0,
+    8,
+    'Additional text-model requests for saved evidence. A final work result is still required; this does not grant new tools.',
+  ],
+  [
+    'localContextTokens',
+    'Ollama context ceiling (tokens)',
+    8192,
+    131072,
+    'Local context request ceiling; larger windows use more RAM and CPU. The model may support less. Actual input also obeys Maximum input bytes.',
+  ],
+  [
+    'maxRequests24h',
+    'Requests in the last 24 hours',
+    1,
+    10000,
+    'Counts recorded jobs, including planning, retrieval and correction. Codex may use several model turns inside a job.',
+  ],
+  [
+    'maxInputBytes',
+    'Maximum input bytes',
+    2000,
+    200000,
+    'UTF-8 transport budget. Required instructions stay intact; supporting context is excerpted and originals retained.',
+  ],
+  [
+    'maxOutputTokens',
+    'Maximum output tokens (API/local)',
+    256,
+    16000,
+    'Generation ceiling, not a target. Native Codex manages its own output token behavior.',
+  ],
+  [
+    'dailyBudgetUsd',
+    'API estimate budget, rolling 24 hours ($)',
+    0,
+    1000,
+    'Workroom dispatch estimate only; it cannot control unrelated provider spending or subscription allowance.',
+  ],
+  [
+    'projectBudgetUsd',
+    'API estimate budget per project ($)',
+    0,
+    1000,
+    'Reserves a conservative estimate before paid dispatch; uncertain usage remains recorded.',
+  ],
+];

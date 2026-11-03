@@ -133,7 +133,7 @@ export default function WorkEvidence({ task }: { task: Task }) {
           <p>
             The brief and assignment remain intact. Supporting sources are selected to fit.
             Originals remain in saved outputs, decisions and memory; the model can request source
-            passages in up to two additional requests.
+            passages within the Source retrieval rounds per task setting in Workspace controls.
           </p>
           <ul>
             {task.contextReport.sources.map((s, i) => (

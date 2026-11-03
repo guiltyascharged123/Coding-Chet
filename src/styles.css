@@ -5526,3 +5526,137 @@ button.connection:hover {
   flex: 0 0 18px;
   margin-top: 4px;
 }
+
+.planning-rejection {
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+}
+.planning-rejection summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.planning-rejection pre {
+  max-width: 100%;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 14px;
+  background: #25333e;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.limits-reference {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.limits-reference label {
+  display: grid;
+  gap: 8px;
+}
+.limits-reference input {
+  width: 100%;
+  min-width: 0;
+}
+.limits-reference article {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  margin: 10px 0;
+}
+.limits-reference p {
+  margin: 8px 0;
+}
+.limits-reference small {
+  color: var(--muted);
+}
+.rejected-meeting-reply {
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.model-activity {
+  min-width: 0;
+  margin: 18px 0;
+  padding: 20px;
+  border: 1px solid #607b8c;
+  border-radius: 12px;
+  background: #2c3d49;
+  overflow-wrap: anywhere;
+}
+.model-activity h2 {
+  font-size: 20px;
+  margin: 0;
+}
+.model-activity .section-header {
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0 0 12px;
+}
+.model-activity article {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.model-job-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.model-job-heading > div {
+  min-width: 0;
+  flex: 1 1 260px;
+}
+.model-job-heading b {
+  color: #dcc399;
+  font-size: 17px;
+}
+.model-job-heading p {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+.model-request-details {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+.model-request-details summary {
+  cursor: pointer;
+}
+.model-request-details p {
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+.model-activity small {
+  color: var(--muted);
+}
+.model-activity dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin: 14px 0;
+}
+.model-activity dl > div {
+  min-width: 0;
+}
+.model-activity dt {
+  font-size: 13px;
+  color: var(--muted);
+}
+.model-activity dd {
+  font-size: 15px;
+  margin: 4px 0;
+}
+.model-activity .button {
+  max-width: 100%;
+  white-space: normal;
+}

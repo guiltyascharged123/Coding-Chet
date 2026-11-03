@@ -1,3 +1,4 @@
+import { INPUT_LIMITS } from '../../shared/limits';
 import { useState } from 'react';
 import type { Agent, Project, Task, ReasoningEffort } from '../../shared/types';
 import { api, saveBlob } from '../api';
@@ -236,8 +237,8 @@ export default function PlanEditor({
               onValue={(timeout) => saveDraft({ ...draft, timeout })}
             />
             <span className="field-hint">
-              Each text/model request can run for this long. Local CPU inference may need several
-              minutes. Coding jobs have a separate 15-minute limit.
+              Each model job, including managed coding, uses this timeout. Local CPU inference can
+              need several minutes. Allowed range: 60–3600 seconds; default 900.
             </span>
           </label>
 
@@ -290,9 +291,9 @@ export default function PlanEditor({
           </label>
           <p className="field-hint">
             Kickoff, then progress checkpoints when more work is ready. A meeting adds one model
-            request per teammate plus one chair summary; malformed replies can add one correction
-            per turn. Existing limits apply; completed contributions survive retries. Settings save
-            with this plan.
+            request per teammate plus one chair summary; malformed replies use the Automatic format
+            corrections per response allowance in Workspace controls. Existing limits apply;
+            completed contributions survive retries. Settings save with this plan.
           </p>
         </fieldset>
         {rows.map((t, i) => {
@@ -308,19 +309,27 @@ export default function PlanEditor({
                 <input
                   aria-label={`Task ${i + 1} title`}
                   value={t.title}
-                  maxLength={100}
+                  maxLength={INPUT_LIMITS.taskTitle}
                   onChange={(e) => change(t.id, { title: e.target.value })}
                 />
+                <small className="field-hint">
+                  {t.title.length} / {INPUT_LIMITS.taskTitle} characters. This is a display label;
+                  put full requirements in the assignment.
+                </small>
               </label>
               <label>
                 Assignment & acceptance criteria
                 <textarea
                   aria-label={`Task ${i + 1} assignment`}
                   rows={4}
-                  maxLength={4000}
+                  maxLength={INPUT_LIMITS.taskDescription}
                   value={t.description}
                   onChange={(e) => change(t.id, { description: e.target.value })}
                 />
+                <small className="field-hint">
+                  {t.description.length} / {INPUT_LIMITS.taskDescription} characters. Acceptance
+                  criteria: up to 10, each description up to 300 characters.
+                </small>
               </label>
               <label>
                 Assigned agent

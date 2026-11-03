@@ -149,7 +149,7 @@ test('invalid planner output is not replayed from cache and a stopped/restarted 
     let calls = 0;
     globalThis.fetch = (async () => {
       calls++;
-      return calls === 1
+      return calls <= 2
         ? Response.json({ choices: [{ message: { content: 'invalid JSON' } }] })
         : response();
     }) as typeof fetch;
@@ -169,7 +169,7 @@ test('invalid planner output is not replayed from cache and a stopped/restarted 
     );
     engine.retryPlanning(p.id);
     await until(() => p.planningStatus === 'ready');
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
     globalThis.fetch = ((_url, init) =>
       new Promise((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(new Error('Cancelled')), {

@@ -110,3 +110,5 @@ See [Reliability, history and work evidence](docs/STABILITY.md) for activity ret
 Use **Models & sign-in** for the full Connections page, provider configuration, official ChatGPT/Codex sign-in and local model instructions. Click the current project title to edit its brief. See [the easy Connections guide](docs/CONNECTIONS.md).
 
 The [November audit repairs](docs/AUDIT-REPAIRS.md) cover protected edits, full saved history, receipt recovery, private browser pairing and accountable meeting actions. Use the [model evaluation guide](docs/MODEL-EVALUATION.md) to check actual usefulness before a larger run.
+
+See [Model activity, limits and planning recovery](docs/LIMITS-AND-MODEL-ACTIVITY.md) for visible request stages, the long-title repair, editable retrieval/correction/context settings, field-level diagnostics and removal of arbitrary record-count stops.

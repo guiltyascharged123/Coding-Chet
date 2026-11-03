@@ -1,12 +1,15 @@
+import { RESOURCE_LIMITS } from '../shared/limits.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Observation } from '../shared/verification.js';
 import type { Attempt, CostPolicy, MemoryItem, Project, Provider, Task } from '../shared/types.js';
 import type { Store } from './store.js';
 import { defaultPolicy } from '../shared/schemas.js';
-import type { ConsoleEvent } from '../shared/console.js';
+import type { ConsoleEvent, ModelProgress } from '../shared/console.js';
 import { saveResponseIssue } from './work-results.js';
 
 export type GenerationContext = {
+  requestPurpose?: ModelProgress['purpose'];
+  inputContext?: Pick<ModelProgress, 'inputBytes' | 'contextLimitBytes' | 'sourceCount'>;
   onIdea?: (idea: import('../shared/ideas.js').IdeaProposal) => void;
   onMeetingActions?: (actions: { taskId: string; action: string }[]) => void;
   store?: Store;
@@ -121,14 +124,16 @@ export function reserve(
     usage = store.usageSummary(project.id);
   if (inputBytes > p.maxInputBytes)
     throw new Error(
-      'Input exceeds the configured context limit. Increase it in Workspace controls or reduce the assignment. No request was sent.',
+      `Input exceeds the configured context limit: needs ${inputBytes} bytes; Maximum input bytes is ${p.maxInputBytes}. Raise it in Workspace controls or reduce the assignment. No request was sent.`,
     );
   if (usage.requests24h >= p.maxRequests24h)
     throw new Error(
-      'The request limit for the last 24 hours has been reached. No request was sent.',
+      `The request limit for the last 24 hours has been reached: ${usage.requests24h} recorded / ${p.maxRequests24h} allowed. Review Usage or change Requests in the last 24 hours in Workspace controls. No request was sent.`,
     );
   if (usage.running >= p.maxConcurrent)
-    throw new Error('Another worker is active. Wait for it to finish.');
+    throw new Error(
+      `Another worker is active: ${usage.running} running / ${p.maxConcurrent} allowed. Wait, or change Active tasks across the workspace in Workspace controls.`,
+    );
   if (task && store.hasUncertain('task_id', task.id))
     throw new Error(
       'An earlier attempt is uncertain. Acknowledge it in Usage before retrying; it may already have consumed usage.',
@@ -160,7 +165,7 @@ export function reserve(
       projectCost = usage.projectCost;
     if (daily + reservedUsd > p.dailyBudgetUsd || projectCost + reservedUsd > p.projectBudgetUsd)
       throw new Error(
-        'The next request would exceed the workspace or project budget estimate. No request was sent.',
+        `The next request would exceed the budget estimate: next reservation $${reservedUsd.toFixed(4)}, rolling usage $${daily.toFixed(4)} / $${p.dailyBudgetUsd}, project usage $${projectCost.toFixed(4)} / $${p.projectBudgetUsd}. Review API estimate budgets and model prices in Workspace controls. No request was sent.`,
       );
   }
   const a: Attempt = {
@@ -244,6 +249,21 @@ export async function guarded(
     type: 'request',
     text: `Workroom instructions:\n${system}\n\nAssignment and selected context:\n${user}`,
     status: 'dispatching',
+    progress: {
+      stage: 'waiting',
+      purpose: ctx.requestPurpose || 'initial',
+      ...ctx.inputContext,
+      inputBytes: Buffer.byteLength(system + user, 'utf8'),
+      outputLimitTokens: policy(store).maxOutputTokens,
+      timeoutSeconds: ctx.project?.requestTimeoutSeconds || 900,
+    },
+  });
+  ctx.onTrace?.({
+    id: 'waiting-for-output',
+    type: 'status',
+    text: `Contacting ${provider}${model ? ` / ${model}` : ''}; waiting for public output. No completion receipt has been received.`,
+    status: 'waiting',
+    progress: { stage: 'waiting', purpose: ctx.requestPurpose || 'initial' },
   });
   // Keep the dispatch quote even if settings are edited while a request is running.
   const rate =
@@ -254,7 +274,17 @@ export async function guarded(
   try {
     const result = await generate();
     if (provider !== 'codex')
-      ctx.onTrace?.({ id: 'result', type: 'response', text: result.text, status: 'completed' });
+      ctx.onTrace?.({
+        id: 'result',
+        type: 'response',
+        text: result.text,
+        status: 'completed',
+        progress: {
+          stage: 'validating',
+          purpose: ctx.requestPurpose,
+          receivedCharacters: result.text.length,
+        },
+      });
     if (attempt && store) {
       const usageKnown =
         Number.isFinite(result.inputTokens) &&
@@ -276,8 +306,9 @@ export async function guarded(
           outputTokens: usageKnown ? result.outputTokens : undefined,
         },
         {
-          text: result.text.slice(0, 200000),
-          outputLimitReached: result.outputLimitReached || result.text.length > 200000,
+          text: result.text.slice(0, RESOURCE_LIMITS.modelReplyCharacters),
+          outputLimitReached:
+            result.outputLimitReached || result.text.length > RESOURCE_LIMITS.modelReplyCharacters,
           observations: result.observations,
         },
       );
@@ -285,19 +316,25 @@ export async function guarded(
     completionConfirmed = true;
     if (task && result.observations) task.observations = result.observations;
     if (result.outputLimitReached) {
-      const message =
-        'The model reached the configured output token limit before finishing its response. Open Workspace controls → Maximum output tokens and raise it within your budget, or request a smaller deliverable, then retry. The partial reply is saved; no automatic retry or API fallback was attempted.';
+      const message = `The model reached the configured output token limit (${policy(store).maxOutputTokens}) before finishing its response. Open Workspace controls → Maximum output tokens and raise it within your budget, or request a smaller deliverable, then retry. The partial reply is saved; no automatic retry or API fallback was attempted.`;
       saveResponseIssue(task, result.text, [message]);
       ctx.onContext?.();
       throw new Error(message);
     }
     if (!result.text.trim()) throw new Error('The model returned no document.');
-    if (result.text.length > 200000)
-      throw new Error('The model response exceeds the document limit.');
+    if (result.text.length > RESOURCE_LIMITS.modelReplyCharacters)
+      throw new Error(
+        `The model response is ${result.text.length} characters; the raw response limit is ${RESOURCE_LIMITS.modelReplyCharacters}. Lower Maximum output tokens or split the assignment. The partial reply is saved; no automatic retry was attempted.`,
+      );
     if (store && attempt && ctx.cache !== false && (!ctx.cacheWhen || ctx.cacheWhen(result.text)))
       store.cache(key, result.text);
     ctx.onTrace?.({
       type: 'status',
+      progress: {
+        stage: 'validating',
+        purpose: ctx.requestPurpose,
+        receivedCharacters: result.text.length,
+      },
       text: `Model request completed${result.inputTokens === undefined ? '' : ` · input tokens: ${result.inputTokens}`}${result.outputTokens === undefined ? '' : ` · output tokens: ${result.outputTokens}`}. Completion of a model request is separate from acceptance of the work.`,
       status: 'completed',
     });

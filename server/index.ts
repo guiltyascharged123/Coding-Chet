@@ -1,3 +1,6 @@
+import { RESOURCE_LIMITS, INPUT_LIMITS } from '../shared/limits.js';
+import { validationMessages, parseField } from '../shared/validation.js';
+import { limitsCatalog } from './limits-catalog.js';
 import 'dotenv/config';
 import express from 'express';
 import { timingSafeEqual, createHash } from 'node:crypto';
@@ -86,11 +89,13 @@ app.get('/api/session', (req, res) => {
   res.json({ token });
 });
 app.use((req, res, next) =>
-  express.json({ limit: req.path === '/api/restore' ? '25mb' : '1mb', inflate: false })(
-    req,
-    res,
-    next,
-  ),
+  express.json({
+    limit:
+      req.path.toLowerCase().replace(/\/+$/, '') === '/api/restore'
+        ? RESOURCE_LIMITS.restoreBytes
+        : RESOURCE_LIMITS.requestBytes,
+    inflate: false,
+  })(req, res, next),
 );
 const identity = runtimeIdentity(resolve('.'));
 const store = new Store(process.env.DATABASE_PATH || resolve('.data/workroom.sqlite'));
@@ -133,6 +138,13 @@ app.get('/api/health', (_req, res) =>
 );
 app.get('/api/state', (_req, res) => res.json(engine.bootstrap()));
 app.get(
+  '/api/limits',
+  route((req, res) => {
+    const id = parseField(z.string().max(100).optional(), 'projectId', req.query);
+    res.json(limitsCatalog(store, id ? engine.project(id) : undefined));
+  }),
+);
+app.get(
   '/api/projects/:id/directions',
   route((req, res) => {
     const project = engine.project(param(req, 'id'));
@@ -150,7 +162,11 @@ app.get(
   '/api/projects/:id/plan-history',
   route((req, res) => {
     engine.project(param(req, 'id'));
-    const before = z.coerce.number().int().nonnegative().optional().parse(req.query.before);
+    const before = parseField(
+      z.coerce.number().int().nonnegative().optional(),
+      'before',
+      req.query,
+    );
     res.json({ entries: store.planVersions(param(req, 'id'), before) });
   }),
 );
@@ -180,7 +196,7 @@ for (const [path, kind] of [
         store.historyPage(
           kind,
           param(req, 'id'),
-          z.string().max(300).optional().parse(req.query.before),
+          parseField(z.string().max(300).optional(), 'before', req.query),
         ),
       );
     }),
@@ -191,7 +207,7 @@ app.patch(
     engine.setDirection(
       param(req, 'id'),
       param(req, 'messageId'),
-      z.boolean().parse(req.body.active),
+      parseField(z.boolean(), 'active', req.body),
     );
     res.json({ ok: true });
   }),
@@ -277,8 +293,8 @@ app.post(
   route(async (req, res) => {
     const body = z
       .object({
-        title: z.string().trim().min(2).max(80),
-        brief: z.string().trim().min(20).max(6000),
+        title: z.string().trim().min(2).max(INPUT_LIMITS.projectTitle),
+        brief: z.string().trim().min(20).max(INPUT_LIMITS.projectBrief),
         documentPack: z.enum(['studio', 'office']).default('office'),
         planning: z.enum(['template', 'ai', 'manual']).optional(),
         requestId: z.string().uuid().optional(),
@@ -319,7 +335,7 @@ app.post(
     const body = z
       .object({
         requestId: z.string().uuid(),
-        title: z.string().trim().min(2).max(80),
+        title: z.string().trim().min(2).max(INPUT_LIMITS.projectTitle),
         mode: z.enum(['replan', 'reuse']),
         officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).optional(),
       })
@@ -443,8 +459,8 @@ app.put(
       .array(
         z.object({
           id: z.string().uuid(),
-          title: z.string().trim().min(1).max(100),
-          description: z.string().trim().min(1).max(4000),
+          title: z.string().trim().min(1).max(INPUT_LIMITS.taskTitle),
+          description: z.string().trim().min(1).max(INPUT_LIMITS.taskDescription),
           agentId: z.string(),
           dependencies: z.array(z.string()).max(100),
           requiresApproval: z.boolean(),
@@ -470,11 +486,11 @@ app.put(
     engine.editPlan(
       param(req, 'id'),
       rows as import('../shared/types.js').Task[],
-      z.boolean().optional().parse(req.body.toolNetwork),
+      parseField(z.boolean().optional(), 'toolNetwork', req.body),
       req.body.collaboration,
-      z.number().int().nonnegative().parse(req.body.expectedRevision),
+      parseField(z.number().int().nonnegative(), 'expectedRevision', req.body),
       req.body.collaboration !== undefined || req.body.toolNetwork !== undefined
-        ? z.number().int().nonnegative().parse(req.body.expectedSettingsRevision)
+        ? parseField(z.number().int().nonnegative(), 'expectedSettingsRevision', req.body)
         : undefined,
     );
     res.json({ ok: true });
@@ -486,8 +502,8 @@ app.put(
     engine.configureCollaboration(
       param(req, 'id'),
       req.body,
-      z.number().int().nonnegative().parse(req.body.expectedRevision),
-      z.boolean().optional().parse(req.body.toolNetwork),
+      parseField(z.number().int().nonnegative(), 'expectedRevision', req.body),
+      parseField(z.boolean().optional(), 'toolNetwork', req.body),
     );
     res.json({ ok: true });
   }),
@@ -531,7 +547,7 @@ app.get(
 app.get(
   '/api/projects/:id/file',
   route((req, res) => {
-    const bytes = workspaceFile(codingFolder(req), z.string().parse(req.query.path));
+    const bytes = workspaceFile(codingFolder(req), parseField(z.string(), 'path', req.query));
     res.type('text/plain').send(bytes);
   }),
 );
@@ -561,7 +577,10 @@ app.post(
   '/api/tasks/:id/retry',
   route(async (req, res) => {
     await reconcileSignIn();
-    engine.retryTask(param(req, 'id'), z.string().max(4000).optional().parse(req.body.feedback));
+    engine.retryTask(
+      param(req, 'id'),
+      parseField(z.string().max(4000).optional(), 'feedback', req.body),
+    );
     res.json({ ok: true });
   }),
 );
@@ -622,7 +641,10 @@ app.post(
 app.post(
   '/api/policy',
   route((req, res) => {
-    engine.updatePolicy(req.body, z.number().int().nonnegative().parse(req.body.expectedRevision));
+    engine.updatePolicy(
+      req.body,
+      parseField(z.number().int().nonnegative(), 'expectedRevision', req.body),
+    );
     res.json({ ok: true, revision: engine.state.policyRevision || 0 });
   }),
 );
@@ -664,7 +686,7 @@ app.put(
       param(req, 'id'),
       value.text,
       value.reason,
-      z.number().int().nonnegative().parse(req.body.expectedRevision),
+      parseField(z.number().int().nonnegative(), 'expectedRevision', req.body),
     );
     res.json({ ok: true, revision: engine.project(param(req, 'id')).instructionRevision });
   }),
@@ -817,10 +839,13 @@ if (existsSync(resolve('dist/index.html'))) {
   app.get('*', (_req, res) => res.sendFile(resolve('dist/index.html')));
 }
 app.use(
-  (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  (error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof z.ZodError)
       return res.status(400).json({
-        error: error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; '),
+        error:
+          validationMessages(error, req.body).join('; ').slice(0, 3500) +
+          ' Check the named fields. Workspace controls → Limits reference lists field and resource constraints.',
+        issues: validationMessages(error, req.body),
       });
     if (error instanceof SettingsError)
       return res.status(error.status).json({ error: error.message });
@@ -835,7 +860,7 @@ app.use(
       return res.status(Number(error.status)).json({
         error:
           Number(error.status) === 413
-            ? 'The request is too large.'
+            ? `The request exceeds the ${req.path.toLowerCase().replace(/\/+$/, '') === '/api/restore' ? RESOURCE_LIMITS.restoreBytes : RESOURCE_LIMITS.requestBytes}-byte ${req.path.toLowerCase().includes('restore') ? 'backup restore' : 'API edit'} limit${req.headers['content-length'] ? ` (received ${req.headers['content-length']} bytes)` : ''}. No changes were applied. Split the edit, or use a stopped .data folder copy for larger backups. See Workspace controls → Limits reference.`
             : 'Compressed request bodies are not supported.',
       });
     if (error instanceof SyntaxError && 'body' in error)

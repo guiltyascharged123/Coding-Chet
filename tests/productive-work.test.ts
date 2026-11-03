@@ -957,6 +957,65 @@ test('two source reads lead to an explicit final work result with role procedure
   }
 });
 
+test('configured source retrieval rounds replace the old two-round bound and require a final checked result', async () => {
+  for (const allowed of [0, 4]) {
+    const h = harness();
+    try {
+      h.store.state.policy!.maxRetrievalRounds = allowed;
+      h.store.state.policy!.maxFormatCorrections = 0;
+      const project = await h.engine.createProject(
+        'Adjustable evidence retrieval',
+        brief,
+        'office',
+        'template',
+        randomUUID(),
+        'office',
+      );
+      const tasks = h.store.state.tasks.filter((task) => task.projectId === project.id),
+        task = tasks.at(-1)!,
+        source = tasks[0];
+      task.workType = 'review';
+      source.status = 'done';
+      source.output = 'Supplied office evidence. '.repeat(3000);
+      let calls = 0;
+      globalThis.fetch = (async (_url, options) => {
+        const request = JSON.parse(String(options?.body)),
+          input = JSON.parse(request.messages[1].content);
+        calls++;
+        assert.equal(input.retrievalState.configuredRounds, allowed);
+        assert.equal(input.retrievalState.remainingRounds, Math.max(0, allowed - calls + 1));
+        if (calls <= allowed) {
+          assert.equal(input.retrievalState.finalResponseRequired, false);
+          return response({
+            outcome: 'retrieve',
+            requests: [{ sourceId: `task:${source.id}`, offset: calls * 9000 }],
+          });
+        }
+        assert.equal(input.retrievalState.finalResponseRequired, true);
+        assert.match(input.retrievalState.instruction, /No retrieval rounds remain/);
+        return response(
+          result({
+            outcome: 'blocked',
+            summary: 'The evidence does not establish demand; no sale or spending occurred.',
+          }),
+        );
+      }) as typeof fetch;
+      await runTask('openai', project, task, agents[3], [source], new AbortController().signal, {
+        store: h.store,
+        project,
+        task,
+      });
+      assert.equal(calls, allowed + 1);
+      assert.equal(task.result?.outcome, 'blocked');
+      assert.equal(task.responseIssue, undefined);
+      assert.equal(h.store.attempts().length, calls);
+      assert.ok(h.store.attempts().every((attempt) => attempt.provider === 'openai'));
+    } finally {
+      h.close();
+    }
+  }
+});
+
 test('a model ignoring the final-result instruction cannot trigger unbounded retrieval calls or overwrite earlier work', async () => {
   const h = harness();
   try {

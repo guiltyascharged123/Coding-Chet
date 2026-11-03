@@ -89,6 +89,7 @@ test('HTTP rejects untrusted authority and missing session before parsing bodies
     assert.equal((await http('/api/session')).status, 401);
     assert.equal((await http('/api/state')).status, 401);
     assert.equal((await http('/api/backup')).status, 401);
+    assert.equal((await http('/api/limits')).status, 401);
     for (const path of [
       '/API/session',
       '/api/SESSION',
@@ -130,6 +131,33 @@ test('HTTP rejects untrusted authority and missing session before parsing bodies
       200,
     );
     assert.equal((await http('/api/state', 'GET', headers)).data.state.policy.maxRequests24h, 31);
+    const invalidLimits = await http(
+      '/api/policy',
+      'POST',
+      headers,
+      JSON.stringify({ ...state.data.state.policy, maxTasks: 101, expectedRevision: 1 }),
+    );
+    assert.equal(invalidLimits.status, 400);
+    assert.match(invalidLimits.data.error, /maxTasks.*100.*received 101/);
+    const catalog = await http('/api/limits', 'GET', headers);
+    assert.equal(catalog.status, 200);
+    assert.ok(
+      catalog.data.formats.some(
+        (row: any) =>
+          row.group === 'Task plan' && row.field === 'tasks[].title' && row.rule.includes('100'),
+      ),
+    );
+    const largeBody = JSON.stringify({ text: 'x'.repeat(1024 * 1024) });
+    const tooLarge = await http(
+      '/api/policy',
+      'POST',
+      { ...headers, 'Content-Length': String(Buffer.byteLength(largeBody)) },
+      largeBody,
+    );
+    assert.equal(tooLarge.status, 413);
+    assert.match(tooLarge.data.error, /1048576-byte.*received.*No changes were applied/);
+    assert.equal((await http('/api/state', 'GET', headers)).data.state.policyRevision, 1);
+
     assert.equal(
       (await http('/api/policy', 'POST', { ...headers, Origin: 'http://evil.invalid' }, '{}'))
         .status,

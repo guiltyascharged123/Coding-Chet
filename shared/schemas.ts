@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { acceptanceListSchema, observationSchema } from './verification.js';
 import { decisionSchema, workResultSchema } from './work.js';
 import { AGENT_IDS } from './team.js';
+import { INPUT_LIMITS } from './limits.js';
 import { ideaSchema } from './ideas.js';
 export const providers = [
   'demo',
@@ -18,6 +19,9 @@ export const defaultPolicy = {
   maxConcurrent: 1,
   maxTasks: 30,
   maxRevisions: 1,
+  maxFormatCorrections: 1,
+  maxRetrievalRounds: 2,
+  localContextTokens: 32768,
   maxRequests24h: 30,
   maxInputBytes: 24000,
   maxOutputTokens: 2000,
@@ -35,6 +39,9 @@ export const policySchema = z.object({
   maxConcurrent: z.number().int().min(1).max(4),
   maxTasks: z.number().int().min(1).max(100),
   maxRevisions: z.number().int().min(0).max(20),
+  maxFormatCorrections: z.number().int().min(0).max(2).default(1),
+  maxRetrievalRounds: z.number().int().min(0).max(8).default(2),
+  localContextTokens: z.number().int().min(8192).max(131072).default(32768),
   maxRequests24h: z.number().int().min(1).max(10000),
   maxInputBytes: z.number().int().min(2000).max(200000),
   maxOutputTokens: z.number().int().min(256).max(16000),
@@ -88,9 +95,18 @@ export const meetingSchema = z.object({
     )
     .max(12),
   summary: text.max(20000),
+  responseIssue: z
+    .object({
+      receivedAt: z.number().finite(),
+      issues: z.array(text.max(500)).max(8),
+      response: text.max(48000),
+      truncated: z.boolean(),
+    })
+    .optional(),
   speakerId: id.optional(),
   error: text.max(4000).optional(),
   createdAt: z.number().finite(),
+  startedAt: z.number().finite().optional(),
   completedAt: z.number().finite().optional(),
   actions: z
     .array(
@@ -133,8 +149,8 @@ export const stateSchema = z
     provider: providerSchema,
     policy: policySchema.optional(),
     policyRevision: z.number().int().nonnegative().optional(),
-    memory: z.array(memorySchema).max(1000).optional(),
-    meetings: z.array(meetingSchema).max(2000).optional(),
+    memory: z.array(memorySchema).optional(),
+    meetings: z.array(meetingSchema).optional(),
     projectMessages: z
       .array(
         z.object({
@@ -164,178 +180,179 @@ export const stateSchema = z
         }),
       )
       .length(4),
-    projects: z
-      .array(
-        z.object({
-          id,
-          title: text.min(2).max(80),
-          brief: text.min(1).max(6000),
-          status: z.enum(['ready', 'running', 'paused', 'needs_input', 'completed']),
-          createdAt: z.number().finite(),
-          updatedAt: z.number().finite().optional(),
-          briefRevision: z.number().int().nonnegative().optional(),
-          briefHistory: z
-            .array(
-              z.object({
-                title: text.min(2).max(80),
-                brief: text.min(1).max(6000),
-                changedAt: z.number().finite(),
-                reason: text.max(1000),
-              }),
-            )
-            .max(100)
-            .optional(),
-          provider: providerSchema,
-          documentPack: z.enum(['studio', 'office']).optional(),
-          model: text.max(150).optional(),
-          planning: z.enum(['template', 'ai', 'manual']).optional(),
-          planningStatus: z.enum(['planning', 'failed', 'ready']).optional(),
-          planningError: text.max(4000).optional(),
-          workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
-          reasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
-          researchEnabled: z.boolean().optional(),
-          exploration: z.enum(['focused', 'expansive']).optional(),
-          requestTimeoutSeconds: z.number().int().min(60).max(3600).optional(),
-          restartedFrom: id.optional(),
-          officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).optional(),
-          planRevision: z.number().int().nonnegative().optional(),
-          teamRevision: z.number().int().nonnegative().optional(),
-          settingsRevision: z.number().int().nonnegative().optional(),
-          instructionRevision: z.number().int().nonnegative().optional(),
-          deliveryMode: z.enum(['build', 'design']).optional(),
-          instructionHistory: z
-            .array(
-              z.object({
-                id,
-                text: text.max(4000),
-                reason: text.max(1000),
-                createdAt: z.number().finite(),
-              }),
-            )
-            .max(50)
-            .optional(),
-          meetingPolicy: collaborationSchema.shape.meetingPolicy.optional(),
-          team: z
-            .array(
-              z.object({
-                id,
-                name: text.min(1).max(30),
-                role: text.min(2).max(50),
-                specialty: text.min(5).max(600),
-                color: text.regex(/^#[0-9a-fA-F]{6}$/),
-                desk: z.number().int().min(0).max(11),
-                goal: text.max(1000).optional(),
-              }),
-            )
-            .min(1)
-            .max(12)
-            .optional(),
-          workspaceFolder: text.regex(/^[a-z0-9-]{1,160}$/).optional(),
-          toolNetwork: z.boolean().optional(),
-          workMode: z.enum(['text', 'workspace']).optional(),
-        }),
-      )
-      .max(1000),
-    tasks: z
-      .array(
-        z.object({
-          id,
-          projectId: id,
-          title: text.min(1).max(100),
-          description: text.max(4000),
-          agentId: id,
-          dependencies: z.array(id).max(100),
-          status: z.enum(['queued', 'working', 'review', 'done', 'failed']),
-          requiresApproval: z.boolean(),
-          conversationMessageId: id.optional(),
-          conversationPending: z.boolean().optional(),
-          requestedByTaskId: id.optional(),
-          documentKind: z
-            .enum([
-              'brief',
-              'project_plan',
-              'budget',
-              'risk_register',
-              'meeting_minutes',
-              'status_report',
-              'notes',
-            ])
-            .optional(),
-          output: text.max(200000),
-          feedback: text.max(4000),
-          error: text.max(4000).optional(),
-          startedAt: z.number().finite().optional(),
-          lastAttemptStartedAt: z.number().finite().optional(),
-          completedAt: z.number().finite().optional(),
-          revisions: z.number().int().min(0).optional(),
-          attemptId: id.optional(),
-          leaseId: id.optional(),
-          leaseExpiresAt: z.number().finite().optional(),
-          toolLog: z
-            .array(
-              z.object({
-                id,
-                type: text.max(50),
-                detail: text.max(2000),
-                status: text.max(50).optional(),
-              }),
-            )
-            .max(100)
-            .optional(),
-          briefRevision: z.number().int().nonnegative().optional(),
-          readOnly: z.boolean().optional(),
-          workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
-          acceptanceCriteria: acceptanceListSchema.optional(),
-          observations: z.array(observationSchema).max(100).optional(),
-          result: workResultSchema.optional(),
-          recovery: z.object({ attemptId: id, hasResponse: z.boolean() }).optional(),
-          responseIssue: z
-            .object({
-              receivedAt: z.number().finite(),
-              issues: z.array(text.max(500)).max(8),
-              response: text.max(48000),
-              truncated: z.boolean(),
-            })
-            .optional(),
-          coordinationRounds: z.number().int().min(0).max(20).optional(),
-          dynamicCriteriaIds: z.array(text.max(40)).max(10).optional(),
-          contextReport: z
-            .object({
-              inputBytes: z.number().int().min(0),
-              originalBytes: z.number().int().min(0),
-              limit: z.number().int().min(0),
-              sources: z
-                .array(
-                  z.object({
-                    id: text.max(200),
-                    label: text.max(100),
-                    totalCharacters: z.number().int().min(0),
-                    includedCharacters: z.number().int().min(0),
-                    offset: z.number().int().min(0).optional(),
-                  }),
-                )
-                .max(20000),
-            })
-            .optional(),
-        }),
-      )
-      .max(10000),
-    activities: z.array(activitySchema).max(1000),
-    approvals: z
-      .array(
-        z.object({
-          id,
-          projectId: id,
-          taskId: id,
-          question: text.max(3000),
-          decision: decisionSchema.optional(),
-          resumeTask: z.boolean().optional(),
-          status: z.enum(['pending', 'approved', 'revision']),
-          feedback: text.max(6000).optional(),
-          createdAt: z.number().finite(),
-        }),
-      )
-      .max(10000),
+    projects: z.array(
+      z.object({
+        id,
+        title: text.min(2).max(80),
+        brief: text.min(1).max(6000),
+        status: z.enum(['ready', 'running', 'paused', 'needs_input', 'completed']),
+        createdAt: z.number().finite(),
+        updatedAt: z.number().finite().optional(),
+        briefRevision: z.number().int().nonnegative().optional(),
+        briefHistory: z
+          .array(
+            z.object({
+              title: text.min(2).max(80),
+              brief: text.min(1).max(6000),
+              changedAt: z.number().finite(),
+              reason: text.max(1000),
+            }),
+          )
+          .optional(),
+        provider: providerSchema,
+        documentPack: z.enum(['studio', 'office']).optional(),
+        model: text.max(150).optional(),
+        planning: z.enum(['template', 'ai', 'manual']).optional(),
+        planningStatus: z.enum(['planning', 'failed', 'ready']).optional(),
+        planningError: text.max(4000).optional(),
+        planningIssue: z
+          .object({
+            receivedAt: z.number().finite(),
+            issues: z.array(text.max(500)).max(8),
+            response: text.max(48000),
+            truncated: z.boolean(),
+            contextHash: text.max(64).optional(),
+          })
+          .optional(),
+        workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
+        reasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+        researchEnabled: z.boolean().optional(),
+        exploration: z.enum(['focused', 'expansive']).optional(),
+        requestTimeoutSeconds: z.number().int().min(60).max(3600).optional(),
+        restartedFrom: id.optional(),
+        officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).optional(),
+        planRevision: z.number().int().nonnegative().optional(),
+        teamRevision: z.number().int().nonnegative().optional(),
+        settingsRevision: z.number().int().nonnegative().optional(),
+        instructionRevision: z.number().int().nonnegative().optional(),
+        deliveryMode: z.enum(['build', 'design']).optional(),
+        instructionHistory: z
+          .array(
+            z.object({
+              id,
+              text: text.max(4000),
+              reason: text.max(1000),
+              createdAt: z.number().finite(),
+            }),
+          )
+          .optional(),
+        meetingPolicy: collaborationSchema.shape.meetingPolicy.optional(),
+        team: z
+          .array(
+            z.object({
+              id,
+              name: text.min(1).max(30),
+              role: text.min(2).max(50),
+              specialty: text.min(5).max(600),
+              color: text.regex(/^#[0-9a-fA-F]{6}$/),
+              desk: z.number().int().min(0).max(11),
+              goal: text.max(1000).optional(),
+            }),
+          )
+          .min(1)
+          .max(12)
+          .optional(),
+        workspaceFolder: text.regex(/^[a-z0-9-]{1,160}$/).optional(),
+        toolNetwork: z.boolean().optional(),
+        workMode: z.enum(['text', 'workspace']).optional(),
+      }),
+    ),
+    tasks: z.array(
+      z.object({
+        id,
+        projectId: id,
+        title: text.min(1).max(INPUT_LIMITS.taskTitle),
+        description: text.max(INPUT_LIMITS.taskDescription),
+        agentId: id,
+        dependencies: z.array(id).max(100),
+        status: z.enum(['queued', 'working', 'review', 'done', 'failed']),
+        requiresApproval: z.boolean(),
+        conversationMessageId: id.optional(),
+        conversationPending: z.boolean().optional(),
+        requestedByTaskId: id.optional(),
+        documentKind: z
+          .enum([
+            'brief',
+            'project_plan',
+            'budget',
+            'risk_register',
+            'meeting_minutes',
+            'status_report',
+            'notes',
+          ])
+          .optional(),
+        output: text.max(200000),
+        feedback: text.max(4000),
+        error: text.max(4000).optional(),
+        startedAt: z.number().finite().optional(),
+        lastAttemptStartedAt: z.number().finite().optional(),
+        completedAt: z.number().finite().optional(),
+        revisions: z.number().int().min(0).optional(),
+        attemptId: id.optional(),
+        leaseId: id.optional(),
+        leaseExpiresAt: z.number().finite().optional(),
+        toolLog: z
+          .array(
+            z.object({
+              id,
+              type: text.max(50),
+              detail: text.max(2000),
+              status: text.max(50).optional(),
+            }),
+          )
+          .max(100)
+          .optional(),
+        briefRevision: z.number().int().nonnegative().optional(),
+        readOnly: z.boolean().optional(),
+        workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
+        acceptanceCriteria: acceptanceListSchema.optional(),
+        observations: z.array(observationSchema).max(100).optional(),
+        result: workResultSchema.optional(),
+        recovery: z.object({ attemptId: id, hasResponse: z.boolean() }).optional(),
+        responseIssue: z
+          .object({
+            receivedAt: z.number().finite(),
+            issues: z.array(text.max(500)).max(8),
+            response: text.max(48000),
+            truncated: z.boolean(),
+          })
+          .optional(),
+        coordinationRounds: z.number().int().min(0).max(20).optional(),
+        dynamicCriteriaIds: z.array(text.max(40)).max(10).optional(),
+        contextReport: z
+          .object({
+            inputBytes: z.number().int().min(0),
+            originalBytes: z.number().int().min(0),
+            limit: z.number().int().min(0),
+            sources: z
+              .array(
+                z.object({
+                  id: text.max(200),
+                  label: text.max(100),
+                  totalCharacters: z.number().int().min(0),
+                  includedCharacters: z.number().int().min(0),
+                  offset: z.number().int().min(0).optional(),
+                }),
+              )
+              .max(20000),
+          })
+          .optional(),
+      }),
+    ),
+    activities: z.array(activitySchema),
+    approvals: z.array(
+      z.object({
+        id,
+        projectId: id,
+        taskId: id,
+        question: text.max(3000),
+        decision: decisionSchema.optional(),
+        resumeTask: z.boolean().optional(),
+        status: z.enum(['pending', 'approved', 'revision']),
+        feedback: text.max(6000).optional(),
+        createdAt: z.number().finite(),
+      }),
+    ),
   })
   .superRefine((s, ctx) => {
     const fail = (message: string) => ctx.addIssue({ code: 'custom', message });
@@ -472,7 +489,7 @@ export const backupSchema = z.object({
   version: z.literal(2),
   createdAt: z.number().finite(),
   state: stateSchema,
-  attempts: z.array(attemptSchema).max(50000),
+  attempts: z.array(attemptSchema),
   activityHistory: z.array(activitySchema).optional(),
   planHistory: z
     .array(
@@ -484,8 +501,8 @@ export const backupSchema = z.object({
           .array(
             z.object({
               id,
-              title: text.min(1).max(100),
-              description: text.max(4000),
+              title: text.min(1).max(INPUT_LIMITS.taskTitle),
+              description: text.max(INPUT_LIMITS.taskDescription),
               agentId: id,
               dependencies: z.array(id).max(100),
               requiresApproval: z.boolean(),
