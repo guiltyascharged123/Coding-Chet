@@ -7,7 +7,9 @@ This pass fixes the twelve reproduced findings in the review of `b42ca4b`. Exist
 Stop Workroom with Ctrl+C. Keep a stopped copy of `.data` if the saved work is valuable; a JSON backup does not contain source folders or console logs. Then run:
 
 ```bash
-git pull --ff-only origin workroom-starter
+git fetch origin
+git switch main
+git pull --ff-only origin main
 npm run local
 ```
 

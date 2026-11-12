@@ -55,12 +55,18 @@ Normal startup never runs canned work or falls back to Demo. Historical simulati
 
 ## Configure and update
 
+`main` is the current branch for installation and normal updates. Existing
+`workroom-starter` checkouts can switch to it with the commands below; the older
+branch remains available for compatibility.
+
 New empty workspaces default to local Ollama. `.env.example` supplies the model and endpoint defaults. An existing `.env` is never overwritten. Set `AGENT_PROVIDER` only when you want an explicit startup override; otherwise the saved default remains. **Model connections** changes future projects; **Model → Change** changes an existing project after pausing it.
 
 Stop Workroom, then update from your repository directory:
 
 ```bash
-git pull --ff-only origin workroom-starter
+git fetch origin
+git switch main
+git pull --ff-only origin main
 npm run local
 ```
 
@@ -68,7 +74,7 @@ Saved records normally live in ignored `.data/workroom.sqlite`; if only the olde
 
 ## Codespaces
 
-Create a Codespace on `workroom-starter`. The container builds the app and opens the real workspace on forwarded port **3001**. It does not automatically install model weights in the cloud; configure a usable model connection and check readiness. A browser in Codespaces cannot directly use an Ollama service on your laptop's localhost. To run local models on your own hardware, clone this repository and use `npm run local` there.
+Create a Codespace on `main`. The container builds the app and opens the real workspace on forwarded port **3001**. It does not automatically install model weights in the cloud; configure a usable model connection and check readiness. A browser in Codespaces cannot directly use an Ollama service on your laptop's localhost. To run local models on your own hardware, clone this repository and use `npm run local` there.
 
 Use `npm run codespace:restart` after pulling an update. Codespaces compute is billed according to your GitHub account; stop it when finished.
 

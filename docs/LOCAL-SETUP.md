@@ -17,7 +17,7 @@ on your computer without Codespaces.
 2. For a fresh clone, with Git installed:
 
    ```bash
-   git clone --branch workroom-starter https://github.com/guiltyascharged123/Coding-Chet.git
+   git clone --branch main https://github.com/guiltyascharged123/Coding-Chet.git
    cd Coding-Chet
    npm run local
    ```
@@ -25,7 +25,9 @@ on your computer without Codespaces.
    For an existing checkout, stop the old app and use:
 
    ```bash
-   git pull --ff-only origin workroom-starter
+   git fetch origin
+   git switch main
+   git pull --ff-only origin main
    npm run local
    ```
 

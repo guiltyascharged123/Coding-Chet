@@ -228,7 +228,9 @@ you explicitly change it.
 For a Git checkout, stop Workroom, then run from the project folder:
 
 ```bash
-git pull --ff-only origin workroom-starter
+git fetch origin
+git switch main
+git pull --ff-only origin main
 npm run local
 ```
 
@@ -238,7 +240,7 @@ For a legacy separate database, set DATABASE_PATH explicitly or import a backup.
 | What you see                                    | What to check                                                                                                                                                                               |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Page will not load or Codespaces returns 502    | Keep the server running and use its printed port. In Codespaces, forward that actual port.                                                                                                  |
-| `Missing script: local`                         | Check that you are in the Coding-Chet folder and have the current `workroom-starter` source.                                                                                                |
+| `Missing script: local`                         | Check that you are in the Coding-Chet folder and have the current `main` source.                                                                                                            |
 | `Unexpected token {` at the launcher's `import` | This terminal may be using old Node.js. Check `node --version`; Workroom requires 24+. If you use nvm, run `nvm install 24`, `nvm use 24`, and `nvm alias default 24`.                      |
 | Projects seem to have disappeared               | Check DATABASE_PATH and the active project. Earlier releases had a separate demo.sqlite; use backup/restore to move its records.                                                            |
 | Codex option is unavailable                     | Run `npx --no-install codex login status`, check the two active `.env` settings and exact model ID, restart, then check connections again.                                                  |

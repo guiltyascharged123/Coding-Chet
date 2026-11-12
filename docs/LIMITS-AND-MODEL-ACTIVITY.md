@@ -5,7 +5,9 @@
 Stop Workroom with Ctrl+C, then run in Coding-Chet:
 
 ```bash
-git pull --ff-only origin workroom-starter
+git fetch origin
+git switch main
+git pull --ff-only origin main
 npm run local
 ```
 

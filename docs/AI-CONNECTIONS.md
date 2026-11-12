@@ -106,7 +106,7 @@ assignments while learning your account's usage.
 
 Older Workroom builds collapsed different failures into “Codex could not finish.”
 One confirmed startup defect was `approval_policy="untrusted"`, which the bundled
-CLI rejects. Update the `workroom-starter` source and restart to get the supported
+CLI rejects. Update the `main` source and restart to get the supported
 policy and specific, sanitized error codes. File, tool, and network restrictions
 remain in place; there is no unrestricted or paid-API fallback.
 
