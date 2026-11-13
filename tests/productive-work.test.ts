@@ -906,7 +906,9 @@ test('two source reads lead to an explicit final work result with role procedure
       const request = JSON.parse(String(options?.body)),
         input = JSON.parse(request.messages[1].content);
       calls++;
-      assert.match(request.messages[0].content, /Review independently/);
+      assert.match(input.agentContext.procedure, /Review independently/);
+      assert.match(request.messages[0].content, /Follow the app-provided agentContext\.procedure/);
+      assert.equal(request.messages[0].content.includes(input.agentContext.procedure), false);
       assert.deepEqual(
         input.availableTeammates.map((a: { agentId: string }) => a.agentId),
         agents.map((a) => a.id),

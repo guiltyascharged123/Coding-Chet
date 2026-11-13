@@ -138,7 +138,15 @@ test('fresh restart preserves the old run, creates independent task IDs and file
     assert.notEqual(copied[0].id, first.id);
     assert.equal(h.engine.task(first.id).output, 'Saved old findings');
     assert.notEqual(fresh.workspaceFolder, project.workspaceFolder);
-    assert.deepEqual(readdirSync(projectWorkspace(h.store.path, fresh)), []);
+    assert.deepEqual(readdirSync(projectWorkspace(h.store.path, fresh)), ['tools']);
+    assert.deepEqual(readdirSync(join(projectWorkspace(h.store.path, fresh), 'tools')).sort(), [
+      'network-policy.json',
+      'network.mjs',
+      'workroom-crawl.mjs',
+      'workroom-download.mjs',
+      'workroom-tools.json',
+      'workroom-tools.mjs',
+    ]);
     assert.equal(h.requests.length, 0);
     assert.ok(backupSchema.safeParse(h.store.backup()).success);
     await assert.rejects(

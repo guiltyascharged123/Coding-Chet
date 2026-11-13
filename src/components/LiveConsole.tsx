@@ -1,21 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Copy, Download, TerminalSquare } from 'lucide-react';
 import type { Agent, Project, Task } from '../../shared/types';
-import type { ConsoleEntry } from '../../shared/console';
 import { useProjectConsole } from '../useProjectConsole';
 import { saveBlob } from '../api';
-
-function readable(entry: ConsoleEntry, raw: boolean) {
-  if (raw || entry.type !== 'response') return entry.text;
-  try {
-    const value = JSON.parse(entry.text);
-    if (typeof value.deliverable === 'string')
-      return `${value.summary || ''}\n\n${value.deliverable}\n\n${Array.isArray(value.checks) ? value.checks.map((c: { status: string; criterion: string; evidence: string }) => `[${c.status}] ${c.criterion}: ${c.evidence}`).join('\n') : ''}`.trim();
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return entry.text;
-  }
-}
+import { consoleReplyText as readable } from '../console-view';
 
 export default function LiveConsole({
   project,
@@ -75,7 +63,8 @@ export default function LiveConsole({
           <h2>Live console</h2>
           <p>
             Public model replies and tool output as received. Private reasoning is not available;
-            some replies arrive only at completion.
+            some replies arrive only at completion. Finished JSON is indented with every field
+            retained; a returned reply is not accepted work until the task checks pass.
           </p>
         </div>
       </div>

@@ -55,6 +55,12 @@ export const test = base.extend({
                 headers: { 'X-Workroom-CSRF': token, ...options.headers },
               });
             };
+          // Node may close an idle keep-alive socket just as an API read starts.
+          // Retry only the idempotent GET on transport reset, never a write or
+          // an HTTP error response (Playwright's maxRetries behavior).
+          if (key === 'get')
+            return (url: string, options: any = {}) =>
+              member.call(target, url, { maxRetries: 1, ...options });
           return typeof member === 'function' ? member.bind(target) : member;
         },
       }),

@@ -63,6 +63,13 @@ export const collaborationSchema = z.object({
   requestTimeoutSeconds: z.number().int().min(60).max(3600).default(900),
   meetingPolicy: z.object({ enabled: z.boolean(), everyTasks: z.number().int().min(1).max(20) }),
 });
+export const executorSchema = z.object({
+  provider: z.literal('codex'),
+  model: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,149}$/),
+});
 export const meetingSchema = z.object({
   id,
   projectId: id,
@@ -202,6 +209,7 @@ export const stateSchema = z
         provider: providerSchema,
         documentPack: z.enum(['studio', 'office']).optional(),
         model: text.max(150).optional(),
+        executor: executorSchema.optional(),
         planning: z.enum(['template', 'ai', 'manual']).optional(),
         planningStatus: z.enum(['planning', 'failed', 'ready']).optional(),
         planningError: text.max(4000).optional(),
@@ -387,7 +395,14 @@ export const stateSchema = z
       )
         fail('Invalid meeting references.');
     }
-    for (const p of s.projects)
+    for (const p of s.projects) {
+      if (
+        p.executor &&
+        (p.workMode !== 'workspace' || ['demo', 'external', 'codex'].includes(p.provider))
+      )
+        fail(
+          'A separate Codex executor needs a direct planning connection and a managed workspace.',
+        );
       if (
         (p.restartedFrom && !projects.has(p.restartedFrom)) ||
         (p.team &&
@@ -398,6 +413,7 @@ export const stateSchema = z
             p.team.some((a) => a.desk >= (p.officeCapacity || 4))))
       )
         fail('Invalid project team.');
+    }
     for (const t of s.tasks)
       if (
         !projects.has(t.projectId) ||

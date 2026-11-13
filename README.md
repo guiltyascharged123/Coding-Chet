@@ -47,9 +47,13 @@ The Workroom logo returns to Workspace. Sidebar pages, model settings and recove
 - Word, Excel, Markdown and print/PDF exports; source viewing and ZIP downloads for managed file projects.
 - Ollama, ChatGPT-authenticated Codex, OpenAI, Gemini, OpenAI-compatible servers and authenticated external workers.
 - Per-project provider/model choices, request limits, explicit paid API permission, estimates, usage receipts and no automatic paid fallback.
+- Explicit local planning with a Codex workspace task executor; reusable project tools, paced image downloads, scoped crawl/index/search, checked tool updates and rollback.
+- Checked Workroom patch proposals from a separate project checkout, with build, unit and relevant browser test receipts.
 - Project memory with provenance, versioned instructions and portable backup/restore. An empty workspace can import a backup.
 
 **Tool capabilities depend on the connection.** Ollama, OpenAI, Gemini and compatible adapters generate text from supplied material. Codex projects can explicitly enable managed file editing and commands after a sandbox readiness check; software teams require Codex. Optional Codex research enables built-in read-only web search. Role names alone do not grant tools or establish expertise.
+
+A direct text connection can also keep local planning while explicitly selecting a **Codex workspace executor** for all task roles. See [Project tools and internet access](docs/PROJECT-TOOLS-AND-INTERNET.md) for enabling it, building/reusing connectors, crawling/searching saved site data and safely preparing tool or app changes.
 
 Normal startup never runs canned work or falls back to Demo. Historical simulation projects and their outputs remain saved; choose a real project connection before running them. The old `npm run demo` command is a compatibility alias for the real workspace. Simulation is retained only as an explicitly enabled automated-test fixture.
 
@@ -118,3 +122,7 @@ Use **Models & sign-in** for the full Connections page, provider configuration, 
 The [November audit repairs](docs/AUDIT-REPAIRS.md) cover protected edits, full saved history, receipt recovery, private browser pairing and accountable meeting actions. Use the [model evaluation guide](docs/MODEL-EVALUATION.md) to check actual usefulness before a larger run.
 
 See [Model activity, limits and planning recovery](docs/LIMITS-AND-MODEL-ACTIVITY.md) for visible request stages, the long-title repair, editable retrieval/correction/context settings, field-level diagnostics and removal of arbitrary record-count stops.
+
+See [Real agent work and creative exploration](docs/REAL-AGENT-WORK.md) for the November 12 reply failure, complete console output, real specialist handoffs, empty normal workspaces, and the tools needed to build and run software.
+
+See [Project tools and internet access](docs/PROJECT-TOOLS-AND-INTERNET.md) to keep local planning while explicitly selecting a Codex task executor, build and reuse project-owned connectors, discover suitable repositories, and download images with cached, paced, rate-aware requests.

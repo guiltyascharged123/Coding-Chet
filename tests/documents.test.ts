@@ -11,7 +11,7 @@ import { initialState, agents, demoPlan } from '../server/seed.js';
 import { runTask } from '../server/providers.js';
 
 test('the office pack creates six distinct, honestly labeled documents and preserves review', async () => {
-  const project = { ...initialState().projects[0], documentPack: 'office' as const };
+  const project = { ...initialState(true).projects[0], documentPack: 'office' as const };
   const tasks = demoPlan(project, agents);
   assert.equal(new Set(tasks.map((t) => t.documentKind)).size, 6);
   assert.equal(tasks[1].requiresApproval, true);

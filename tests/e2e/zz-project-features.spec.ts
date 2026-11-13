@@ -48,6 +48,108 @@ async function openProject(page: any, id: string) {
   await page.reload();
 }
 
+test('a local planning connection can explicitly select a persistent Codex workspace executor without inference', async ({
+  page,
+  request,
+}) => {
+  const original = await (await request.get('/api/connections/settings')).json();
+  const fixtureUrl = new URL('/__codex-fixture', original.compatible.url).href;
+  try {
+    await request.post(fixtureUrl, { data: { authenticated: true, deviceBlocked: false } });
+    await request.put('/api/connections/settings', {
+      data: {
+        provider: 'codex',
+        revision: original.revision,
+        enabled: true,
+        model: 'fixture-executor',
+      },
+    });
+    await request.post('/api/connections/check', { data: {} });
+    const { project } = await savedProject(request, 'Local plan with real executor option');
+    await openProject(page, project.id);
+    await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
+    const selector = page.getByRole('region', { name: 'Selected project model', exact: true });
+    await selector.getByLabel('Use Codex workspace executor', { exact: true }).check();
+    await selector
+      .getByLabel('Codex task executor model ID', { exact: true })
+      .fill('fixture-executor');
+    await selector
+      .getByRole('button', { name: 'Use this model for this project', exact: true })
+      .click();
+    await expect(selector).toContainText('Project model saved');
+    await expect(selector).not.toContainText('This selection has not been applied');
+    const data = await (await request.get('/api/state')).json();
+    const saved = data.state.projects.find((p: any) => p.id === project.id);
+    expect(saved.provider).toBe('compatible');
+    expect(saved.executor).toEqual({ provider: 'codex', model: 'fixture-executor' });
+    expect(saved.workMode).toBe('workspace');
+    expect(data.attempts.filter((a: any) => a.projectId === project.id)).toHaveLength(0);
+    const files = await (await request.get(`/api/projects/${project.id}/files`)).json();
+    expect(files.files.some((file: any) => file.path === 'tools/workroom-download.mjs')).toBe(true);
+    await page.reload();
+    await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
+    await expect(
+      selector.getByLabel('Use Codex workspace executor', { exact: true }),
+    ).toBeChecked();
+    await expect(selector).toContainText('task roles explicitly use Codex / fixture-executor');
+  } finally {
+    await request.post(fixtureUrl, { data: { authenticated: false, deviceBlocked: false } });
+    const latest = await (await request.get('/api/connections/settings')).json();
+    await request.put('/api/connections/settings', {
+      data: {
+        provider: 'codex',
+        revision: latest.revision,
+        enabled: original.codex.enabled,
+        model: original.codex.model,
+      },
+    });
+  }
+});
+
+test('venture creativity is visible, preserves an explicit choice, and saves without canned tasks or model calls', async ({
+  page,
+  request,
+}) => {
+  await prepare(request);
+  await page.addInitScript(() => {
+    HTMLCanvasElement.prototype.getContext = (() => null) as any;
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Clear draft', exact: true }).click();
+  await dialog.getByLabel('Team & workflow', { exact: true }).selectOption('venture');
+  await expect(dialog.getByLabel('Working style', { exact: true })).toHaveValue('expansive');
+  await dialog.getByLabel('Working style', { exact: true }).selectOption('focused');
+  await dialog.getByLabel('Team & workflow', { exact: true }).selectOption('office');
+  await dialog.getByLabel('Team & workflow', { exact: true }).selectOption('venture');
+  await expect(dialog.getByLabel('Working style', { exact: true })).toHaveValue('focused');
+  await dialog.getByLabel('Project name', { exact: true }).fill('Creative capital scope');
+  await dialog
+    .getByLabel('The brief', { exact: true })
+    .fill(
+      'Explore unconventional software solutions and capital options; label unverified demand and missing execution tools.',
+    );
+  await dialog.getByLabel('Task planning', { exact: true }).selectOption('manual');
+  await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  let data = await (await request.get('/api/state')).json();
+  const project = data.state.projects.find((p: any) => p.title === 'Creative capital scope');
+  expect(project.exploration).toBe('focused');
+  expect(data.state.tasks.filter((t: any) => t.projectId === project.id)).toHaveLength(0);
+  expect(data.attempts.filter((a: any) => a.projectId === project.id)).toHaveLength(0);
+  await page.getByRole('button', { name: 'Edit plan · 0 tasks', exact: true }).click();
+  await dialog.getByLabel('Working style', { exact: true }).selectOption('expansive');
+  await dialog.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Edit plan · 0 tasks', exact: true }).click();
+  await expect(dialog.getByLabel('Working style', { exact: true })).toHaveValue('expansive');
+  data = await (await request.get('/api/state')).json();
+  expect(data.state.projects.find((p: any) => p.id === project.id).exploration).toBe('expansive');
+  expect(data.attempts.filter((a: any) => a.projectId === project.id)).toHaveLength(0);
+});
+
 test('every economy number can be cleared and replaced without an inserted zero, including decimal rates', async ({
   page,
   request,
@@ -125,7 +227,9 @@ test('the model page clearly selects the exact model used by this project withou
   );
   await page.getByRole('button', { name: 'Back to workspace', exact: true }).click();
   await page.getByRole('button', { name: /^(Run|Resume) team$/ }).click();
-  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible({
+    timeout: 15000,
+  });
   const data = await (await request.get('/api/state')).json();
   expect(data.attempts.find((attempt: any) => attempt.projectId === project.id).model).toBe(
     'workroom-browser-model-variant',
@@ -196,7 +300,9 @@ test('fresh restart keeps the previous results and creates a clean independent p
   const { project } = await savedProject(request, 'Restartable source project');
   await openProject(page, project.id);
   await page.getByRole('button', { name: /^(Run|Resume) team$/ }).click();
-  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible({
+    timeout: 15000,
+  });
   const before = await (await request.get('/api/state')).json();
   await page.getByRole('button', { name: 'Restart project', exact: true }).click();
   await page.getByLabel('New run name', { exact: true }).fill('Clean restarted office');

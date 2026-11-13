@@ -329,6 +329,18 @@ export async function localGenerate(
       done?: boolean;
     } = {};
   let last = 0;
+  const publish = (status: 'in_progress' | 'completed' | 'interrupted') => {
+    progress?.onTrace?.({
+      id: 'result',
+      type: 'response',
+      text,
+      status,
+      progress: {
+        stage: status === 'completed' ? 'validating' : 'streaming',
+        receivedCharacters: text.length,
+      },
+    });
+  };
   try {
     const response = await fetch(new URL('/api/chat', url), {
       method: 'POST',
@@ -367,16 +379,7 @@ export async function localGenerate(
       final = { ...final, ...data };
       if (text && (data.done || Date.now() - last > 200)) {
         last = Date.now();
-        progress?.onTrace?.({
-          id: 'result',
-          type: 'response',
-          text,
-          status: data.done ? 'completed' : 'in_progress',
-          progress: {
-            stage: data.done ? 'validating' : 'streaming',
-            receivedCharacters: text.length,
-          },
-        });
+        publish(data.done ? 'completed' : 'in_progress');
       }
     };
     if (response.headers.get('content-type')?.includes('application/json')) {
@@ -420,6 +423,7 @@ export async function localGenerate(
       ...(final.done_reason === 'length' ? { outputLimitReached: true } : {}),
     };
   } catch (error) {
+    if (text && !final.done) publish('interrupted');
     if (timeout.aborted && !signal?.aborted)
       throw new Error(
         `Ollama reached this project's ${seconds}-second request timeout. A CPU-only model can be slow on long reviews. Inspect Live output, shorten the assignment or raise Request timeout in Edit plan, then retry; you can also select Codex on Models & sign-in.`,

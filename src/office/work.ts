@@ -115,7 +115,10 @@ export function officeWork(
     detail,
   };
   if (!entry) return result;
-  const model = providers[project.provider] || 'model';
+  const model =
+    providers[entry.provider as keyof typeof providers] ||
+    providers[project.executor?.provider || project.provider] ||
+    'model';
   if (entry.progress?.stage === 'preparing')
     return {
       ...result,

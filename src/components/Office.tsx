@@ -32,6 +32,7 @@ type Props = {
   zoom: number;
   reset: number;
   moving: boolean;
+  rendering?: boolean;
   onAgentClick: (id: string) => void;
   onTaskClick: (id: string) => void;
 };
@@ -87,6 +88,7 @@ export default function Office(props: Props) {
     <SceneBoundary fallback={fallback}>
       <div className="office-renderer">
         <Canvas
+          frameloop={props.rendering === false ? 'never' : 'always'}
           orthographic
           shadows
           dpr={[1, 1.5]}

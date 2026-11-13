@@ -77,7 +77,7 @@ test('settled desk poses put idle and working bodies on the seat, facing the mon
 
 test('a fresh runtime handoff brings both agents to the meeting area, then returns them to work', () => {
   const office = new OfficeSimulation(),
-    state = initialState();
+    state = initialState(true);
   const task = { ...state.tasks[1], status: 'working' as const };
   office.update(
     agents,

@@ -1,4 +1,5 @@
 import { RESOURCE_LIMITS, INPUT_LIMITS } from '../shared/limits.js';
+import { executorSchema } from '../shared/schemas.js';
 import { validationMessages, parseField } from '../shared/validation.js';
 import { limitsCatalog } from './limits-catalog.js';
 import 'dotenv/config';
@@ -298,7 +299,9 @@ app.post(
         documentPack: z.enum(['studio', 'office']).default('office'),
         planning: z.enum(['template', 'ai', 'manual']).optional(),
         requestId: z.string().uuid().optional(),
-        collaboration: collaborationSchema.optional(),
+        collaboration: collaborationSchema
+          .extend({ exploration: z.enum(['focused', 'expansive']).optional() })
+          .optional(),
         officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(4),
         team: z.array(teamMemberSchema).min(1).max(12).optional(),
         workflow: z.enum(['office', 'software', 'research', 'venture', 'custom']).optional(),
@@ -663,6 +666,7 @@ app.post(
         provider: providerSchema,
         model: z.string().trim().max(150).optional(),
         workMode: z.enum(['text', 'workspace']).optional(),
+        executor: executorSchema.nullable().optional(),
         expectedRevision: z.number().int().nonnegative(),
       })
       .parse(req.body);
@@ -672,6 +676,7 @@ app.post(
       value.model,
       value.workMode,
       value.expectedRevision,
+      value.executor,
     );
     res.json({ ok: true, revision: engine.project(param(req, 'id')).settingsRevision });
   }),

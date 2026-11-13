@@ -17,6 +17,10 @@ export default function ProjectModelSelector({
   const [provider, setProvider] = useState(project.provider);
   const [model, setModel] = useState(project.model || '');
   const [tools, setTools] = useState(hasProjectTools(project));
+  const [executor, setExecutor] = useState(!!project.executor);
+  const [executorModel, setExecutorModel] = useState(
+    project.executor?.model || data.runtime.models.codex || '',
+  );
   const [revision, setRevision] = useState(project.settingsRevision || 0);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
@@ -25,6 +29,8 @@ export default function ProjectModelSelector({
     setProvider(project.provider);
     setModel(project.model || '');
     setTools(hasProjectTools(project));
+    setExecutor(!!project.executor);
+    setExecutorModel(project.executor?.model || data.runtime.models.codex || '');
     setRevision(project.settingsRevision || 0);
   }, [project.id]);
   const locked =
@@ -52,7 +58,9 @@ export default function ProjectModelSelector({
       const saved = await api<{ revision: number }>(`/projects/${project.id}/runtime`, {
         provider,
         model,
-        workMode: tools && provider === 'codex' ? 'workspace' : 'text',
+        workMode: (tools && provider === 'codex') || executor ? 'workspace' : 'text',
+        executor:
+          executor && provider !== 'codex' ? { provider: 'codex', model: executorModel } : null,
         expectedRevision: revision,
       });
       setRevision(saved.revision);
@@ -75,7 +83,11 @@ export default function ProjectModelSelector({
             (project.provider === 'external' ? 'Worker-managed model' : 'No model ID')}
         </code>
       </p>
-      <p>All roles in this project use this selection. Connected models are available choices.</p>
+      <p>
+        {project.executor
+          ? `Planning and meetings use this selection. All task roles explicitly use Codex / ${project.executor.model} with shared project tools.`
+          : 'All roles in this project use this selection. Connected models are available choices.'}
+      </p>
       <form onSubmit={save}>
         <button
           type="button"
@@ -85,6 +97,8 @@ export default function ProjectModelSelector({
             setProvider(project.provider);
             setModel(project.model || '');
             setTools(hasProjectTools(project));
+            setExecutor(!!project.executor);
+            setExecutorModel(project.executor?.model || data.runtime.models.codex || '');
             setRevision(project.settingsRevision || 0);
             setMessage('Saved project model reloaded.');
           }}
@@ -109,6 +123,7 @@ export default function ProjectModelSelector({
               );
               if (next !== 'codex') setTools(false);
               else if (project.workflow === 'software') setTools(true);
+              if (['codex', 'external', 'demo'].includes(next)) setExecutor(false);
             }}
           >
             {Object.entries(PROVIDER_LABELS)
@@ -172,6 +187,41 @@ export default function ProjectModelSelector({
             Enable shared coding folder and commands
           </label>
         )}
+        {!['codex', 'external', 'demo'].includes(provider) && (
+          <>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                aria-label="Use Codex workspace executor"
+                checked={executor}
+                disabled={busy || locked}
+                onChange={(event) => setExecutor(event.target.checked)}
+              />
+              Use Codex to build and run project tools; keep this model for planning
+            </label>
+            {executor && (
+              <>
+                <label>
+                  Codex task executor model ID
+                  <input
+                    aria-label="Codex task executor model ID"
+                    required
+                    maxLength={150}
+                    value={executorModel}
+                    disabled={busy || locked}
+                    onChange={(event) => setExecutorModel(event.target.value)}
+                  />
+                </label>
+                <p className="field-hint">
+                  This explicitly sends task jobs to your signed-in Codex account and uses its
+                  allowance; it is not a fallback. Tasks share a managed folder and can build, test
+                  and reuse tools. Internet access is separately enabled in Edit plan.{' '}
+                  {data.runtime.coding?.message}
+                </p>
+              </>
+            )}
+          </>
+        )}
         {locked && (
           <div>
             <p className="field-hint">Pause this project before changing its model.</p>
@@ -210,7 +260,9 @@ export default function ProjectModelSelector({
         </button>
         {(provider !== project.provider ||
           model !== (project.model || '') ||
-          tools !== hasProjectTools(project)) && (
+          (provider === 'codex' && tools !== hasProjectTools(project)) ||
+          executor !== !!project.executor ||
+          (executor && executorModel !== project.executor?.model)) && (
           <p className="field-hint">
             This selection has not been applied. Use the button above to save it.
           </p>

@@ -317,7 +317,20 @@ test('software workspaces use unique readable folders, expose real files, and ex
     writeFileSync(join(directory, 'outside.txt'), 'not public');
     if (process.platform !== 'win32')
       symlinkSync(join(directory, 'outside.txt'), join(folder, 'link.txt'));
-    assert.deepEqual(workspaceFiles(folder), [{ path: 'src/main.js', bytes: 25 }]);
+    const expectedPaths = [
+      'src/main.js',
+      'tools/network-policy.json',
+      'tools/network.mjs',
+      'tools/workroom-crawl.mjs',
+      'tools/workroom-download.mjs',
+      'tools/workroom-tools.json',
+      'tools/workroom-tools.mjs',
+    ];
+    assert.deepEqual(
+      workspaceFiles(folder).map((file) => file.path),
+      expectedPaths,
+    );
+    assert.equal(workspaceFiles(folder)[0].bytes, 25);
     for (const name of [
       '../outside.txt',
       '.env',
@@ -327,7 +340,7 @@ test('software workspaces use unique readable folders, expose real files, and ex
     ])
       assert.throws(() => workspaceFile(folder, name));
     const zip = unzipSync(workspaceZip(folder));
-    assert.deepEqual(Object.keys(zip), ['src/main.js']);
+    assert.deepEqual(Object.keys(zip), expectedPaths);
     assert.equal(strFromU8(zip['src/main.js']), 'export const answer = 42;');
     store.restore(store.backup());
     assert.equal(existsSync(join(folder, 'src/main.js')), true);

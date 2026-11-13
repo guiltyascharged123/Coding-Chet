@@ -10,6 +10,29 @@ export function jsonValue(output: string): unknown {
   }
 }
 
+/** Remove only blank optional handoff bullets, never findings or assignments.
+ * The original reply remains unchanged in the console and request checkpoint.
+ */
+export function normalizeWorkReply(value: unknown) {
+  const notes: string[] = [];
+  if (!value || typeof value !== 'object' || !('handoff' in value)) return { value, notes };
+  const handoff = value.handoff;
+  if (!handoff || typeof handoff !== 'object') return { value, notes };
+  const cleaned = { ...handoff } as Record<string, unknown>;
+  for (const key of ['facts', 'assumptions']) {
+    const items = cleaned[key];
+    if (!Array.isArray(items)) continue;
+    const kept = items.filter((item) => typeof item !== 'string' || !!item.trim());
+    if (kept.length !== items.length) {
+      cleaned[key] = kept;
+      notes.push(
+        `Removed ${items.length - kept.length} empty optional handoff.${key} bullet(s). No substantive text or assignments changed; the original provider reply is retained.`,
+      );
+    }
+  }
+  return { value: { ...value, handoff: cleaned }, notes };
+}
+
 export function saveResponseIssue(task: Task | undefined, output: string, issues: string[]) {
   const response = consoleText(output);
   const saved = {

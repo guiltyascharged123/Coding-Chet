@@ -674,6 +674,23 @@ export default function App() {
                     : PROVIDER_LABELS[project.provider])}{' '}
                 · Change
               </button>
+              {project.executor && (
+                <small className="project-capabilities">
+                  Planning: {project.provider} / {project.model} · Tasks: Codex /{' '}
+                  {project.executor.model}
+                </small>
+              )}
+              <small className="project-capabilities">
+                {project.provider === 'demo'
+                  ? 'Simulation · no model calls'
+                  : project.provider === 'external'
+                    ? 'Worker-managed capabilities · inspect worker receipts'
+                    : (project.provider === 'codex' || project.executor) && hasProjectTools(project)
+                      ? 'Workspace tools · project files and commands'
+                      : project.provider === 'codex' && project.researchEnabled
+                        ? 'Text and web research · no file execution'
+                        : 'Text only · supplied material; no browsing or file execution'}
+              </small>
             </div>
             <div className="project-progress">
               <div>
@@ -1002,6 +1019,7 @@ export default function App() {
                         zoom={zoom}
                         reset={resetCamera}
                         moving={officeMoving}
+                        rendering={!modal && !selectedTask && !selectedAgent && !selectedReview}
                         onAgentClick={openAgentConsole}
                         onTaskClick={setTaskId}
                       />

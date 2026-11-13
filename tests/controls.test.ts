@@ -16,7 +16,7 @@ test('legacy databases retain outputs and create a validated recovery snapshot b
   const directory = mkdtempSync(join(tmpdir(), 'workroom-legacy-')),
     path = join(directory, 'legacy.sqlite');
   const database = new DatabaseSync(path),
-    legacy = initialState();
+    legacy = initialState(true);
   legacy.tasks[0].output = '# Retained legacy document';
   legacy.tasks[0].status = 'done';
   database.exec('CREATE TABLE workspace (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)');

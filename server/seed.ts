@@ -98,7 +98,7 @@ export function demoPlan(project: Project, team: Agent[]): Task[] {
   }));
 }
 
-export function initialState(demo = true): WorkspaceState {
+export function initialState(demo = false): WorkspaceState {
   const project: Project = {
     id: randomUUID(),
     title: 'Sunday Coffee',

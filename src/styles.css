@@ -5593,6 +5593,15 @@ button.connection:hover {
   background: #2c3d49;
   overflow-wrap: anywhere;
 }
+.project-capabilities {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .model-activity h2 {
   font-size: 20px;
   margin: 0;

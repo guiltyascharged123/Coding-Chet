@@ -242,7 +242,7 @@ export default function PlanEditor({
             </span>
           </label>
 
-          {project.provider === 'codex' && (
+          {(project.provider === 'codex' || project.executor) && (
             <>
               <label>
                 Codex reasoning effort
@@ -540,8 +540,8 @@ export default function PlanEditor({
               checked={network}
               onChange={(e) => setNetwork(e.target.checked)}
             />
-            Allow tool network for this project (for example, dependency downloads). Code and
-            installed packages can make internet requests when enabled.
+            Allow tool network for this project (dependencies, project data and authorized
+            connectors). Code and installed packages can make internet requests when enabled.
           </label>
         )}
         <p className="field-hint" role="status">

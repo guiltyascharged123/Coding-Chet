@@ -5,7 +5,7 @@ import type { Bootstrap, Attempt } from '../shared/types.js';
 import type { ConsoleEntry } from '../shared/console.js';
 import { modelJobs } from '../src/model-work.js';
 function fixture() {
-  const state = initialState();
+  const state = initialState(true);
   const project = {
     ...state.projects[0],
     team: structuredClone(agents),

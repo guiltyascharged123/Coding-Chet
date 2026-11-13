@@ -112,7 +112,8 @@ export default function ProjectModal({
         collaboration: {
           ...(draft.workflow === 'software' ? { deliveryMode: draft.deliveryMode || 'build' } : {}),
           researchEnabled: !!draft.researchEnabled,
-          exploration: draft.exploration || 'focused',
+          exploration:
+            draft.exploration || (draft.workflow === 'venture' ? 'expansive' : 'focused'),
           requestTimeoutSeconds: 900,
           reasoningEffort: draft.reasoningEffort || 'medium',
           meetingPolicy: {
@@ -305,15 +306,16 @@ export default function ProjectModal({
           Working style
           <select
             aria-label="Working style"
-            value={draft.exploration || 'focused'}
+            value={draft.exploration || (draft.workflow === 'venture' ? 'expansive' : 'focused')}
             onChange={(e) => change({ exploration: e.target.value as 'focused' | 'expansive' })}
           >
             <option value="focused">Focused delivery</option>
             <option value="expansive">Creative exploration</option>
           </select>
           <span className="field-hint">
-            Creative exploration encourages unconventional approaches and autonomous internal work.
-            Model-provider rules and tool permissions still apply.
+            Creative exploration can challenge the plan, invent approaches and test software ideas
+            with available tools. Venture projects default to this style. Tool access is configured
+            separately; text-only connections cannot run code.
           </span>
         </label>
         {provider === 'codex' && (

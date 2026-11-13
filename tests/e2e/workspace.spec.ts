@@ -834,6 +834,13 @@ test('live console shows requests before replies, retains history, filters and e
   await expect(consoleView.locator('.console-response')).toContainText('Cost comparison', {
     timeout: 15000,
   });
+  await expect(page.getByRole('region', { name: 'Current project', exact: true })).toContainText(
+    'Text only · supplied material; no browsing or file execution',
+  );
+  // The ordinary viewer must keep the fields behind validation and delegation
+  // failures visible, rather than dropping them when a JSON stream completes.
+  for (const field of ['"outcome": "complete"', '"handoff"', '"facts"', '"followUps"'])
+    await expect(consoleView.locator('.console-response pre')).toContainText(field);
   await expect(page.getByRole('button', { name: 'View results', exact: true })).toBeVisible();
   await page.getByLabel('Raw replies', { exact: true }).check();
   await expect(consoleView.locator('.console-response pre')).toContainText('"outcome":"complete"');

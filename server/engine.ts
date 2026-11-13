@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { ensureProjectTools } from './project-tools.js';
 import { AGENT_IDS, expandTeam, type OfficeCapacity } from '../shared/team.js';
 import type { IdeaProposal, ProjectIdea } from '../shared/ideas.js';
 import { agentContext } from '../shared/agent-context.js';
@@ -33,7 +34,7 @@ import { evidenceGaps, reportedAcceptanceGaps } from './verification.js';
 import { modelReadiness } from '../shared/model-readiness.js';
 import { workResultSchema } from '../shared/work.js';
 import { jsonValue } from './work-results.js';
-import { hasProjectTools } from '../shared/capabilities.js';
+import { hasProjectTools, taskExecutionProject } from '../shared/capabilities.js';
 import type { ConsoleEvent } from '../shared/console.js';
 import type { CostPolicy } from '../shared/types.js';
 
@@ -134,8 +135,8 @@ export class Engine extends EventEmitter {
         agentRole: agent?.role,
         meetingId,
         attemptId,
-        provider: project.provider,
-        model: project.model,
+        provider: (phase === 'task' ? taskExecutionProject(project) : project).provider,
+        model: (phase === 'task' ? taskExecutionProject(project) : project).model,
       });
       this.emit('console', update);
     } catch {
@@ -255,7 +256,7 @@ export class Engine extends EventEmitter {
       reasoningEffort: collaboration?.reasoningEffort || 'medium',
       meetingPolicy: collaboration?.meetingPolicy,
       researchEnabled: !!collaboration?.researchEnabled,
-      exploration: collaboration?.exploration || 'focused',
+      exploration: collaboration?.exploration || (workflow === 'venture' ? 'expansive' : 'focused'),
       requestTimeoutSeconds: collaboration?.requestTimeoutSeconds || 900,
       officeCapacity,
       deliveryMode:
@@ -274,7 +275,7 @@ export class Engine extends EventEmitter {
     stateSchema.parse({ ...this.state, projects: [...this.state.projects, project] });
     if (workflow === 'software') {
       project.workspaceFolder = workspaceFolder(project);
-      projectWorkspace(this.store.path, project);
+      ensureProjectTools(projectWorkspace(this.store.path, project));
     }
     // Durability comes before any model request. A failed plan is a saved project.
     this.state.projects.unshift(project);
@@ -384,6 +385,7 @@ export class Engine extends EventEmitter {
       meetingPolicy: structuredClone(source.meetingPolicy),
       researchEnabled: source.researchEnabled,
       workMode: source.workMode,
+      executor: source.executor ? { ...source.executor } : undefined,
       toolNetwork: source.toolNetwork,
       exploration: source.exploration,
       requestTimeoutSeconds: source.requestTimeoutSeconds,
@@ -394,7 +396,7 @@ export class Engine extends EventEmitter {
     };
     if (hasProjectTools(project)) {
       project.workspaceFolder = workspaceFolder(project);
-      projectWorkspace(this.store.path, project);
+      ensureProjectTools(projectWorkspace(this.store.path, project));
     }
     this.state.projects.unshift(project);
     this.event(
@@ -760,6 +762,7 @@ export class Engine extends EventEmitter {
     model?: string,
     workMode?: 'text' | 'workspace',
     expectedRevision?: number,
+    executor?: Project['executor'] | null,
   ) {
     const p = this.project(id);
     this.checkRevision(p.settingsRevision, expectedRevision, 'Project settings');
@@ -786,16 +789,40 @@ export class Engine extends EventEmitter {
     const readiness = modelReadiness(runtimeInfo(), provider, selected);
     if (!readiness.ready) throw new AppError(readiness.message);
     const tools = p.workflow === 'software' || (workMode || p.workMode) === 'workspace';
-    if (tools && provider !== 'codex')
+    const execution =
+      !tools || provider === 'codex'
+        ? undefined
+        : executor === undefined
+          ? p.executor
+          : executor || undefined;
+    if (execution && (provider === 'demo' || provider === 'external'))
+      throw new AppError('Choose a direct planning connection for the separate Codex executor.');
+    if (execution) {
+      if (
+        execution.provider !== 'codex' ||
+        !/^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,149}$/.test(execution.model)
+      )
+        throw new AppError('Choose an exact Codex executor model ID.');
+      const ready = modelReadiness(runtimeInfo(), 'codex', execution.model);
+      if (!ready.ready) throw new AppError(ready.message);
+    }
+    if (tools && provider !== 'codex' && !execution)
       throw new AppError(
         'Managed project tools require Codex. Disable that option before choosing a text connection. Software delivery always requires Codex.',
       );
     const folder = tools ? p.workspaceFolder || workspaceFolder(p) : p.workspaceFolder;
-    if (tools) projectWorkspace(this.store.path, { ...p, workspaceFolder: folder });
+    if (tools)
+      ensureProjectTools(projectWorkspace(this.store.path, { ...p, workspaceFolder: folder }));
     const nextMode = p.workflow === 'software' ? 'workspace' : workMode || p.workMode;
-    if (p.provider !== provider || p.model !== selected || p.workMode !== nextMode)
+    if (
+      p.provider !== provider ||
+      p.model !== selected ||
+      p.workMode !== nextMode ||
+      JSON.stringify(p.executor) !== JSON.stringify(execution)
+    )
       for (const task of this.state.tasks.filter((t) => t.projectId === id)) delete task.recovery;
     p.workMode = nextMode;
+    p.executor = execution;
     p.workspaceFolder = folder;
     p.provider = provider;
     p.model = provider === 'demo' || provider === 'external' ? undefined : selected;
@@ -803,7 +830,7 @@ export class Engine extends EventEmitter {
     this.event(
       id,
       'system',
-      `Project model set to ${provider}${p.model ? ` / ${p.model}` : ''}. Existing work and usage history retained.`,
+      `Project model set to ${provider}${p.model ? ` / ${p.model}` : ''}${execution ? ` for planning and meetings; tasks explicitly use Codex / ${execution.model} in the project workspace` : ''}. Existing work and usage history retained.`,
     );
     this.commit();
   }
@@ -1181,14 +1208,15 @@ export class Engine extends EventEmitter {
       project.planningStatus === 'failed'
     )
       throw new AppError('Finish or retry planning before running the team. Your brief is saved.');
-    if (hasProjectTools(project) && project.provider !== 'codex')
+    const execution = taskExecutionProject(project);
+    if (hasProjectTools(project) && execution.provider !== 'codex')
       throw new AppError(
         'Software delivery requires the Codex connection for real file and command tools. Select it in Workspace controls.',
       );
-    const readiness = modelReadiness(runtimeInfo(), project.provider, project.model);
+    const readiness = modelReadiness(runtimeInfo(), execution.provider, execution.model);
     if (!readiness.ready)
       throw new AppError(
-        `This saved project uses ${project.provider}${project.model ? ' / ' + project.model : ''}. ${readiness.message}`,
+        `This project's task engine is ${execution.provider}${execution.model ? ' / ' + execution.model : ''}. ${readiness.message}`,
         400,
         'connections',
       );
@@ -1245,8 +1273,10 @@ export class Engine extends EventEmitter {
       throw new AppError(
         `This plan has ${this.state.tasks.filter((task) => task.projectId === id && !task.conversationMessageId).length} tasks; Tasks allowed per project is ${policy(this.store).maxTasks}. Increase it in Workspace controls; no tasks have been discarded.`,
       );
-    if (!modelReadiness(runtimeInfo(), project.provider, project.model).ready)
-      throw new AppError(modelReadiness(runtimeInfo(), project.provider, project.model).message);
+    if (!modelReadiness(runtimeInfo(), execution.provider, execution.model).ready)
+      throw new AppError(
+        modelReadiness(runtimeInfo(), execution.provider, execution.model).message,
+      );
     project.status = this.state.approvals.some((a) => a.projectId === id && a.status === 'pending')
       ? 'needs_input'
       : 'running';
@@ -1362,6 +1392,7 @@ export class Engine extends EventEmitter {
     if (this.store.hasUncertain('task_id', id))
       throw new AppError('Acknowledge uncertain usage in Workspace controls before retrying.');
     const target = this.project(task.projectId);
+    const execution = taskExecutionProject(target);
     if (
       !task.conversationMessageId &&
       (this.state.meetings || []).some((m) => m.projectId === target.id && m.status === 'failed')
@@ -1369,15 +1400,17 @@ export class Engine extends EventEmitter {
       throw new AppError('Retry or skip the failed meeting before retrying work.');
     if (
       hasProjectTools(target) &&
-      (target.provider !== 'codex' ||
+      (execution.provider !== 'codex' ||
         !runtimeInfo().available.codex ||
         !runtimeInfo().coding?.ready)
     )
       throw new AppError(
         'Software delivery requires a ready Codex connection and coding sandbox. Check Model connections.',
       );
-    if (!modelReadiness(runtimeInfo(), target.provider, target.model).ready)
-      throw new AppError(modelReadiness(runtimeInfo(), target.provider, target.model).message);
+    if (!modelReadiness(runtimeInfo(), execution.provider, execution.model).ready)
+      throw new AppError(
+        modelReadiness(runtimeInfo(), execution.provider, execution.model).message,
+      );
     delete task.recovery;
     task.status = 'queued';
     if (feedback?.trim()) task.feedback = feedback.trim();
@@ -1880,7 +1913,7 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   private async execute(task: Task, controller: AbortController) {
-    const project = this.project(task.projectId);
+    const project = taskExecutionProject(this.project(task.projectId));
     const agent = (project.team || this.state.agents).find((a) => a.id === task.agentId)!;
     try {
       if (project.provider === 'demo') {
@@ -1900,6 +1933,10 @@ export class Engine extends EventEmitter {
         (t) =>
           t.projectId === project.id && (t.status === 'done' || t.id === task.requestedByTaskId),
       );
+      const workspace = hasProjectTools(project)
+        ? projectWorkspace(this.store.path, project)
+        : undefined;
+      if (workspace) ensureProjectTools(workspace);
       const output = await this.worker(
         project.provider,
         project,
@@ -1913,9 +1950,7 @@ export class Engine extends EventEmitter {
           task,
           toolNetwork: !!project.toolNetwork,
           readOnly: !!task.readOnly || project.deliveryMode === 'design',
-          workspace: hasProjectTools(project)
-            ? projectWorkspace(this.store.path, project)
-            : undefined,
+          workspace,
           cache: hasProjectTools(project) ? false : undefined,
           onTool: (raw) => {
             const entry = { ...raw, id: `${task.attemptId || task.id}:${raw.id}` };
@@ -2021,7 +2056,7 @@ export class Engine extends EventEmitter {
     const created: Task[] = followUps.map((f) => {
       const project = this.project(task.projectId),
         owner = team.find((agent) => agent.id === f.agentId)!;
-      const tools = project.provider === 'codex' && hasProjectTools(project);
+      const tools = taskExecutionProject(project).provider === 'codex' && hasProjectTools(project);
       const workType =
         f.workType ||
         (!tools
@@ -2033,10 +2068,21 @@ export class Engine extends EventEmitter {
               : !task.readOnly && /engineer|developer/.test(owner.role.toLowerCase())
                 ? 'implementation'
                 : 'plan');
+      // An explicitly writable project authorizes project-owned tool building.
+      // A read-only coordinator stays read-only, but may assign a separate
+      // builder in the same writable project. Design-only and legacy read-only
+      // task permissions are preserved.
+      const delegatedBuilder =
+        (project.workMode === 'workspace' || project.deliveryMode === 'build') &&
+        tools &&
+        project.deliveryMode !== 'design' &&
+        task.workType === 'plan' &&
+        workType === 'implementation' &&
+        f.agentId !== task.agentId;
       if (
         (!tools &&
           (workType !== 'plan' || f.acceptanceCriteria?.some((c) => c.evidence !== 'report'))) ||
-        (task.readOnly && workType === 'implementation')
+        (task.readOnly && workType === 'implementation' && !delegatedBuilder)
       )
         throw new AppError(
           'The proposed follow-up requires tools or write access unavailable to this assignment. Its proposal is saved; use a separately authorized implementation assignment or select the required project tools.',
@@ -2076,7 +2122,11 @@ export class Engine extends EventEmitter {
         requestedByTaskId: task.id,
         conversationMessageId: task.conversationMessageId,
         conversationPending: !!task.conversationMessageId,
-        readOnly: !!task.readOnly || !!f.readOnly || workType === 'plan' || workType === 'review',
+        readOnly:
+          (!!task.readOnly && !delegatedBuilder) ||
+          !!f.readOnly ||
+          workType === 'plan' ||
+          workType === 'review',
         workType,
         acceptanceCriteria,
         dependencies,

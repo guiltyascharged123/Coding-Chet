@@ -150,6 +150,24 @@ export function limitsCatalog(store: Store, project?: Project) {
     ],
     fixed: [
       {
+        name: 'Project HTTP tools and internet policy',
+        value:
+          'Configurable per-project GET pacing, request/byte/time/cache/redirect limits; server rate headers can impose stricter pauses',
+        why: 'Inspect tools/network-policy.json and run node tools/workroom-download.mjs --help for defaults and ranges. Cache/host state and single-flight locking are in .workroom-http. These are separate from model requests and do not meter unrelated programs or accounts.',
+      },
+      {
+        name: 'Project crawl and local search limits',
+        value:
+          'Default 25 pages (1–1000 total across resumes), depth 2 (0–10), text/page 100000 characters (1000–1000000), queue 10000, search results 5 (1–50)',
+        why: 'Run node tools/workroom-crawl.mjs --help. Page/depth/text/search allowances and ignore/respect robots mode are explicit options; HTTP budgets apply additionally. Saved index text is searchable without site requests.',
+      },
+      {
+        name: 'Tool promotion and Workroom patch checks',
+        value:
+          'Default 600000 ms/check (5000–3600000 adjustable), 4 MiB captured output/command; one lifecycle change per project',
+        why: 'Run node tools/workroom-tools.mjs --help. Failed/time-limited checks do not promote candidates or mark core patches ready. Snapshots/receipts are retained under .workroom-tools; Workroom proposals are also visible under tool-proposals. These checks run inside the existing worker sandbox.',
+      },
+      {
         name: 'Saved record retention',
         value:
           'No count-based cap on saved historical records: projects, tasks, brief/instruction versions, meetings, memory, decisions or usage',

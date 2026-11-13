@@ -130,6 +130,7 @@ export interface Project {
   workspaceFolder?: string;
   toolNetwork?: boolean;
   workMode?: 'text' | 'workspace';
+  executor?: { provider: 'codex'; model: string };
   reasoningEffort?: ReasoningEffort;
   meetingPolicy?: { enabled: boolean; everyTasks: number };
   researchEnabled?: boolean;

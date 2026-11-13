@@ -117,3 +117,46 @@ test('local model timeout is actionable and remains distinct from explicit cance
     globalThis.fetch = oldFetch;
   }
 });
+
+test('a broken stream flushes the latest public text even inside the update throttle window', async () => {
+  const oldFetch = globalThis.fetch,
+    events: ConsoleEvent[] = [];
+  try {
+    let pulls = 0;
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (pulls++ === 0)
+              controller.enqueue(
+                new TextEncoder().encode(
+                  [
+                    JSON.stringify({ message: { content: 'First public words. ' }, done: false }),
+                    JSON.stringify({
+                      message: { content: 'Latest words before disconnect.', thinking: 'PRIVATE' },
+                      done: false,
+                    }),
+                  ].join('\n') + '\n',
+                ),
+              );
+            else controller.error(new Error('Fixture stream disconnected'));
+          },
+        }),
+        { headers: { 'Content-Type': 'application/x-ndjson' } },
+      )) as typeof fetch;
+    await assert.rejects(
+      () =>
+        localGenerate('System', 'Assignment', 'offline', 500, undefined, false, undefined, {
+          onTrace: (event) => events.push(event),
+        }),
+      /stream disconnected/,
+    );
+    assert.equal(events.at(-1)?.text, 'First public words. Latest words before disconnect.');
+    assert.equal(events.at(-1)?.status, 'interrupted');
+    assert.ok(
+      events.every((event) => !event.text.includes('PRIVATE') && event.status !== 'completed'),
+    );
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});

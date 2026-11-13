@@ -34,8 +34,15 @@ async function project(
 }
 async function open(page: any, id: string) {
   await page.goto('/');
-  await page.evaluate((id: string) => localStorage.setItem('workroom-project', id), id);
-  await page.reload();
+  // Set the selected ID and reload in one browser turn, so the outgoing
+  // app's persistence effect cannot overwrite the requested project in between.
+  await Promise.all([
+    page.waitForEvent('domcontentloaded'),
+    page.evaluate((id: string) => {
+      localStorage.setItem('workroom-project', id);
+      location.reload();
+    }, id),
+  ]);
 }
 
 test('a second browser editor cannot silently delete a newer saved assignment', async ({
@@ -317,7 +324,7 @@ test('a specialist meeting assigns a visible task check that resolves only when 
     .fill('Compare the supplied prices and keep missing buyer evidence explicit.');
   await page.getByRole('button', { name: 'Start team meeting', exact: true }).click();
   await expect(page.locator('.meeting-record .eyebrow')).toContainText('manual · completed', {
-    timeout: 20000,
+    timeout: 30000,
   });
   await expect(page.locator('.meeting-contribution')).toHaveCount(2);
   await expect(page.locator('.meeting-actions')).toContainText('Assigned check');

@@ -107,6 +107,8 @@ export function modelJobs(data: Bootstrap, projectId: string, entries: ConsoleEn
     const actorId =
       task?.agentId || meeting?.speakerId || (phase === 'plan' ? team[0]?.id : last?.agentId);
     const actor = team.find((agent) => agent.id === actorId);
+    const connection = phase === 'task' && project.executor ? project.executor : project;
+    const provider = request?.provider || connection.provider;
     let label = 'Preparing request',
       detail = 'Assembling role instructions, the assignment and selected saved evidence.';
     const purpose = request?.progress?.purpose || last?.progress?.purpose || 'initial';
@@ -196,11 +198,11 @@ export function modelJobs(data: Bootstrap, projectId: string, entries: ConsoleEn
           ? 'Provider reported activity'
           : 'Waiting for public model output';
       detail =
-        project.provider === 'ollama'
+        provider === 'ollama'
           ? 'The request was sent to Ollama. No public reply has arrived yet. Loading the model and processing a long prompt can take minutes on a CPU. No more detailed provider progress is available yet.'
           : 'The request has been sent. The provider has not supplied a public reply yet; some providers return text only at completion.';
     }
-    if (project.provider === 'external' && active) {
+    if (provider === 'external' && active) {
       label = 'External worker has the assignment';
       detail =
         'Workroom sees the lease and submitted events. It cannot confirm the worker’s internal model activity; open the console for reported updates.';
@@ -227,8 +229,8 @@ export function modelJobs(data: Bootstrap, projectId: string, entries: ConsoleEn
       startedAt,
       requestAt: task?.status === 'queued' ? undefined : receipt?.createdAt || request?.createdAt,
       lastUpdate: last?.updatedAt,
-      provider: request?.provider || project.provider,
-      model: request?.model || project.model,
+      provider,
+      model: request?.model || connection.model,
       active,
       label,
       detail,

@@ -6,7 +6,7 @@ import type { ConsoleEntry } from '../shared/console.js';
 import { roleProcedure } from '../shared/role-protocol.js';
 
 test('office work follows the current attempt, actual tools and saved states without making up progress', () => {
-  const state = initialState(),
+  const state = initialState(true),
     project = { ...state.projects[0], team: agents, provider: 'codex' as const };
   const task = {
     ...state.tasks[0],
@@ -90,7 +90,7 @@ test('role procedures distinguish implementation, independent review and commerc
 });
 
 test('planning is visible for legacy teams and only the actual meeting contributor is marked active', () => {
-  const state = initialState(),
+  const state = initialState(true),
     project = { ...state.projects[0], planningStatus: 'planning' as const, team: undefined };
   assert.equal(officeWork(agents[0], project, [], []).active, true);
   assert.equal(officeWork(agents[1], project, [], []).active, false);
@@ -117,7 +117,7 @@ test('planning is visible for legacy teams and only the actual meeting contribut
 });
 
 test('specialist meetings leave uninvited agents at their actual work instead of pretending they attend', () => {
-  const state = initialState(),
+  const state = initialState(true),
     project = { ...state.projects[0], team: agents };
   const meeting = {
     id: 'subset',

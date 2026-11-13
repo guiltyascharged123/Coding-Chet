@@ -43,7 +43,7 @@ test('OpenAI planning preserves explicit dependency scope and validates assignme
         { status: 200 },
       );
     }) as typeof fetch;
-    const project = { ...initialState().projects[0], provider: 'openai' as const };
+    const project = { ...initialState(true).projects[0], provider: 'openai' as const };
     const plan = await planProject(project, agents);
     assert.deepEqual(
       plan[2].dependencies,
@@ -64,7 +64,7 @@ test('Gemini uses a server-side key header and retains revision and teammate con
   const originalKey = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = 'test-only-placeholder';
   try {
-    const state = initialState();
+    const state = initialState(true);
     const task = state.tasks[1];
     task.feedback = 'Please reconsider the hierarchy.';
     const previous = { ...state.tasks[0], output: '# Audience research', status: 'done' as const };
@@ -118,7 +118,7 @@ test('model failures report a useful status without exposing provider response b
   try {
     globalThis.fetch = (async () =>
       new Response('Do not expose this response body.', { status: 429 })) as typeof fetch;
-    const state = initialState();
+    const state = initialState(true);
     await assert.rejects(
       () =>
         runTask(
