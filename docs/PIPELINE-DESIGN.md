@@ -111,7 +111,9 @@ no claim is made that Workroom outperforms these frameworks.
 The final full unit/integration suite completed 214 checks: 212 passed, two native
 sandbox checks skipped on this host. CPU-quota checks cover cgroup v2/v1,
 fractional quotas, missing metadata and explicit thread overrides. The
-production build passes. Model fixtures validate orchestration and persistence;
+production build passes. The final full browser suite passed all 42 checks,
+including the 55-reply history/recovery case. Browser model and CLI responses
+are deterministic fixtures; the live-model observations below are separate. Model fixtures validate orchestration and persistence;
 they are not live-model benchmarks.
 
 The requested Ollama model completed correctly labeled arithmetic in the
