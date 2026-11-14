@@ -75,6 +75,31 @@ export async function api<T = { ok: boolean }>(
 export async function getState(): Promise<Bootstrap> {
   return api<Bootstrap>('/state', undefined, 'GET');
 }
+export async function streamApi(
+  path: string,
+  body: unknown,
+  signal: AbortSignal,
+): Promise<Response> {
+  for (const refresh of [false, true]) {
+    const token = await browserToken(refresh);
+    const response = await fetch(`/api${path}`, {
+      method: 'POST',
+      signal,
+      headers: { 'Content-Type': 'application/json', 'X-Workroom-CSRF': token },
+      body: JSON.stringify(body),
+    });
+    if (response.ok) return response;
+    const data = await response.json();
+    if (
+      !refresh &&
+      ((response.status === 401 && data.code === 'BROWSER_PAIRING_REQUIRED') ||
+        (response.status === 403 && data.code === 'SESSION_REQUIRED'))
+    )
+      continue;
+    throw new ApiError(data.error || `Request failed (${response.status}).`);
+  }
+  throw new Error('Refresh the browser session before sending a message.');
+}
 export function relativeTime(time: number) {
   const secs = Math.max(0, Math.floor((Date.now() - time) / 1000));
   return secs < 60

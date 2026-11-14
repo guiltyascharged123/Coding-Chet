@@ -14,6 +14,8 @@ First startup installs app dependencies, builds the interface, creates `.env` if
 
 Open the URL printed in the terminal, normally **http://127.0.0.1:3001**. The launcher normally opens a private link that pairs your browser automatically. If you see **Connect this browser**, use the private link printed in that terminal. Keep the terminal open; Ctrl+C stops Workroom. Ollama may remain running for reuse. On Windows, the same command works in PowerShell or Command Prompt; use `npm.cmd run local` if PowerShell blocks npm scripts.
 
+To talk directly to the local model, choose **Local model chat** or open `/chat` after pairing. Replies stream, **Stop reply** cancels generation, and conversation history stays in your browser. No agent project is required.
+
 If local model setup needs attention:
 
 ```bash
@@ -126,3 +128,5 @@ See [Model activity, limits and planning recovery](docs/LIMITS-AND-MODEL-ACTIVIT
 See [Real agent work and creative exploration](docs/REAL-AGENT-WORK.md) for the November 12 reply failure, complete console output, real specialist handoffs, empty normal workspaces, and the tools needed to build and run software.
 
 See [Project tools and internet access](docs/PROJECT-TOOLS-AND-INTERNET.md) to keep local planning while explicitly selecting a Codex task executor, build and reuse project-owned connectors, discover suitable repositories, and download images with cached, paced, rate-aware requests.
+
+See [Specialist interaction and small local models](docs/AGENT-INTERACTION.md) for role-specific templates, durable working memory, creative experiments, hardware inspection, and `npm run evaluate:local` for actual Ollama specialist/reviewer requests.

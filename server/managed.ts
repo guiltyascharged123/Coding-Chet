@@ -315,6 +315,7 @@ export async function localGenerate(
     onTrace?: (event: ConsoleEvent) => void;
     timeoutSeconds?: number;
     contextTokens?: number;
+    messages?: { role: 'system' | 'user' | 'assistant'; content: string }[];
   },
 ): Promise<Generated> {
   const seconds = progress?.timeoutSeconds || 900;
@@ -352,11 +353,12 @@ export async function localGenerate(
         think: false,
         keep_alive: '2m',
         ...(json ? { format: outputSchema || 'json' } : {}),
-        messages: [
+        messages: progress?.messages || [
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
         options: {
+          ...(json ? { temperature: 0.2 } : {}),
           num_predict: maxTokens,
           num_ctx: localContextTokens(system, user, maxTokens, progress?.contextTokens),
         },

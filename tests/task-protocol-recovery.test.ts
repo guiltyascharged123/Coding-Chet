@@ -5,7 +5,7 @@ import { Store } from '../server/store.js';
 import { Engine } from '../server/engine.js';
 import { managedInfo } from '../server/managed.js';
 import { defaultPolicy, backupSchema } from '../shared/schemas.js';
-import { workResultSchema } from '../shared/work.js';
+import { workResultSchema, textWorkOutputSchema } from '../shared/work.js';
 import { normalizeWorkReply } from '../server/work-results.js';
 import { consoleReplyText } from '../src/console-view.js';
 import type { ConsoleEntry } from '../shared/console.js';
@@ -91,6 +91,53 @@ test('blank optional bullets are repaired without losing findings or laundering 
   );
 });
 
+test('compact local replies retain actual work without requiring reporting filler or laundering completion', () => {
+  const raw = {
+    outcome: 'complete',
+    deliverable: '$35 - $20 = $15.',
+    checks: [
+      { criterion: 'c1: Subtract prices', status: 'met', evidence: '35 - 20 = 15 dollars.' },
+    ],
+  };
+  const normalized = normalizeWorkReply(raw, true);
+  const accepted = workResultSchema.parse(normalized.value);
+  assert.equal(accepted.summary, raw.deliverable);
+  assert.equal(accepted.deliverable, raw.deliverable);
+  assert.deepEqual(accepted.handoff.facts, []);
+  assert.deepEqual(accepted.handoff.assumptions, []);
+  assert.equal('summary' in raw, false);
+  const schema = textWorkOutputSchema(true, ['atlas'], 2, true);
+  const complete = schema.anyOf[0];
+  assert.deepEqual(complete.required, ['outcome', 'deliverable', 'checks']);
+  assert.equal(complete.properties.followUps, undefined);
+  assert.equal(complete.properties.decision, undefined);
+  assert.deepEqual(complete.properties.checks.items.properties.status.enum, ['met']);
+  assert.deepEqual(Object.keys(complete.properties).slice(0, 3), [
+    'outcome',
+    'deliverable',
+    'checks',
+  ]);
+  assert.equal(
+    workResultSchema.safeParse(
+      normalizeWorkReply({ ...raw, checks: [{ ...raw.checks[0], status: 'unverified' }] }, true)
+        .value,
+    ).success,
+    false,
+  );
+  assert.equal(
+    workResultSchema.safeParse(normalizeWorkReply({ ...raw, outcome: 'continue' }, true).value)
+      .success,
+    false,
+  );
+  assert.equal(
+    workResultSchema.safeParse(normalizeWorkReply(raw).value).success,
+    false,
+    'other adapters retain their full result contract',
+  );
+  const retrieval = { outcome: 'retrieve', requests: [{ sourceId: 'task:known', offset: 0 }] };
+  assert.deepEqual(normalizeWorkReply(retrieval, true).value, retrieval);
+});
+
 test('public streaming and finished console text retain the outcome, handoff, follow-ups and unknown fields', () => {
   const reply = JSON.stringify({
     ...result({
@@ -171,10 +218,14 @@ test('Ollama correction becomes real analyst and reviewer assignments whose resu
         false,
         'send the full creativity instructions once, leaving room for evidence',
       );
-      assert.equal(request.format.properties.handoff.properties.facts.items.minLength, 1);
-      assert.equal(request.format.properties.handoff.properties.facts.maxItems, 6);
-      if (request.format.properties.requests)
-        assert.equal(request.format.properties.requests.minItems, 0);
+      const complete = request.format.anyOf.find((variant: any) =>
+        variant.properties.outcome.enum?.includes('complete'),
+      );
+      const continuation = request.format.anyOf.find((variant: any) =>
+        variant.properties.outcome.enum?.includes('continue'),
+      );
+      assert.equal(complete.properties.handoff, undefined, 'local grammar omits reporting filler');
+      assert.deepEqual(complete.required, ['outcome', 'deliverable', 'checks']);
       let reply: unknown;
       if (actor === parent.agentId && parentTurns++ === 0) {
         reply = result({
@@ -190,7 +241,7 @@ test('Ollama correction becomes real analyst and reviewer assignments whose resu
         assert.match(input.validationIssues.join(' '), /followUps.*empty/);
         assert.equal(input.delegationState.maxFollowUpsThisTurn, 3);
         assert.deepEqual(
-          request.format.properties.followUps.items.properties.agentId.enum,
+          continuation.properties.followUps.items.properties.agentId.enum,
           project.team!.map((agent) => agent.id),
         );
         reply = result({
@@ -225,8 +276,7 @@ test('Ollama correction becomes real analyst and reviewer assignments whose resu
             /Reviewer verified/,
           );
           assert.equal(input.delegationState.remainingCoordinationRounds, 0);
-          assert.equal(request.format.properties.followUps.maxItems, 0);
-          assert.ok(!request.format.properties.outcome.enum.includes('continue'));
+          assert.equal(continuation, undefined);
         }
         reply = result({
           deliverable:

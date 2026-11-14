@@ -14,6 +14,7 @@ import type { Activity, Agent, Task, Meeting } from '../../shared/types';
 
 import { DESKS, MEETING_SEATS, OfficeSimulation } from '../office/simulation';
 import { placeLabels } from '../office/labels';
+import { softwareRenderer } from '../office/rendering';
 import { DESK_CHAIR, seatedPose } from '../office/pose';
 import { officeLayout, meetingSeats } from '../../shared/office-layout';
 import type { OfficeCapacity } from '../../shared/team';
@@ -52,12 +53,21 @@ class SceneBoundary extends Component<
 
 export default function Office(props: Props) {
   const labelPortal = useRef<HTMLDivElement>(null!);
-  const [available] = useState(() => {
+  const [{ available, software }] = useState(() => {
     try {
       const canvas = document.createElement('canvas');
-      return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+      const context = canvas.getContext('webgl2') || canvas.getContext('webgl');
+      if (!context) return { available: false, software: false };
+      const debug = context.getExtension('WEBGL_debug_renderer_info');
+      const renderer = String(
+        debug
+          ? context.getParameter(debug.UNMASKED_RENDERER_WEBGL)
+          : context.getParameter(context.RENDERER),
+      );
+      context.getExtension('WEBGL_lose_context')?.loseContext();
+      return { available: true, software: softwareRenderer(renderer) };
     } catch {
-      return false;
+      return { available: false, software: false };
     }
   });
   const fallback = (
@@ -88,12 +98,16 @@ export default function Office(props: Props) {
     <SceneBoundary fallback={fallback}>
       <div className="office-renderer">
         <Canvas
-          frameloop={props.rendering === false ? 'never' : 'always'}
+          frameloop={props.rendering === false ? 'never' : software ? 'demand' : 'always'}
           orthographic
-          shadows
-          dpr={[1, 1.5]}
+          shadows={!software}
+          dpr={software ? 1 : [1, 1.5]}
           camera={{ position: [17, 18, 21], zoom: 32, near: 0.1, far: 150 }}
-          gl={{ antialias: true, alpha: false, powerPreference: 'high-performance' }}
+          gl={{
+            antialias: !software,
+            alpha: false,
+            powerPreference: software ? 'low-power' : 'high-performance',
+          }}
           onCreated={({ gl }) => {
             gl.setClearColor('#303b45');
             gl.toneMapping = THREE.ACESFilmicToneMapping;
@@ -101,12 +115,29 @@ export default function Office(props: Props) {
           }}
           aria-label="Interactive 3D office with agents walking, meeting, and working"
         >
+          {software && <SoftwareFrameBudget running={props.rendering !== false} />}
           <Scene {...props} labelPortal={labelPortal} />
         </Canvas>
         <div className="scene-label-layer" ref={labelPortal} />
       </div>
     </SceneBoundary>
   );
+}
+
+/** Software WebGL shares CPU with local inference. Do not render an unbounded
+ * shadowed scene at the display refresh rate while the model is working.
+ */
+function SoftwareFrameBudget({ running }: { running: boolean }) {
+  const invalidate = useThree((state) => state.invalidate);
+  useEffect(() => {
+    if (!running) return;
+    invalidate();
+    const timer = setInterval(() => {
+      if (!document.hidden) invalidate();
+    }, 50);
+    return () => clearInterval(timer);
+  }, [running, invalidate]);
+  return null;
 }
 
 function CameraRig({

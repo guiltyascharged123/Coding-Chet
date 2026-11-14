@@ -1181,7 +1181,7 @@ export class Engine extends EventEmitter {
     const message = this.postProjectMessage(
       projectId,
       requestId,
-      `Investigate the idea “${idea.title}”. Proposal: ${idea.proposal.slice(0, 1000)}\nRationale: ${idea.rationale.slice(0, 250)}\nSuggested next step: ${idea.nextStep.slice(0, 200)}\nAssess feasibility, evidence gaps and a useful bounded next action. Do not treat this proposed idea as approved implementation or verified demand.`,
+      `Investigate the idea “${idea.title}” (source idea:${idea.id}; retrieve its full proposal if needed). Proposal: ${idea.proposal.slice(0, 1000)}\nRationale: ${idea.rationale.slice(0, 250)}\nSuggested next step: ${idea.nextStep.slice(0, 200)}\nIdentify the causal mechanism and compare a simpler baseline or a mechanism from another field. Name the weakest assumption, a discriminating test and a stop condition. Run a bounded reversible test if configured tools and project authority permit; otherwise provide an executable test proposal and mark it unexecuted. Consider a reusable project module when it removes a concrete obstacle, but never claim it installed without tool receipts. Request a focused independent specialist challenge through followUps if needed. Retain observations, cost/resource limits, evidence gaps and a useful next action so the next attempt can change route rather than repeat a failed experiment. Do not treat this proposed idea as approved implementation or verified demand.`,
       true,
       { respondAsAgentId: agentId, kind: 'idea' },
     );

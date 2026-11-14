@@ -66,7 +66,13 @@ test('the launcher reuses a matching server and rejects changed code, configurat
   try {
     for (const folder of ['scripts', 'server', 'node_modules/tsx', 'dist'])
       mkdirSync(join(directory, folder), { recursive: true });
-    for (const file of ['launch.mjs', 'local-model.mjs', 'runtime-identity.mjs', 'browser-key.mjs'])
+    for (const file of [
+      'launch.mjs',
+      'local-model.mjs',
+      'local-hardware.mjs',
+      'runtime-identity.mjs',
+      'browser-key.mjs',
+    ])
       copyFileSync(
         new URL(`../scripts/${file}`, import.meta.url),
         join(directory, 'scripts', file),

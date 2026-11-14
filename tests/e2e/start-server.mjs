@@ -29,6 +29,10 @@ const seen = new Set();
 const plannerFailures = new Map();
 const modelServer = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
+  if (req.url === '/api/tags') {
+    res.end(JSON.stringify({ models: [{ name: 'workroom-chat-fixture-not-live' }] }));
+    return;
+  }
   if (req.url === '/__codex-fixture') {
     let raw = '';
     for await (const chunk of req) raw += chunk;
@@ -49,8 +53,40 @@ const modelServer = createServer(async (req, res) => {
   }
   let raw = '';
   for await (const chunk of req) raw += chunk;
-  const request = JSON.parse(raw),
-    input = JSON.parse(request.messages.at(-1).content);
+  const request = JSON.parse(raw);
+  if (req.url === '/api/chat') {
+    // Direct-chat browser fixture. No model weights or inference are involved.
+    const prompt = request.messages.at(-1).content;
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.write(
+      JSON.stringify({
+        message: {
+          content: prompt.includes('Stop fixture')
+            ? 'Partial fixture response'
+            : `Fixture answer: 35 - 20 = 15. Conversation messages: ${request.messages.length}.`,
+        },
+        done: false,
+      }) + '\n',
+    );
+    if (prompt.includes('Stop fixture')) {
+      const timer = setInterval(
+        () => res.write(JSON.stringify({ message: { content: '.' }, done: false }) + '\n'),
+        1000,
+      );
+      res.on('close', () => clearInterval(timer));
+    } else
+      res.end(
+        JSON.stringify({
+          message: { content: '' },
+          done: true,
+          done_reason: 'stop',
+          prompt_eval_count: 50,
+          eval_count: 20,
+        }) + '\n',
+      );
+    return;
+  }
+  const input = JSON.parse(request.messages.at(-1).content);
   if (input.brief?.includes('E2E planning recovery') && !seen.has(input.brief)) {
     seen.add(input.brief);
     res.statusCode = 503;
@@ -295,7 +331,8 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
     WORKROOM_CODEX_BIN: fakeCodex,
     HOME: directory,
     USERPROFILE: directory,
-    OLLAMA_MODEL: '',
+    OLLAMA_URL: `http://127.0.0.1:${modelPort}`,
+    OLLAMA_MODEL: 'workroom-chat-fixture-not-live',
     COMPATIBLE_API_URL: `http://127.0.0.1:${modelPort}/v1`,
     COMPATIBLE_MODEL: 'workroom-browser-model',
     COMPATIBLE_API_KEY: '',

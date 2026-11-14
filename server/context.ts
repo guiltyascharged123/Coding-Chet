@@ -21,6 +21,7 @@ const fields = [
   'requestedSources',
   'projectConversation',
   'ideaBoard',
+  'specialistMemory',
   'boardDecisions',
   'archiveIndex',
 ];

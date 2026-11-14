@@ -82,9 +82,11 @@ import RestartProject from './components/RestartProject';
 import TeamConfigurator from './components/TeamConfigurator';
 import ProjectConversation from './components/ProjectConversation';
 import IdeaBoard from './components/IdeaBoard';
+import LocalModelChat from './components/LocalModelChat';
 
 const Office = lazy(() => import('./components/Office'));
 type View =
+  | 'model-chat'
   | 'connections'
   | 'workspace'
   | 'team'
@@ -96,6 +98,7 @@ type View =
   | 'conversation'
   | 'ideas';
 const nav = [
+  { id: 'model-chat' as View, label: 'Local model chat', icon: MessageCircle },
   { id: 'workspace' as View, label: 'Workspace', icon: LayoutDashboard },
   { id: 'tasks' as View, label: 'Task board', icon: ClipboardList },
   { id: 'outputs' as View, label: 'Outputs', icon: FolderOpen },
@@ -119,7 +122,9 @@ export default function App() {
   const setData = (next: Bootstrap) => updateData((current) => newerSnapshot(current, next));
   const [connected, setConnected] = useState(false);
   const [initialError, setInitialError] = useState('');
-  const [view, setView] = useState<View>('workspace');
+  const [view, setView] = useState<View>(
+    location.pathname === '/chat' ? 'model-chat' : 'workspace',
+  );
   const [projectId, setProjectId] = useState(() => {
     try {
       return localStorage.getItem('workroom-project') || '';
@@ -324,6 +329,15 @@ export default function App() {
       </div>
     );
 
+  if (view === 'model-chat')
+    return (
+      <LocalModelChat
+        model={data.runtime.models.ollama}
+        models={data.runtime.listedModels?.ollama || []}
+        onClose={() => setView('workspace')}
+      />
+    );
+
   if (view === 'connections')
     return (
       <>
@@ -377,6 +391,9 @@ export default function App() {
           </button>
           <button className="button secondary" onClick={() => openConnections()}>
             Model connections
+          </button>
+          <button className="button secondary" onClick={() => setView('model-chat')}>
+            Local model chat
           </button>
           <button
             className="button secondary"

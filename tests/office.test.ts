@@ -258,3 +258,22 @@ test('only invited teammates move into a specialist meeting; everyone returns wh
   office.update(agents, [], [], { ...meeting, status: 'completed' });
   for (const agent of agents) assert.equal(office.people.get(agent.id)!.goal.action, 'desk');
 });
+import { softwareRenderer } from '../src/office/rendering.js';
+
+test('software rendering is recognized without downgrading known hardware GPUs', () => {
+  for (const name of [
+    'ANGLE (Google, Vulkan SwiftShader Device)',
+    'Mesa llvmpipe (LLVM 15)',
+    'softpipe',
+    'Software Rasterizer',
+  ])
+    assert.equal(softwareRenderer(name), true);
+  for (const name of [
+    'NVIDIA GeForce RTX 4060',
+    'Intel Iris Xe Graphics',
+    'AMD Radeon RX 6800',
+    'Apple M2',
+    '',
+  ])
+    assert.equal(softwareRenderer(name), false);
+});

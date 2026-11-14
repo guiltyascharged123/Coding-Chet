@@ -13,8 +13,35 @@ export function jsonValue(output: string): unknown {
 /** Remove only blank optional handoff bullets, never findings or assignments.
  * The original reply remains unchanged in the console and request checkpoint.
  */
-export function normalizeWorkReply(value: unknown) {
+export function normalizeWorkReply(value: unknown, compact = false) {
   const notes: string[] = [];
+  if (
+    compact &&
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    'outcome' in value &&
+    value.outcome !== 'retrieve'
+  ) {
+    const record = { ...value } as Record<string, unknown>;
+    if (
+      record.summary === undefined &&
+      typeof record.deliverable === 'string' &&
+      record.deliverable.trim()
+    ) {
+      record.summary = record.deliverable.trim().slice(0, 1200);
+      notes.push(
+        'Compact local reply: summary is a verbatim deliverable excerpt, not a new model claim. Original reply retained.',
+      );
+    }
+    if (record.handoff === undefined) {
+      record.handoff = { facts: [], assumptions: [], next: 'No additional handoff supplied.' };
+      notes.push(
+        'Compact local reply: omitted handoff has no asserted facts or assumptions. Original reply retained.',
+      );
+    }
+    value = record;
+  }
   if (!value || typeof value !== 'object' || !('handoff' in value)) return { value, notes };
   const handoff = value.handoff;
   if (!handoff || typeof handoff !== 'object') return { value, notes };

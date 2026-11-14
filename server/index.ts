@@ -23,6 +23,7 @@ import { AGENT_IDS, teamMemberSchema } from '../shared/team.js';
 import { ideaProposalSchema } from '../shared/ideas.js';
 import { CONSOLE_LIMITS, type ConsoleEntry } from '../shared/console.js';
 import { refreshManagedInfo } from './managed.js';
+import { localChatRoute } from './local-chat.js';
 import { projectWorkspace, workspaceFiles, workspaceFile, workspaceZip } from './workspaces.js';
 
 const app = express();
@@ -138,6 +139,7 @@ app.get('/api/health', (_req, res) =>
   }),
 );
 app.get('/api/state', (_req, res) => res.json(engine.bootstrap()));
+app.post('/api/local-chat', localChatRoute());
 app.get(
   '/api/limits',
   route((req, res) => {

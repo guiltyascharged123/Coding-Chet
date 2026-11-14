@@ -121,7 +121,7 @@ test('local planning and task handoffs use actual Ollama protocol responses, str
           ],
         };
       } else {
-        assert.ok(request.format.properties.checks);
+        assert.ok(request.format.anyOf[0].properties.checks);
         if (calls === 3) assert.match(input.teammateOutputs[0].output, /Option A saves \$15/);
         value = result();
       }

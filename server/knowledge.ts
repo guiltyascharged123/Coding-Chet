@@ -20,12 +20,15 @@ export function projectKnowledge(project: Project, state?: WorkspaceState) {
       {
         sourceId: 'board-decisions',
         title:
-          'Saved selected and rejected approaches — retrieve or search before repeating an approach',
+          'Saved approach decisions and investigation findings — retrieve before repeating an experiment',
         text: ideas
-          .filter((idea) => ['selected', 'rejected'].includes(idea.status))
+          .filter(
+            (idea) =>
+              ['selected', 'rejected', 'evaluated'].includes(idea.status) || idea.evaluation,
+          )
           .map(
             (idea) =>
-              `${idea.status.toUpperCase()} | idea:${idea.id} | ${idea.title}\n${idea.proposal}`,
+              `${idea.status.toUpperCase()} | idea:${idea.id} | ${idea.title}\n${idea.proposal}\nReported evaluation (not independent verification): ${idea.evaluation || 'None.'}\nInvestigation source: ${idea.investigationTaskId ? `task:${idea.investigationTaskId}` : 'None.'}`,
           )
           .join('\n\n'),
       },
@@ -90,7 +93,17 @@ export function archivedSource(
     return {
       id,
       label: `${task.title} (${task.status}; ${task.status === 'done' ? 'accepted' : 'not accepted'})`,
-      text: JSON.stringify({ result: task.result, output: task.output, error: task.error }),
+      text: JSON.stringify({
+        assignment: {
+          title: task.title,
+          description: task.description,
+          acceptanceCriteria: task.acceptanceCriteria,
+          briefRevision: task.briefRevision || 0,
+        },
+        result: task.result,
+        output: task.output,
+        error: task.error,
+      }),
     };
   const meeting = state.meetings?.find(
     (meeting) => `meeting:${meeting.id}` === id && meeting.projectId === project.id,

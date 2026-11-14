@@ -103,7 +103,7 @@ export function relevantContext(task: Task, context: Task[]) {
       sourceStatus: t.status,
       title: t.title,
       output: t.result
-        ? `${JSON.stringify({ summary: t.result.summary, handoff: t.result.handoff, checks: t.result.checks })}\n\n${t.output}`
+        ? `${JSON.stringify({ assignment: { description: t.description, acceptanceCriteria: t.acceptanceCriteria }, summary: t.result.summary, handoff: t.result.handoff, checks: t.result.checks })}\n\n${t.output}`
         : t.output,
     }));
 }

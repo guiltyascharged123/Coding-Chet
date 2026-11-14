@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { printHardwareAdvice } from './local-hardware.mjs';
 
 export const DEFAULT_MODEL = 'huihui_ai/qwen3.5-abliterated:4B';
 export const DEFAULT_URL = 'http://127.0.0.1:11434';
@@ -204,6 +205,7 @@ export async function ensureLocalModel(root, env = process.env, deps = {}) {
     models = await list();
   }
   if (!models.includes(model)) {
+    (deps.advise || printHardwareAdvice)(root, model);
     console.log(
       `Downloading ${model}. First setup needs internet and several GB of free disk space. Later starts reuse it.`,
     );
