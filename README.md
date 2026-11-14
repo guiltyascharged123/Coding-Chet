@@ -130,3 +130,8 @@ See [Real agent work and creative exploration](docs/REAL-AGENT-WORK.md) for the 
 See [Project tools and internet access](docs/PROJECT-TOOLS-AND-INTERNET.md) to keep local planning while explicitly selecting a Codex task executor, build and reuse project-owned connectors, discover suitable repositories, and download images with cached, paced, rate-aware requests.
 
 See [Specialist interaction and small local models](docs/AGENT-INTERACTION.md) for role-specific templates, durable working memory, creative experiments, hardware inspection, and `npm run evaluate:local` for actual Ollama specialist/reviewer requests.
+
+Specialists can now delegate [fork/join subpipelines](docs/PIPELINE-DESIGN.md),
+resume saved local artifacts at assessment, and use exact arithmetic receipts.
+The optional [free AI Horde connection](docs/FREE-COMMUNITY-MODELS.md) is available
+in Model chat and connection settings for nonconfidential volunteer inference.

@@ -60,11 +60,31 @@ export function assembleContext(system: string, data: Data, limit: number) {
   const base = structuredClone(data);
   for (const field of fields) delete base[field];
   if (base.task) delete base.task.previousOutput;
+  delete base.sourceCatalog;
   const required = size(system) + size(base);
   if (required + 512 > limit)
     throw new Error(
       `The saved brief, assignment and required instructions need at least ${required + 512} input bytes; the configured limit is ${limit}. Supporting work was compacted automatically. Increase Maximum input bytes in Workspace controls; your work is saved. No request was sent.`,
     );
+  if (Array.isArray(data.sourceCatalog)) {
+    // Catalog entries describe retrievable evidence, not mandatory instructions.
+    // Bound metadata by the remaining budget; the full source-index is still
+    // available through retrieval/search instead of growing every request.
+    const budget = Math.max(0, Math.floor((limit - required - 512) / 4));
+    const catalog: unknown[] = [];
+    for (const entry of data.sourceCatalog) {
+      if (size([...catalog, entry]) > budget) break;
+      catalog.push(entry);
+    }
+    base.sourceCatalog = catalog;
+    if (catalog.length < data.sourceCatalog.length)
+      base.sourceCatalogNotice = {
+        omittedSources: data.sourceCatalog.length - catalog.length,
+        indexSourceId: 'source-index',
+        instruction:
+          'Catalog metadata is abbreviated. Retrieve/search source-index for the complete list of saved source IDs, titles and lengths; no original evidence was deleted.',
+      };
+  }
   const prioritized = sources
     .map((source, i) => ({
       ...source,

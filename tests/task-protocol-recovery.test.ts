@@ -347,3 +347,5 @@ test('Ollama correction becomes real analyst and reviewer assignments whose resu
     );
   }
 });
+// Explicit compatibility coverage for the earlier single-reply local protocol.
+process.env.WORKROOM_OLLAMA_INTERACTION = 'structured';

@@ -70,6 +70,7 @@ test('the launcher reuses a matching server and rejects changed code, configurat
       'launch.mjs',
       'local-model.mjs',
       'local-hardware.mjs',
+      'cpu-capacity.mjs',
       'runtime-identity.mjs',
       'browser-key.mjs',
     ])

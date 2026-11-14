@@ -316,6 +316,14 @@ export const stateSchema = z
         acceptanceCriteria: acceptanceListSchema.optional(),
         observations: z.array(observationSchema).max(100).optional(),
         result: workResultSchema.optional(),
+        localArtifact: z
+          .object({
+            key: text.min(1).max(64),
+            text: text.max(100000),
+            createdAt: z.number().finite(),
+            assessmentAttemptId: id.optional(),
+          })
+          .optional(),
         recovery: z.object({ attemptId: id, hasResponse: z.boolean() }).optional(),
         responseIssue: z
           .object({

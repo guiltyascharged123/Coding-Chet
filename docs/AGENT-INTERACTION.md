@@ -22,18 +22,13 @@ when they do not. Saved idea evaluations and their investigation source IDs feed
 future requests. An evaluated idea is still a reported finding, not automatically
 verified truth or approval to implement it.
 
-Ollama task requests use a shorter interaction contract with the same nested
-bounds and acceptance validation. Their grammar requires only outcome, deliverable
-and checks, with optional decisions, specialist assignments and useful ideas.
-Summary, handoff and improvement reporting fields are excluded from local output;
-the app derives a verbatim summary excerpt and an empty handoff without inventing
-facts or assumptions. Raw replies remain saved. Role methods are supplied once,
-and structured local requests use temperature 0.2 to reduce format variation;
-mechanism diversity comes from specialist methods rather than random wording.
-The current turn explicitly
-distinguishes initial work, reading retrieved evidence and correcting a rejected
-response. Corrections identify field-level defects, retain useful work and respect
-the configured correction/request limits. Nothing silently changes providers.
+Ollama now defaults to an artifact-first pipeline: write the actual Markdown
+answer, checkpoint it, then assess a compact control record. The app attaches the
+saved artifact unchanged. Specialist methods are applied to the assignment, not
+mandatory report headings. See [Pipeline design](PIPELINE-DESIGN.md) for resumable
+checkpoints, calculator receipts, parallel specialist subpipelines and the
+source-level reviews of smolagents, LangGraph.js and Aider. Raw provider receipts
+remain available; format validity is not a quality verdict.
 
 ## Durable working memory
 
@@ -54,7 +49,7 @@ This avoids a second set of mutable memory files drifting from the database.
 ## Tools and extensions
 
 The Ollama adapter currently generates text and can retrieve saved project
-evidence. It does not execute arbitrary shell commands. For actual software
+evidence or execute the bounded exact-arithmetic calculator. It does not execute arbitrary shell commands. For actual software
 modules, explicitly configure the existing Codex workspace executor. It can build
 project-owned utilities, test them, promote them through the utility lifecycle
 manager and preserve rollback receipts. See
@@ -106,7 +101,7 @@ on an external goal.
 
 Run the app normally with `npm run local`, or start a prepared installation with
 `npm start` while Ollama is running. Open the private pairing link printed in the
-terminal, then choose **Local model chat**. The `/chat` path also opens it directly.
+terminal, then choose **Model chat**. The `/chat` path also opens it directly.
 It works in a fresh empty workspace without creating a project or agent tasks.
 
 Choose an installed exact model and send a message. Replies stream as Markdown;
@@ -172,3 +167,6 @@ benchmarks or claims that their runtimes have been integrated. Replacing the
 scheduler would also require migrating existing projects, usage reservations,
 uncertain attempts and review state. No second framework is installed merely to
 give role prompts a new name. Existing external-worker bridges remain available.
+
+The optional [free community connection](FREE-COMMUNITY-MODELS.md) adds explicit
+AI Horde volunteer inference with separate history; local Ollama stays the default.

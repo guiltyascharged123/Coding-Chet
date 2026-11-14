@@ -1,3 +1,6 @@
+// @ts-expect-error Shared dependency-free hardware helper.
+import { localThreadOptions } from '../scripts/cpu-capacity.mjs';
+import './network.js';
 import { RESOURCE_LIMITS } from '../shared/limits.js';
 import { createHash } from 'node:crypto';
 import { codexReadiness } from './codex-readiness.js';
@@ -18,6 +21,7 @@ import { WORK_RESULT_JSON_SCHEMA, workResultSchema } from '../shared/work.js';
 import type { ConsoleEvent } from '../shared/console.js';
 import { nativeConsole } from './console.js';
 import { DEFAULT_LOCAL_MODEL } from '../shared/defaults.js';
+import { communityConnection, compatibleKey } from './community-provider.js';
 
 export const managedInfo = {
   codexReady: false,
@@ -216,14 +220,16 @@ export async function refreshManagedInfo(
   next.compatibleModels = [];
   if (process.env.COMPATIBLE_API_URL)
     try {
+      const community = communityConnection();
       const url = serviceUrl(
         process.env.COMPATIBLE_API_URL,
         process.env.COMPATIBLE_BILLING === 'local',
       );
       const response = await fetch(`${url.href.replace(/\/$/, '')}/models`, {
-        headers: process.env.COMPATIBLE_API_KEY
-          ? { Authorization: `Bearer ${process.env.COMPATIBLE_API_KEY}` }
-          : {},
+        headers:
+          community || process.env.COMPATIBLE_API_KEY
+            ? { Authorization: `Bearer ${compatibleKey()}` }
+            : {},
         signal: AbortSignal.timeout(2500),
       });
       const data = (await response.json()) as { data?: { id: string }[] };
@@ -232,7 +238,7 @@ export async function refreshManagedInfo(
         ? data.data!.map((m) => m.id).filter((id) => typeof id === 'string')
         : [];
       next.compatibleMessage = next.compatibleReady
-        ? `${process.env.COMPATIBLE_BILLING === 'local' ? 'Local billing mode.' : 'Paid API controls apply.'} Service reachable; project model availability is checked separately. Generation compatibility is checked on the first assignment.`
+        ? `${community ? 'Free anonymous community compute. Volunteer operators can see prompts; worker availability varies.' : process.env.COMPATIBLE_BILLING === 'local' ? 'Local billing mode.' : 'Paid API controls apply.'} Service reachable; project model availability is checked separately. Generation compatibility is checked on the first assignment.`
         : 'The model service did not list the configured model. Check its URL, model name, and authentication.';
     } catch {
       next.compatibleMessage =
@@ -358,6 +364,7 @@ export async function localGenerate(
           { role: 'user', content: user },
         ],
         options: {
+          ...localThreadOptions(),
           ...(json ? { temperature: 0.2 } : {}),
           num_predict: maxTokens,
           num_ctx: localContextTokens(system, user, maxTokens, progress?.contextTokens),

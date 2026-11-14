@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { streamApi } from '../api';
+import remarkGfm from 'remark-gfm';
+import { api, streamApi } from '../api';
 import { useSavedDraft } from '../drafts';
 
 type Message = { role: 'user' | 'assistant'; content: string; interrupted?: boolean };
@@ -14,8 +15,15 @@ export default function LocalModelChat({
   onClose: () => void;
 }) {
   const [selected, setSelected] = useState(model);
+  const [backend, setBackend] = useState<'local' | 'community'>('local');
+  const [sharedModels, setSharedModels] = useState<string[]>([]);
+  const [refresh, setRefresh] = useState(0);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const selection = useRef(selected);
+  selection.current = selected;
+  const available = !!selected && (backend === 'local' || sharedModels.includes(selected));
   const [saved, save, clear, storageError] = useSavedDraft<{ messages: Message[]; draft: string }>(
-    `workroom-local-chat-${selected}`,
+    `workroom-${backend === 'local' ? 'local' : 'community'}-chat-${selected}`,
     { messages: [], draft: '' },
   );
   const messages = Array.isArray(saved.messages) ? saved.messages : [];
@@ -26,11 +34,36 @@ export default function LocalModelChat({
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => {
+    if (backend !== 'community') return;
+    let current = true;
+    setLoadingModels(true);
+    void api<{ models: string[]; preferred: string }>('/community-models', undefined, 'GET')
+      .then((value) => {
+        if (current) {
+          setSharedModels(value.models);
+          if (!selection.current) setSelected(value.preferred);
+          setError('');
+        }
+      })
+      .catch((failure) => {
+        if (current)
+          setError(
+            failure instanceof Error ? failure.message : 'Community model list unavailable.',
+          );
+      })
+      .finally(() => {
+        if (current) setLoadingModels(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [backend, refresh]);
+  useEffect(() => {
     bottom.current?.scrollIntoView({ block: 'nearest' });
   }, [live, messages.length]);
   async function send() {
     const text = saved.draft.trim();
-    if (!text || busy) return;
+    if (!text || busy || !available || loadingModels) return;
     // An interrupted turn remains visible, but is not supplied as a completed
     // assistant answer on the next request. Never silently discard complete pairs.
     const history = messages.filter(
@@ -51,7 +84,7 @@ export default function LocalModelChat({
     save({ messages: displayed, draft: '' });
     try {
       const response = await streamApi(
-        '/local-chat',
+        backend === 'local' ? '/local-chat' : '/community-chat',
         { model: selected, messages: pending.map(({ role, content }) => ({ role, content })) },
         abort.signal,
       );
@@ -118,10 +151,11 @@ export default function LocalModelChat({
     <main className="local-chat-page">
       <header className="section-header">
         <div>
-          <h1>Local model chat</h1>
+          <h1>{backend === 'local' ? 'Local model chat' : 'Free community chat'}</h1>
           <p>
-            Talk directly to your Ollama model. History stays in this browser; this chat has no
-            agent tools.
+            {backend === 'local'
+              ? 'Talk directly to your Ollama model. History stays in this browser; this chat has no agent tools.'
+              : 'AI Horde volunteer workers can see messages. Use nonconfidential material. Model availability and queues vary; replies appear when the worker finishes. Stopping closes the request, but an already queued job may finish.'}
           </p>
         </div>
         <button className="button secondary" onClick={onClose}>
@@ -129,6 +163,23 @@ export default function LocalModelChat({
         </button>
       </header>
       <div className="local-chat-toolbar">
+        <label>
+          Chat connection
+          <select
+            aria-label="Chat connection"
+            value={backend}
+            disabled={busy}
+            onChange={(event) => {
+              const next = event.target.value as 'local' | 'community';
+              setBackend(next);
+              setSelected(next === 'local' ? model : '');
+              setError('');
+            }}
+          >
+            <option value="local">Local Ollama</option>
+            <option value="community">AI Horde · free community compute</option>
+          </select>
+        </label>
         <label>
           Exact model
           <select
@@ -140,11 +191,28 @@ export default function LocalModelChat({
               setError('');
             }}
           >
-            {[...new Set([model, ...models])].map((id) => (
+            {!selected && (
+              <option value="">
+                {loadingModels ? 'Loading available models…' : 'Select a model'}
+              </option>
+            )}
+            {selected && backend === 'community' && !sharedModels.includes(selected) && (
+              <option value={selected}>{selected} · unavailable</option>
+            )}
+            {(backend === 'local' ? [...new Set([model, ...models])] : sharedModels).map((id) => (
               <option key={id}>{id}</option>
             ))}
           </select>
         </label>
+        {backend === 'community' && (
+          <button
+            className="button secondary"
+            disabled={busy || loadingModels}
+            onClick={() => setRefresh((value) => value + 1)}
+          >
+            {loadingModels ? 'Refreshing models…' : 'Refresh models'}
+          </button>
+        )}
         <button
           className="button secondary"
           disabled={busy}
@@ -159,7 +227,10 @@ export default function LocalModelChat({
       <section className="local-chat-history" aria-label="Chat messages" aria-live="polite">
         {!messages.length && !busy && (
           <p className="field-hint">
-            Send a question, a problem, or ask it to challenge an idea. Replies will stream here.
+            Send a question, a problem, or ask it to challenge an idea.{' '}
+            {backend === 'local'
+              ? 'Replies will stream here.'
+              : 'Replies appear when the volunteer worker finishes.'}
           </p>
         )}
         {messages.map((entry, index) => (
@@ -168,14 +239,14 @@ export default function LocalModelChat({
               {entry.role === 'user' ? 'You' : selected}
               {entry.interrupted ? ' · interrupted' : ''}
             </strong>
-            <ReactMarkdown>{entry.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content}</ReactMarkdown>
           </article>
         ))}
         {busy && (
           <article className="local-chat-message assistant">
             <strong>{selected} · replying</strong>
             {live ? (
-              <ReactMarkdown>{live}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{live}</ReactMarkdown>
             ) : (
               <p>Loading or processing your message…</p>
             )}
@@ -196,7 +267,7 @@ export default function LocalModelChat({
           rows={4}
           maxLength={12000}
           value={saved.draft || ''}
-          disabled={busy}
+          disabled={busy || !selected || loadingModels}
           placeholder="Ask the model…"
           onChange={(event) => save({ messages, draft: event.target.value })}
         />
@@ -218,7 +289,7 @@ export default function LocalModelChat({
               key="send"
               type="submit"
               className="button primary"
-              disabled={!saved.draft?.trim()}
+              disabled={!saved.draft?.trim() || !available || loadingModels}
             >
               Send message
             </button>

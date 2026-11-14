@@ -26,17 +26,18 @@ test('local evaluation calls the real CLI and HTTP adapter, preserves receipts a
     response.end(
       JSON.stringify({
         message: {
-          content: JSON.stringify(
-            result({
-              checks: [
-                {
-                  criterion: 'c1: ' + input.task.acceptanceCriteria[0].description,
-                  status: 'met',
-                  evidence: 'Deterministic evaluation fixture, not live inference.',
-                },
-              ],
-            }),
-          ),
+          content: !packet.format
+            ? result().deliverable
+            : JSON.stringify({
+                outcome: 'complete',
+                checks: [
+                  {
+                    criterion: 'c1: ' + input.task.acceptanceCriteria[0].description,
+                    status: 'met',
+                    evidence: 'Deterministic evaluation fixture, not live inference.',
+                  },
+                ],
+              }),
         },
         done: true,
         done_reason: 'stop',
@@ -54,6 +55,7 @@ test('local evaluation calls the real CLI and HTTP adapter, preserves receipts a
         OLLAMA_URL: `http://127.0.0.1:${address.port}`,
         OLLAMA_MODEL: 'evaluation-fixture-not-live',
         WORKROOM_EVALUATION_ROOT: root,
+        WORKROOM_OLLAMA_INTERACTION: 'artifact-first',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -69,17 +71,28 @@ test('local evaluation calls the real CLI and HTTP adapter, preserves receipts a
       child.once('close', resolve);
     });
     assert.equal(code, 0, output);
-    assert.equal(inputs.length, 3);
+    assert.equal(inputs.length, 6);
     assert.deepEqual(
       inputs.map((input) => input.agentContext.role),
-      ['Data analyst', 'Operations specialist', 'Quality & test engineer'],
+      [
+        'Data analyst',
+        'Data analyst',
+        'Operations specialist',
+        'Operations specialist',
+        'Quality & test engineer',
+        'Quality & test engineer',
+      ],
     );
-    assert.equal(inputs[2].teammateOutputs.length, 2);
-    assert.equal(inputs[0].localTurn.purpose, 'initial');
+    assert.equal(inputs[4].teammateOutputs.length, 2);
+    assert.match(
+      inputs[4].teammateOutputs[0].output,
+      /self-reported status and checks are intentionally omitted/,
+    );
+    assert.equal(inputs[1].localTurn.purpose, 'initial');
     const receipt = JSON.parse(
       readFileSync(join(root, readdirSync(root)[0], 'receipt.json'), 'utf8'),
     );
-    assert.equal(receipt.attempts.length, 3);
+    assert.equal(receipt.attempts.length, 6);
     assert.ok(
       receipt.attempts.every(
         (attempt: any) => attempt.provider === 'ollama' && attempt.status === 'completed',

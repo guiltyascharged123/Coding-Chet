@@ -15,7 +15,7 @@ export function specialistTemplate(
           action:
             'Find the strongest counterexample, inspect original evidence, and test the weakest assumption. Check an unconventional idea on its mechanism, not familiarity.',
           check:
-            'Report reproducible defects and the smallest correction. Do not certify a teammate’s claims without checking.',
+            'Quote the exact passage you challenge, then identify a reproducible defect or unsupported claim and the smallest correction. Check that your criticism follows from that passage; never attribute unseen content to an author or certify claims without checking.',
         }
       : /engineer|developer|architect|automation/.test(role)
         ? {
@@ -60,16 +60,26 @@ export function specialistTemplate(
     version: '1.0',
     specialist: agent.role,
     specialistMethod:
-      SPECIALIST_METHODS[task.workType === 'review' ? 'Independent code reviewer' : agent.role] ||
-      'Apply the assigned specialty to the actual evidence and acceptance criteria.',
+      task.workType === 'review'
+        ? 'Compare the actual artifact with its original assignment and supplied evidence. Quote the passage challenged; distinguish reproducible defects, unsupported claims and missing evidence. Do not infer unseen contents from a title, status or role.'
+        : SPECIALIST_METHODS[agent.role] ||
+          'Apply the assigned specialty to the actual evidence and acceptance criteria.',
     deliveryRule:
       'The current assignment takes priority over exploration methods. Put the concrete answer, equation, table, code or findings inside deliverable itself, never a description or promise of that artifact. Search labels such as "cross-domain hybrid" are not mechanisms: describe the causal steps. For a small closed question, answer it directly and stop; omit unrelated ideas and process improvements.',
     mode: project.exploration === 'expansive' ? 'creative-experiment' : 'focused-delivery',
     ...method,
+    ...(project.exploration !== 'expansive' && method.lens === 'Quantitative challenge'
+      ? {
+          action:
+            'Compute the assigned quantities using the exact labels, units and supplied inputs. Show the actual operation and result. Do not add hypothetical scenarios, value judgments or new quantities unless requested.',
+          check:
+            'Verify the mapping of each input label before calculating. Check the sign, units and what the result actually establishes; a price difference does not establish service value or quality.',
+        }
+      : {}),
     loop:
       project.exploration === 'expansive'
         ? 'Frame → invent different mechanisms → challenge → run a bounded test → retain evidence → adapt. Use only the steps needed for this assignment; do not turn them into mandatory reports or meetings.'
-        : 'Inspect → act → verify → hand off. Use the simplest useful mechanism.',
+        : 'Use the simplest useful mechanism. Apply this method internally to the task; it is not a required report outline. Do not narrate template compliance or restate the assignment.',
     handoff:
       'Return the actual work and checks. Use named followUps for a missing specialty. Record reusable approaches in ideas with a test and stop condition; cite saved sources. Human input is for missing authority or a consequential choice.',
   };

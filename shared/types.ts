@@ -86,6 +86,7 @@ export interface Task {
   }[];
   observations?: Observation[];
   result?: WorkResult;
+  localArtifact?: { key: string; text: string; createdAt: number; assessmentAttemptId?: string };
   recovery?: { attemptId: string; hasResponse: boolean };
   responseIssue?: {
     receivedAt: number;

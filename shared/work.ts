@@ -11,6 +11,7 @@ export const followUpSchema = z.object({
   workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
   acceptanceCriteria: acceptanceListSchema.optional(),
   readOnly: z.boolean().optional(),
+  dependsOn: z.array(z.number().int().min(0).max(2)).max(3).nullable().optional(),
 });
 export const decisionSchema = z
   .object({
@@ -122,6 +123,7 @@ export function textWorkOutputSchema(
   agentIds: string[],
   maxFollowUps: number,
   compact = false,
+  assessment = false,
 ): Record<string, any> {
   const schema = structuredClone(retrieve ? TEXT_WORK_JSON_SCHEMA : WORK_RESULT_JSON_SCHEMA);
   schema.properties.followUps.maxItems = maxFollowUps;
@@ -163,6 +165,12 @@ export function textWorkOutputSchema(
       const retrieval = strictResponseSchema(retrievalSchema);
       retrieval.properties.requests.items.required = ['sourceId', 'offset'];
       variants.push(retrieval);
+    }
+    if (assessment) {
+      for (const variant of variants) {
+        delete variant.properties.deliverable;
+        variant.required = variant.required.filter((field: string) => field !== 'deliverable');
+      }
     }
     // Constrain the control flow in the grammar, not just a prose instruction.
     // A completion cannot carry a decision or hidden specialist assignments.

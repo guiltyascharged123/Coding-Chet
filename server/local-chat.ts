@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { localGenerate, serviceUrl } from './managed.js';
 import { DEFAULT_LOCAL_MODEL } from '../shared/defaults.js';
 
-const requestSchema = z
+export const chatRequestSchema = z
   .object({
     model: z.string().trim().min(1).max(150),
     messages: z
@@ -42,7 +42,7 @@ export function localChatRoute(): RequestHandler {
       if (!res.writableEnded) controller.abort();
     };
     try {
-      const parsed = requestSchema.safeParse(req.body);
+      const parsed = chatRequestSchema.safeParse(req.body);
       if (!parsed.success) {
         res.status(400).json({ error: parsed.error.issues[0].message });
         return;

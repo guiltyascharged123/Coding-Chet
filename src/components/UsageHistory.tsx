@@ -100,9 +100,11 @@ export default function UsageHistory({ data, projectId }: { data: Bootstrap; pro
                   ? 'Subscription usage; remaining allowance unknown.'
                   : a.provider === 'external'
                     ? 'External worker usage is not metered.'
-                    : a.provider === 'ollama' || a.billing === 'local'
-                      ? 'Local computation; uses your hardware.'
-                      : `API estimate held: $${a.reservedUsd.toFixed(4)}${a.actualUsd != null ? ` · recorded estimate: $${a.actualUsd.toFixed(4)}` : ''}`}
+                    : a.provider === 'compatible' && a.billing === 'none'
+                      ? 'Free anonymous community compute; availability depends on volunteers.'
+                      : a.provider === 'ollama' || a.billing === 'local'
+                        ? 'Local computation; uses your hardware.'
+                        : `API estimate held: $${a.reservedUsd.toFixed(4)}${a.actualUsd != null ? ` · recorded estimate: $${a.actualUsd.toFixed(4)}` : ''}`}
                 {a.inputTokens !== undefined
                   ? ` · input ${a.inputTokens}, output ${a.outputTokens ?? 'unknown'} tokens`
                   : ''}

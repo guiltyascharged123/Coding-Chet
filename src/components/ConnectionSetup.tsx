@@ -3,6 +3,7 @@ import type { Bootstrap, Provider } from '../../shared/types';
 import { DEFAULT_LOCAL_MODEL } from '../../shared/defaults';
 import { api } from '../api';
 import CodexSignIn from './CodexSignIn';
+import { COMMUNITY_API_URL, COMMUNITY_EXAMPLE_MODEL } from '../../shared/community';
 
 type Settings = {
   revision: string;
@@ -11,7 +12,12 @@ type Settings = {
   openai: { model: string; hasKey: boolean };
   gemini: { model: string; hasKey: boolean };
   ollama: { model: string; url: string };
-  compatible: { model: string; url: string; billing: 'local' | 'api'; hasKey: boolean };
+  compatible: {
+    model: string;
+    url: string;
+    billing: 'local' | 'api' | 'community';
+    hasKey: boolean;
+  };
 };
 export default function ConnectionSetup({
   provider,
@@ -30,7 +36,7 @@ export default function ConnectionSetup({
   const [key, setKey] = useState(''),
     [clearKey, setClearKey] = useState(false);
   const [enabled, setEnabled] = useState(false),
-    [billing, setBilling] = useState<'local' | 'api'>('local');
+    [billing, setBilling] = useState<'local' | 'api' | 'community'>('local');
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
     [error, setError] = useState('');
@@ -134,50 +140,74 @@ export default function ConnectionSetup({
               />
             </label>
           )}
-          {['openai', 'gemini', 'compatible'].includes(provider) && (
-            <>
-              <label>
-                {hasKey ? 'Replace API key (leave blank to keep it)' : 'API key'}
-                <input
-                  aria-label={`${provider} API key`}
-                  type="password"
-                  autoComplete="new-password"
-                  spellCheck={false}
-                  value={key}
-                  onChange={(e) => setKey(e.target.value)}
-                  maxLength={8192}
-                />
-              </label>
-              <p className="field-hint">
-                {hasKey
-                  ? 'A saved key is configured.'
-                  : provider === 'compatible'
-                    ? 'Local model servers often do not require a key.'
-                    : 'No saved key is configured.'}
-              </p>
-              {hasKey && (
-                <label className="checkbox-label">
+          {['openai', 'gemini', 'compatible'].includes(provider) &&
+            !(provider === 'compatible' && billing === 'community') && (
+              <>
+                <label>
+                  {hasKey ? 'Replace API key (leave blank to keep it)' : 'API key'}
                   <input
-                    type="checkbox"
-                    checked={clearKey}
-                    onChange={(e) => setClearKey(e.target.checked)}
+                    aria-label={`${provider} API key`}
+                    type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    value={key}
+                    onChange={(e) => setKey(e.target.value)}
+                    maxLength={8192}
                   />
-                  Remove this saved API key
                 </label>
-              )}
-            </>
-          )}
+                <p className="field-hint">
+                  {hasKey
+                    ? 'A saved key is configured.'
+                    : provider === 'compatible'
+                      ? 'Local model servers often do not require a key.'
+                      : 'No saved key is configured.'}
+                </p>
+                {hasKey && (
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={clearKey}
+                      onChange={(e) => setClearKey(e.target.checked)}
+                    />
+                    Remove this saved API key
+                  </label>
+                )}
+              </>
+            )}
           {provider === 'compatible' && (
             <label>
               Billing mode
               <select
                 value={billing}
-                onChange={(e) => setBilling(e.target.value as 'local' | 'api')}
+                onChange={(e) => setBilling(e.target.value as 'local' | 'api' | 'community')}
               >
                 <option value="local">Local computer · no API billing</option>
                 <option value="api">Remote service · API spending controls</option>
+                <option value="community">AI Horde · free anonymous volunteer compute</option>
               </select>
             </label>
+          )}
+          {provider === 'compatible' && (
+            <div className="control-section">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => {
+                  setUrl(COMMUNITY_API_URL);
+                  setModel(COMMUNITY_EXAMPLE_MODEL);
+                  setBilling('community');
+                  setKey('');
+                  setClearKey(false);
+                }}
+              >
+                Use free AI Horde connection
+              </button>
+              <p className="field-hint">
+                Public volunteer workers can see prompts. Availability and queues vary; use
+                nonconfidential material. This uses the documented anonymous token, no personal API
+                key and no paid fallback. Check model availability before running.
+              </p>
+            </div>
           )}
           {provider === 'openai' && (
             <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">

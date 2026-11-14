@@ -98,7 +98,7 @@ type View =
   | 'conversation'
   | 'ideas';
 const nav = [
-  { id: 'model-chat' as View, label: 'Local model chat', icon: MessageCircle },
+  { id: 'model-chat' as View, label: 'Model chat', icon: MessageCircle },
   { id: 'workspace' as View, label: 'Workspace', icon: LayoutDashboard },
   { id: 'tasks' as View, label: 'Task board', icon: ClipboardList },
   { id: 'outputs' as View, label: 'Outputs', icon: FolderOpen },
@@ -393,7 +393,7 @@ export default function App() {
             Model connections
           </button>
           <button className="button secondary" onClick={() => setView('model-chat')}>
-            Local model chat
+            Model chat
           </button>
           <button
             className="button secondary"

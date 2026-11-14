@@ -1,4 +1,5 @@
-import { totalmem, freemem, availableParallelism } from 'node:os';
+import { cpuCapacity } from './cpu-capacity.mjs';
+import { totalmem, freemem } from 'node:os';
 import { statfsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,8 +14,11 @@ export function hardwareSnapshot(root) {
   } catch {
     /* Unknown is not zero and must not block a configured endpoint. */
   }
+  const cpu = cpuCapacity();
   return {
-    cpuThreads: availableParallelism(),
+    cpuThreads: cpu.effectiveThreads,
+    cpuAffinityThreads: cpu.affinityThreads,
+    cpuQuotaCores: cpu.quotaCores,
     memoryBytes: Math.min(totalmem(), constraint),
     availableMemoryBytes: Math.min(freemem(), process.availableMemory?.() ?? freemem(), constraint),
     freeDiskBytes,

@@ -308,3 +308,36 @@ test('reload reads externally edited saved values, and a blank key keeps and app
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('saving the free community preset replaces old private credentials and rejects arbitrary remote billing exemptions', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'workroom-community-settings-'));
+  const env: NodeJS.ProcessEnv = {
+    COMPATIBLE_API_KEY: 'old-private-fixture-key',
+    COMPATIBLE_API_URL: 'https://old-provider.example/v1',
+    COMPATIBLE_BILLING: 'api',
+  };
+  try {
+    writeFileSync(join(directory, '.env'), 'COMPATIBLE_API_KEY=old-private-fixture-key\n');
+    const settings = new ConnectionSettings(directory, env);
+    const change = {
+      provider: 'compatible',
+      model: 'community-fixture-not-live',
+      billing: 'community',
+      apiKey: '',
+      url: 'https://example.com/v1',
+      revision: settings.view().revision,
+    };
+    assert.throws(() => settings.save(change), /restricted to the official AI Horde/);
+    assert.equal(env.COMPATIBLE_API_KEY, 'old-private-fixture-key');
+    settings.save({ ...change, url: 'https://oai.aihorde.net/v1' });
+    assert.equal(env.COMPATIBLE_API_KEY, '0000000000');
+    assert.equal(env.COMPATIBLE_BILLING, 'community');
+    assert.equal(settings.view().compatible.billing, 'community');
+    assert.equal(
+      readFileSync(join(directory, '.env'), 'utf8').includes('old-private-fixture-key'),
+      false,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

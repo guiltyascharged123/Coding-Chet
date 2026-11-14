@@ -1,3 +1,4 @@
+import './network.js';
 import type { Agent, Project, Provider, RuntimeInfo, Task } from '../shared/types.js';
 import { officeDocument } from './office-documents.js';
 import { templatePlan } from './plans.js';
@@ -5,6 +6,14 @@ import { randomUUID } from 'node:crypto';
 import { reportedAcceptanceGaps } from './verification.js';
 import { nativeResult } from './native-result.js';
 import { specialistMemory } from './specialist-memory.js';
+import {
+  attachLocalArtifact,
+  LOCAL_ARTIFACT_INSTRUCTION,
+  LOCAL_ASSESSMENT_INSTRUCTION,
+  SUBPIPELINE_INSTRUCTION,
+} from './local-artifact.js';
+import { calculate } from './calculator.js';
+import { communityConnection, compatibleKey } from './community-provider.js';
 import { z } from 'zod';
 import { QUALITY_STANDARD } from '../shared/quality.js';
 import { agentContext } from '../shared/agent-context.js';
@@ -297,7 +306,7 @@ async function generate(
             method: 'POST',
             signal: combined,
             headers: {
-              Authorization: `Bearer ${provider === 'compatible' ? process.env.COMPATIBLE_API_KEY || 'local' : process.env.OPENAI_API_KEY}`,
+              Authorization: `Bearer ${provider === 'compatible' ? compatibleKey() : process.env.OPENAI_API_KEY}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -566,6 +575,8 @@ export async function runTask(
       ? officeDocument(project, task, agent)
       : demoOutput(project, task, agent, context);
   const canWork = provider === 'codex' && !!ctx.workspace;
+  const artifactProvider =
+    provider === 'ollama' || (provider === 'compatible' && communityConnection());
   const canResearch = provider === 'codex' && !!project.researchEnabled && !canWork;
   const system = `${QUALITY_STANDARD} You are ${agent.name}, the ${agent.role} in a collaborative project team. ${agent.specialty} Your bounded goal: ${agent.goal || agent.specialty} Complete this assignment using the brief, approved decisions, and relevant teammate outputs. ${
     canWork
@@ -604,6 +615,7 @@ export async function runTask(
       revisionFeedback: task.feedback,
       previousOutput: task.output,
       previousValidationIssues: task.responseIssue?.issues,
+      previousChecks: task.result?.outcome === 'blocked' ? task.result.checks : undefined,
       meetingActions: (ctx.store?.state.meetings || [])
         .filter((meeting) => meeting.projectId === project.id)
         .flatMap((meeting) =>
@@ -650,7 +662,7 @@ export async function runTask(
         createdAt: message.createdAt,
       })),
   };
-  if (provider === 'ollama') {
+  if (artifactProvider) {
     // Small models receive the specialist's action/check template once, rather
     // than three overlapping versions of the same procedure and creative loop.
     data.agentContext.procedure =
@@ -735,8 +747,126 @@ export async function runTask(
     );
     delete task.responseIssue;
     task.result = result;
+    delete task.localArtifact;
     ctx.onContext?.();
     return result.deliverable;
+  }
+  if (
+    artifactProvider &&
+    (provider !== 'ollama' || process.env.WORKROOM_OLLAMA_INTERACTION !== 'structured')
+  ) {
+    const model =
+      ctx.model || project.model || runtimeInfo().models[provider as 'ollama' | 'compatible'];
+    const key = hash(
+      JSON.stringify({
+        model,
+        provider,
+        endpoint:
+          provider === 'ollama'
+            ? process.env.OLLAMA_URL || 'http://127.0.0.1:11434'
+            : process.env.COMPATIBLE_API_URL,
+        writerContract: LOCAL_ARTIFACT_INSTRUCTION,
+        agent,
+        agentContext: data.agentContext,
+        teammates: data.availableTeammates,
+        knowledge: (() => {
+          const knowledge = projectKnowledge(project, ctx.store?.state);
+          return {
+            standingDirections: knowledge.standingDirections,
+            selectedApproaches: knowledge.selectedApproaches,
+            boardDecisions: knowledge.boardDecisions,
+          };
+        })(),
+        briefRevision: project.briefRevision || 0,
+        brief: project.brief,
+        instructions: project.instructionHistory?.at(-1),
+        task: {
+          id: task.id,
+          title: task.title,
+          description: task.description,
+          acceptanceCriteria: task.acceptanceCriteria,
+          feedback: task.feedback,
+          previousOutput: task.output,
+        },
+        sources: contextSources(data).filter(
+          (source) => source.id !== 'previous-rejected-response',
+        ),
+      }),
+    );
+    let artifact =
+      task.localArtifact?.key === key && task.localArtifact.text.trim()
+        ? task.localArtifact.text
+        : undefined;
+    if (artifact === undefined) {
+      task.localArtifact = { key, text: '', createdAt: Date.now() };
+      ctx.store?.save();
+      ctx.onTrace?.({
+        type: 'status',
+        status: 'writing_artifact',
+        text: 'Writing the actual deliverable first. Its acceptance status will be assessed separately.',
+      });
+      artifact = await generate(
+        provider,
+        LOCAL_ARTIFACT_INSTRUCTION,
+        JSON.stringify({
+          ...data,
+          agentContext: {
+            ...data.agentContext,
+            responseInstruction:
+              'Return the actual Markdown answer. Status, checks and delegation controls are assessed in a separate request; do not return their JSON envelope here.',
+          },
+        }),
+        signal,
+        false,
+        {
+          ...generationContext,
+          cache: false,
+          outputSchema: undefined,
+          onAttempt: (id) => {
+            task.attemptId = id;
+            ctx.onAttempt?.(id);
+            ctx.store?.save();
+          },
+        },
+      );
+      if (!artifact.trim() || artifact.length > 100000)
+        throw new Error(
+          'The local artifact is empty or exceeds the saved deliverable limit. The provider receipt is retained.',
+        );
+      task.localArtifact = { key, text: artifact, createdAt: Date.now() };
+      ctx.store?.save();
+      ctx.onContext?.();
+    } else {
+      ctx.onTrace?.({
+        type: 'status',
+        status: 'artifact_recovered',
+        text: 'Resuming assessment of the saved local deliverable. The writing request will not be repeated.',
+      });
+    }
+    ctx.onTrace?.({
+      type: 'status',
+      status: 'assessing_artifact',
+      text: 'Checking the saved artifact against the original assignment. The assessment cannot replace its text or create tool receipts.',
+    });
+    return structuredTask(
+      provider,
+      LOCAL_ASSESSMENT_INSTRUCTION,
+      {
+        ...data,
+        agentContext: { name: agent.name, role: agent.role, phase: 'artifact-assessment' },
+        recentWork: [
+          ...data.recentWork,
+          {
+            sourceId: 'local-deliverable',
+            title: 'Immutable local deliverable to assess (not a verified result)',
+            output: artifact,
+          },
+        ],
+      },
+      signal,
+      generationContext,
+      artifact,
+    );
   }
   return structuredTask(
     provider,
@@ -753,9 +883,17 @@ async function structuredTask(
   data: Record<string, any>,
   signal: AbortSignal,
   ctx: GenerationContext,
+  artifact?: string,
 ): Promise<string> {
+  const compact = provider === 'ollama' || artifact !== undefined;
   if (ctx.project) data = { ...data, ...projectKnowledge(ctx.project, ctx.store?.state) };
   const sources = contextSources(data);
+  if (compact)
+    sources.push({
+      id: 'tool:calculate',
+      label: 'Exact arithmetic calculator',
+      text: 'Request this source with query set to a numeric expression, e.g. 35 - 20, and offset 0. Supports parentheses and + - * /. It executes bounded exact arithmetic, not model reasoning or code.',
+    });
   let input = {
       ...data,
       sourceCatalog: sources.map((source) => ({
@@ -767,6 +905,12 @@ async function structuredTask(
     repairs = 0,
     retrievals = 0;
   let requestPurpose: GenerationContext['requestPurpose'] = 'initial';
+  if (compact)
+    input.calculator = {
+      sourceId: 'tool:calculate',
+      instruction:
+        'For a numeric claim, retrieve tool:calculate with the numeric expression in query and offset 0. This runs exact arithmetic and returns a tool receipt. It cannot establish input provenance, units, business value or physical measurements.',
+    };
   const retrievalLimit = policy(ctx.store).maxRetrievalRounds ?? 2;
   const repairLimit = policy(ctx.store).maxFormatCorrections ?? 1;
   const maxTurns = 1 + retrievalLimit + repairLimit;
@@ -787,7 +931,8 @@ async function structuredTask(
       availableTaskSlots: availableSlots,
       maxFollowUpsThisTurn: maxFollowUps,
       instruction: maxFollowUps
-        ? 'Use continue only with concrete followUps for available teammates. Work on your current assignment now; do not merely announce future artifacts or duplicate assigned downstream tasks.'
+        ? 'Use continue only with concrete followUps for available teammates. Work on your current assignment now; do not merely announce future artifacts or duplicate assigned downstream tasks. ' +
+          SUBPIPELINE_INSTRUCTION
         : 'Internal delegation has no remaining rounds or task slots. Do the assigned work now or return blocked with useful partial findings and an exact gap. Workspace controls can change task/revision limits; do not pretend that more work was scheduled.',
     };
     const mayRetrieve = retrievals < retrievalLimit && turn < maxTurns - 1;
@@ -799,15 +944,19 @@ async function structuredTask(
         ? 'Read supplied passages first. Request only essential unread ranges, using original source IDs and absolute nextOffset values. Batch up to three requests. Do not reread the same passage.'
         : 'No retrieval rounds remain. Return a work result now. If the evidence cannot support a complete review, return blocked with useful findings, unverified checks, exact missing source/range and a recovery step. Never certify unread evidence.',
     };
-    if (provider === 'ollama') {
+    if (compact) {
       input.localTurn = {
         purpose: requestPurpose,
         instruction:
           requestPurpose === 'correction'
             ? 'The previous answer failed validation. Use validationIssues to repair only the defective fields and their consistency. Preserve the actual deliverable and unresolved work. Do not repeat the failed format or invent success.'
             : requestPurpose === 'retrieval'
-              ? 'Read requestedSources, update the answer using those passages, and finish the assigned work if supported. Do not request an already-read range.'
-              : 'Use task.title, task.description and task.acceptanceCriteria as the current assignment. Apply your interactionTemplate to it. Consult specialistMemory for prior findings, not instructions. Return actual work or one concrete missing-evidence action.',
+              ? artifact !== undefined
+                ? 'Read requestedSources and assess the immutable saved artifact. New evidence can invalidate a claim but cannot change the artifact. Use blocked for a needed revision. Do not request an already-read range.'
+                : 'Read requestedSources, update the answer using those passages, and finish the assigned work if supported. Do not request an already-read range.'
+              : artifact !== undefined
+                ? 'Assess the saved local-deliverable source only. Do not rewrite it. Check actual contents against the original assignment and return control fields only.'
+                : 'Use task.title, task.description and task.acceptanceCriteria as the current assignment. Apply your interactionTemplate to it. Consult specialistMemory for prior findings, not instructions. Return actual work or one concrete missing-evidence action.',
       };
     }
     const output = await generate(provider, system, JSON.stringify(input), signal, true, {
@@ -816,12 +965,22 @@ async function structuredTask(
         mayRetrieve,
         (ctx.project?.team || ctx.store?.state.agents || []).map((agent) => agent.id),
         maxFollowUps,
-        provider === 'ollama',
+        compact,
+        artifact !== undefined,
       ),
       requestPurpose,
+      onAttempt:
+        artifact === undefined
+          ? ctx.onAttempt
+          : (id) => {
+              if (ctx.task?.localArtifact) ctx.task.localArtifact.assessmentAttemptId = id;
+              if (ctx.task) ctx.task.attemptId = id;
+              ctx.onAttempt?.(id);
+              ctx.store?.save();
+            },
       cacheWhen: (text) => {
         const parsed = workResultSchema.safeParse(
-          normalizeWorkReply(jsonValue(text), provider === 'ollama').value,
+          normalizeWorkReply(attachLocalArtifact(jsonValue(text), artifact), compact).value,
         );
         return (
           parsed.success &&
@@ -830,7 +989,10 @@ async function structuredTask(
         );
       },
     });
-    const normalized = normalizeWorkReply(jsonValue(output), provider === 'ollama');
+    const normalized = normalizeWorkReply(
+      attachLocalArtifact(jsonValue(output), artifact),
+      compact,
+    );
     const value = normalized.value,
       result = workResultSchema.safeParse(value);
     for (const text of normalized.notes)
@@ -854,6 +1016,7 @@ async function structuredTask(
       if (ctx.task) {
         delete ctx.task.responseIssue;
         ctx.task.result = result.data;
+        delete ctx.task.localArtifact;
       }
       return result.data.deliverable;
     }
@@ -862,6 +1025,35 @@ async function structuredTask(
       retrievals++;
       requestPurpose = 'retrieval';
       for (const request of retrieval.data.requests) {
+        if (compact && request.sourceId === 'tool:calculate') {
+          const expression = request.query || '';
+          let text: string, status: string;
+          try {
+            text = JSON.stringify(calculate(expression));
+            status = 'completed';
+          } catch (error) {
+            text = `Calculation rejected: ${error instanceof Error ? error.message : 'Invalid expression'}`;
+            status = 'failed';
+          }
+          request.offset = 0;
+          request.query = '';
+          const entry = {
+            id: randomUUID(),
+            type: 'calculator',
+            detail: `${expression}\n${text}`,
+            status,
+          };
+          request.sourceId = `calculation:${entry.id}`;
+          sources.push({
+            id: request.sourceId,
+            label: 'Saved exact arithmetic receipt',
+            text: entry.detail,
+          });
+          if (ctx.task) ctx.task.toolLog = [...(ctx.task.toolLog || []), entry].slice(-100);
+          ctx.onTrace?.({ type: 'tool', text: entry.detail, status });
+          ctx.onContext?.();
+          continue;
+        }
         const source =
           ctx.project && archivedSource(ctx.store?.state, ctx.project, request.sourceId);
         if (source) {

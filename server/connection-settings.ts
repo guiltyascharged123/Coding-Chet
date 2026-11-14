@@ -15,6 +15,7 @@ import { parse } from 'dotenv';
 import { z } from 'zod';
 import { serviceUrl } from './managed.js';
 import { DEFAULT_LOCAL_MODEL } from '../shared/defaults.js';
+import { COMMUNITY_ANONYMOUS_KEY, isCommunityEndpoint } from '../shared/community.js';
 
 const assertServiceUrl = (value: string, localOnly = false) => {
   try {
@@ -70,7 +71,7 @@ export const connectionSettingsSchema = z.discriminatedUnion('provider', [
       revision: z.string(),
       ...apiFields,
       url: z.string().max(2048),
-      billing: z.enum(['local', 'api']),
+      billing: z.enum(['local', 'api', 'community']),
     })
     .strict(),
 ]);
@@ -179,7 +180,12 @@ export class ConnectionSettings {
       compatible: {
         model: saved('COMPATIBLE_MODEL') || '',
         url: publicEndpoint(saved('COMPATIBLE_API_URL') || 'http://127.0.0.1:1234/v1'),
-        billing: saved('COMPATIBLE_BILLING') === 'local' ? ('local' as const) : ('api' as const),
+        billing:
+          saved('COMPATIBLE_BILLING') === 'community'
+            ? ('community' as const)
+            : saved('COMPATIBLE_BILLING') === 'local'
+              ? ('local' as const)
+              : ('api' as const),
         hasKey: !!saved('COMPATIBLE_API_KEY'),
       },
     };
@@ -215,6 +221,13 @@ export class ConnectionSettings {
       else if (data.apiKey) changes[`${prefix}_API_KEY`] = data.apiKey;
       if (data.provider === 'compatible') {
         assertServiceUrl(data.url, data.billing === 'local');
+        if (data.billing === 'community') {
+          if (!isCommunityEndpoint(data.url))
+            throw new SettingsError(
+              'Free community mode is restricted to the official AI Horde HTTPS endpoint.',
+            );
+          changes.COMPATIBLE_API_KEY = COMMUNITY_ANONYMOUS_KEY;
+        }
         Object.assign(changes, { COMPATIBLE_API_URL: data.url, COMPATIBLE_BILLING: data.billing });
       }
     }

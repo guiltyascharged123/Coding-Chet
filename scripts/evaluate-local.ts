@@ -11,7 +11,7 @@ import type { Task } from '../shared/types.js';
 
 if (process.argv.includes('--help')) {
   console.log(
-    'npm run evaluate:local\nRuns three real Ollama specialist requests (plus bounded format repairs/retrieval). Uses OLLAMA_URL and OLLAMA_MODEL from .env. No installation, model download, or paid API fallback. Saves isolated SQLite/JSON receipts under .data/evaluations/. Quality requires human inspection.',
+    'npm run evaluate:local\nRuns three real Ollama specialist assignments (writing and assessment, plus bounded format repairs/retrieval). Uses OLLAMA_URL and OLLAMA_MODEL from .env. No installation, model download, or paid API fallback. Saves isolated SQLite/JSON receipts under .data/evaluations/. Quality requires human inspection.',
   );
 } else {
   const root = resolve(import.meta.dirname, '..');
@@ -74,7 +74,7 @@ if (process.argv.includes('--help')) {
       {
         title: 'Check supplied arithmetic',
         description:
-          'Calculate B minus A from supplied prices $35 and $20. Show the operation and state what it establishes. Complete this small text assignment without delegating.',
+          'The supplied prices are A = $20 and B = $35. Compute B minus A, preserving these exact labels. State the price gap and which price is larger. Do not infer service quality, business value or shop costs, generate ideas or delegate this small closed question.',
         criterion: 'Correctly compute the supplied difference without inventing demand.',
       },
       {
@@ -165,6 +165,10 @@ if (process.argv.includes('--help')) {
       JSON.stringify(
         {
           kind: 'ollama-evaluation',
+          interaction:
+            process.env.WORKROOM_OLLAMA_INTERACTION === 'structured'
+              ? 'structured'
+              : 'artifact-first',
           model,
           startedAt,
           finishedAt: Date.now(),

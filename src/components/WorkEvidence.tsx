@@ -6,6 +6,16 @@ export default function WorkEvidence({ task }: { task: Task }) {
     task.responseIssue.receivedAt < (task.lastAttemptStartedAt || task.startedAt || 0);
   return (
     <>
+      {task.localArtifact?.text && (
+        <details className="control-section" open aria-label="Saved local deliverable">
+          <summary>Saved deliverable · acceptance assessment pending</summary>
+          <p>
+            The actual text is retained. A completed writing request does not establish that its
+            acceptance criteria are met.
+          </p>
+          <pre className="rejected-response">{task.localArtifact.text}</pre>
+        </details>
+      )}
       {task.responseIssue && (
         <details className="control-section" open aria-label="Saved response details">
           <summary>

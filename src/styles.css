@@ -5683,6 +5683,7 @@ button.connection:hover {
   margin-bottom: 8px;
 }
 .local-chat-toolbar {
+  flex-wrap: wrap;
   display: flex;
   justify-content: space-between;
   align-items: end;

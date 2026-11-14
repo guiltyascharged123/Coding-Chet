@@ -33,7 +33,8 @@ import type { FollowUp } from '../shared/work.js';
 import { evidenceGaps, reportedAcceptanceGaps } from './verification.js';
 import { modelReadiness } from '../shared/model-readiness.js';
 import { workResultSchema } from '../shared/work.js';
-import { jsonValue } from './work-results.js';
+import { jsonValue, normalizeWorkReply } from './work-results.js';
+import { attachLocalArtifact } from './local-artifact.js';
 import { hasProjectTools, taskExecutionProject } from '../shared/capabilities.js';
 import type { ConsoleEvent } from '../shared/console.js';
 import type { CostPolicy } from '../shared/types.js';
@@ -195,6 +196,7 @@ export class Engine extends EventEmitter {
   }
   stop() {
     clearInterval(this.timer);
+    this.timer = undefined;
     for (const [id] of this.conferences) this.stopMeeting(id);
     for (const id of [...this.planners.keys()]) this.pauseProject(id);
     for (const controller of this.active.values()) controller.abort();
@@ -1353,7 +1355,34 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'A complete reply is unavailable. Inspect Usage and existing files before retrying.',
       );
-    const parsed = workResultSchema.safeParse(jsonValue(response.text));
+    const savedAttempt = this.store
+      .attempts()
+      .find((attempt) => attempt.id === task.recovery!.attemptId);
+    const artifactReceipt =
+      savedAttempt?.provider === 'ollama' ||
+      (savedAttempt?.provider === 'compatible' && !!task.localArtifact);
+    if (
+      artifactReceipt &&
+      task.localArtifact &&
+      task.localArtifact.assessmentAttemptId !== savedAttempt?.id &&
+      response.text.trim() &&
+      response.text.length <= 100000
+    ) {
+      task.localArtifact.text = response.text;
+      delete task.recovery;
+      task.error =
+        'The completed deliverable was recovered. Retry this task to assess the saved text; the writing request will not be repeated.';
+      this.event(task.projectId, 'system', task.error, task.agentId);
+      this.commit();
+      return;
+    }
+    const saved = artifactReceipt
+      ? normalizeWorkReply(
+          attachLocalArtifact(jsonValue(response.text), task.localArtifact?.text),
+          true,
+        ).value
+      : jsonValue(response.text);
+    const parsed = workResultSchema.safeParse(saved);
     if (!parsed.success)
       throw new AppError(
         'The saved reply is not an accepted work result. Inspect the saved response in Live console before retrying.',
@@ -1370,6 +1399,7 @@ export class Engine extends EventEmitter {
     task.observations = response.observations;
     task.result = parsed.data;
     task.output = parsed.data.deliverable;
+    delete task.localArtifact;
     delete task.recovery;
     delete task.error;
     if (task.result.outcome === 'continue') this.coordinate(task, task.result.followUps);
@@ -1871,7 +1901,12 @@ export class Engine extends EventEmitter {
       const controller = new AbortController();
       this.active.set(task.id, controller);
       this.begin(task);
-      void this.execute(task, controller).finally(() => this.active.delete(task.id));
+      void this.execute(task, controller).finally(() => {
+        this.active.delete(task.id);
+        // Drain newly ready steps when capacity opens; the interval remains a
+        // recovery/lease heartbeat rather than a delay between every job.
+        if (this.timer) this.tick();
+      });
     }
   }
   private begin(task: Task) {
@@ -2028,6 +2063,18 @@ export class Engine extends EventEmitter {
     );
   }
   private coordinate(task: Task, followUps: FollowUp[]) {
+    for (const [index, followUp] of followUps.entries()) {
+      if (
+        followUp.dependsOn &&
+        (new Set(followUp.dependsOn).size !== followUp.dependsOn.length ||
+          followUp.dependsOn.some(
+            (dependency) => !Number.isInteger(dependency) || dependency < 0 || dependency >= index,
+          ))
+      )
+        throw new AppError(
+          'Subpipeline dependencies must name distinct earlier follow-up indexes. The proposed work is saved; no child task was scheduled.',
+        );
+    }
     const team = this.project(task.projectId).team || this.state.agents;
     if (followUps.some((followUp) => !team.some((agent) => agent.id === followUp.agentId)))
       throw new AppError(
@@ -2052,8 +2099,14 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'Necessary teammate follow-ups exceed the project task limit. The proposed work is saved in this task; extend the plan or task limit before retrying.',
       );
-    let dependencies = [...task.dependencies];
-    const created: Task[] = followUps.map((f) => {
+    const prerequisites = [...task.dependencies];
+    let dependencies = [...prerequisites];
+    const created: Task[] = [];
+    for (const f of followUps) {
+      const childDependencies =
+        f.dependsOn == null
+          ? dependencies
+          : [...prerequisites, ...f.dependsOn.map((index) => created[index].id)];
       const project = this.project(task.projectId),
         owner = team.find((agent) => agent.id === f.agentId)!;
       const tools = taskExecutionProject(project).provider === 'codex' && hasProjectTools(project);
@@ -2081,15 +2134,17 @@ export class Engine extends EventEmitter {
         f.agentId !== task.agentId;
       if (
         (!tools &&
-          (workType !== 'plan' || f.acceptanceCriteria?.some((c) => c.evidence !== 'report'))) ||
+          (['implementation', 'tests'].includes(workType) ||
+            f.acceptanceCriteria?.some((c) => c.evidence !== 'report'))) ||
         (task.readOnly && workType === 'implementation' && !delegatedBuilder)
       )
         throw new AppError(
           'The proposed follow-up requires tools or write access unavailable to this assignment. Its proposal is saved; use a separately authorized implementation assignment or select the required project tools.',
         );
       const acceptanceCriteria = structuredClone(f.acceptanceCriteria || []);
-      const required =
-        workType === 'implementation'
+      const required = !tools
+        ? ['report']
+        : workType === 'implementation'
           ? ['artifact', 'verification']
           : workType === 'review'
             ? ['inspection']
@@ -2115,8 +2170,9 @@ export class Engine extends EventEmitter {
             evidence: evidence as 'artifact' | 'verification' | 'inspection' | 'report',
           });
         }
+      const { dependsOn: _indexes, ...specification } = f;
       const next: Task = {
-        ...f,
+        ...specification,
         id: randomUUID(),
         projectId: task.projectId,
         requestedByTaskId: task.id,
@@ -2129,16 +2185,18 @@ export class Engine extends EventEmitter {
           workType === 'review',
         workType,
         acceptanceCriteria,
-        dependencies,
+        dependencies: [...new Set(childDependencies)],
         status: 'queued',
         requiresApproval: false,
         output: '',
         feedback: '',
       };
       dependencies = [next.id];
-      return next;
-    });
-    task.dependencies = [...new Set([...task.dependencies, ...dependencies])];
+      created.push(next);
+    }
+    // Join every child pipeline, including branches that do not depend on the
+    // final child. Legacy serial follow-ups keep their ordering.
+    task.dependencies = [...new Set([...task.dependencies, ...created.map((child) => child.id)])];
     task.coordinationRounds = (task.coordinationRounds || 0) + 1;
     const project = this.project(task.projectId);
     project.planRevision = (project.planRevision || 0) + 1;

@@ -165,3 +165,5 @@ test('local planning and task handoffs use actual Ollama protocol responses, str
     });
   }
 });
+// Legacy single-reply protocol fixtures. Artifact-first has dedicated coverage.
+process.env.WORKROOM_OLLAMA_INTERACTION = 'structured';

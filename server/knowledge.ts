@@ -63,6 +63,15 @@ export function archivedSource(
   id: string,
 ): SavedSource | undefined {
   if (!state) return;
+  if (id.startsWith('calculation:')) {
+    const receipt = state.tasks
+      .filter((task) => task.projectId === project.id)
+      .flatMap((task) => task.toolLog || [])
+      .find((entry) => entry.type === 'calculator' && `calculation:${entry.id}` === id);
+    if (receipt)
+      return { id, label: `Exact arithmetic receipt (${receipt.status})`, text: receipt.detail };
+    return;
+  }
   const knowledge = projectKnowledge(project, state);
   const index = [...knowledge.boardDecisions, ...knowledge.archiveIndex].find(
     (source) => source.sourceId === id,
@@ -102,6 +111,10 @@ export function archivedSource(
         },
         result: task.result,
         output: task.output,
+        unacceptedDraft: task.localArtifact?.text || undefined,
+        unacceptedDraftNotice: task.localArtifact?.text
+          ? 'Saved writing-stage artifact. Not accepted or independently verified; inspect its actual contents against the assignment.'
+          : undefined,
         error: task.error,
       }),
     };

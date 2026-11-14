@@ -6,6 +6,7 @@ import type { Store } from './store.js';
 import { defaultPolicy } from '../shared/schemas.js';
 import type { ConsoleEvent, ModelProgress } from '../shared/console.js';
 import { saveResponseIssue } from './work-results.js';
+import { communityConnection } from './community-provider.js';
 
 export type GenerationContext = {
   requestPurpose?: ModelProgress['purpose'];
@@ -40,6 +41,7 @@ export type Generated = {
 };
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export function billingFor(provider: Provider): Attempt['billing'] {
+  if (provider === 'compatible' && communityConnection()) return 'none';
   return provider === 'codex'
     ? 'subscription'
     : provider === 'external'
@@ -103,7 +105,7 @@ export function relevantContext(task: Task, context: Task[]) {
       sourceStatus: t.status,
       title: t.title,
       output: t.result
-        ? `${JSON.stringify({ assignment: { description: t.description, acceptanceCriteria: t.acceptanceCriteria }, summary: t.result.summary, handoff: t.result.handoff, checks: t.result.checks })}\n\n${t.output}`
+        ? `${JSON.stringify({ assignment: { description: t.description, acceptanceCriteria: t.acceptanceCriteria }, ...(task.workType === 'review' ? { reviewNotice: 'Inspect the actual work against its original assignment. Prior self-reported status and checks are intentionally omitted; they are not review evidence.' } : { summary: t.result.summary, handoff: t.result.handoff, checks: t.result.checks }) })}\n\n${t.output}`
         : t.output,
     }));
 }
@@ -141,11 +143,7 @@ export function reserve(
   if (meetingId && store.hasUncertain('meeting_id', meetingId))
     throw new Error('Acknowledge uncertain meeting usage in Workspace controls before retrying.');
   let reservedUsd = 0;
-  if (
-    provider === 'openai' ||
-    provider === 'gemini' ||
-    (provider === 'compatible' && process.env.COMPATIBLE_BILLING !== 'local')
-  ) {
+  if (billingFor(provider) === 'api') {
     if (!p.allowPaid)
       throw new Error(
         'Paid APIs are disabled. Enable them explicitly in Workspace controls before running this project.',

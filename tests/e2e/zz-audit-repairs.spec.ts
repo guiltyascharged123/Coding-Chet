@@ -34,15 +34,17 @@ async function project(
 }
 async function open(page: any, id: string) {
   await page.goto('/');
-  // Set the selected ID and reload in one browser turn, so the outgoing
-  // app's persistence effect cannot overwrite the requested project in between.
-  await Promise.all([
-    page.waitForEvent('domcontentloaded'),
-    page.evaluate((id: string) => {
-      localStorage.setItem('workroom-project', id);
-      location.reload();
-    }, id),
-  ]);
+  await page.locator('.project-selector > button').click();
+  const data = await (await page.request.get('/api/state')).json();
+  const target = data.state.projects.find((project: any) => project.id === id);
+  expect(target).toBeTruthy();
+  await page
+    .locator('.project-menu button')
+    .filter({ has: page.getByText(target.title, { exact: true }) })
+    .click();
+  await expect(
+    page.getByRole('button', { name: `Edit project ${target.title}`, exact: true }),
+  ).toBeVisible();
 }
 
 test('a second browser editor cannot silently delete a newer saved assignment', async ({

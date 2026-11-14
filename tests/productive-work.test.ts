@@ -1054,3 +1054,257 @@ test('a model ignoring the final-result instruction cannot trigger unbounded ret
     h.close();
   }
 });
+
+test('nested follow-up pipelines fork independent specialists, join for review, then resume their parent (model fixture)', async () => {
+  const h = harness();
+  let release!: () => void;
+  const branchGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Set<string>(),
+    finished = new Set<string>();
+  let parentTurns = 0,
+    branchTurns = 0;
+  try {
+    const project = await h.engine.createProject(
+      'Fork and join',
+      brief,
+      'office',
+      'template',
+      randomUUID(),
+      'custom',
+    );
+    const parent = h.store.state.tasks.find((t) => t.projectId === project.id)!;
+    h.store.state.policy!.maxConcurrent = 2;
+    globalThis.fetch = (async (_url, options) => {
+      const input = JSON.parse(JSON.parse(String(options?.body)).messages[1].content),
+        title = input.task.title;
+      if (title === parent.title && parentTurns++ === 0)
+        return response(
+          result({
+            outcome: 'continue',
+            checks: [
+              {
+                criterion: 'Delegated checks',
+                status: 'unverified',
+                evidence: 'Await specialist branches.',
+              },
+            ],
+            followUps: [
+              {
+                title: 'Branch A',
+                description: 'Compute the supplied price difference.',
+                agentId: 'sol',
+                dependsOn: [],
+              },
+              {
+                title: 'Branch B',
+                description: 'Challenge assumptions independently.',
+                agentId: 'atlas',
+                dependsOn: [],
+              },
+              {
+                title: 'Join review',
+                description: 'Review both actual branch artifacts.',
+                agentId: 'echo',
+                workType: 'review',
+                dependsOn: [0, 1],
+              },
+            ],
+          }),
+        );
+      if (title === 'Branch A' || title === 'Branch B') {
+        started.add(title);
+        if (started.size === 2) release();
+        await branchGate;
+        if (title === 'Branch A' && branchTurns++ === 0)
+          return response(
+            result({
+              outcome: 'continue',
+              checks: [
+                {
+                  criterion: 'Check the baseline',
+                  status: 'unverified',
+                  evidence: 'Await the nested specialist step.',
+                },
+              ],
+              followUps: [
+                {
+                  title: 'Nested baseline check',
+                  description: 'Check the supplied operation before the branch completes.',
+                  agentId: 'mira',
+                  dependsOn: [],
+                },
+              ],
+            }),
+          );
+        if (title === 'Branch A')
+          assert.equal(
+            h.store.state.tasks.find((task) => task.title === 'Nested baseline check')!.status,
+            'done',
+          );
+        finished.add(title);
+      }
+      if (title === 'Join review') {
+        assert.equal(
+          finished.size,
+          2,
+          'review cannot start until both independent branches finish',
+        );
+        assert.equal(
+          input.teammateOutputs.filter((source: any) =>
+            ['Branch A', 'Branch B'].includes(source.title),
+          ).length,
+          2,
+        );
+      }
+      if (title === parent.title)
+        assert.equal(
+          h.store.state.tasks.filter(
+            (t) => t.requestedByTaskId === parent.id && t.status === 'done',
+          ).length,
+          3,
+        );
+      return response(
+        result({
+          checks: (input.task.acceptanceCriteria || [])
+            .map((c: any) => ({
+              criterion: `${c.id}: ${c.description}`,
+              status: 'met',
+              evidence: 'Fixture reviewed actual supplied artifacts; arithmetic difference $15.',
+            }))
+            .concat(input.task.acceptanceCriteria?.length ? [] : result().checks),
+        }),
+      );
+    }) as typeof fetch;
+    h.engine.start();
+    h.engine.runProject(project.id);
+    await until(() => project.status === 'completed');
+    const children = h.store.state.tasks.filter((t) => t.requestedByTaskId === parent.id);
+    assert.equal(children.length, 3);
+    assert.equal(
+      h.store.state.tasks.find((task) => task.title === 'Nested baseline check')!.requestedByTaskId,
+      children[0].id,
+    );
+    assert.deepEqual(children[0].dependencies, [
+      h.store.state.tasks.find((task) => task.title === 'Nested baseline check')!.id,
+    ]);
+    assert.deepEqual(children[1].dependencies, []);
+    assert.deepEqual(
+      children[2].dependencies,
+      children.slice(0, 2).map((t) => t.id),
+    );
+    assert.ok(children.every((child) => parent.dependencies.includes(child.id)));
+    assert.equal(h.store.state.approvals.length, 0);
+  } finally {
+    release?.();
+    h.close();
+  }
+});
+
+test('subpipeline forward references and duplicate dependencies create no partial child work', async () => {
+  const h = harness();
+  try {
+    const project = await h.engine.createProject(
+      'Invalid pipeline',
+      brief,
+      'office',
+      'template',
+      randomUUID(),
+      'custom',
+    );
+    const parent = h.store.state.tasks.find((t) => t.projectId === project.id)!;
+    const count = h.store.state.tasks.length;
+    for (const dependsOn of [[0], [1], [0, 0]]) {
+      assert.throws(
+        () =>
+          (h.engine as any).coordinate(parent, [
+            { title: 'Invalid branch', description: 'Must not start.', agentId: 'sol', dependsOn },
+          ]),
+        /distinct earlier/,
+      );
+      assert.equal(h.store.state.tasks.length, count);
+      assert.equal(parent.coordinationRounds, undefined);
+    }
+  } finally {
+    h.close();
+  }
+});
+
+test('completing a pipeline step dispatches its ready successor without waiting for the polling heartbeat', async () => {
+  const h = harness();
+  try {
+    const project = await h.engine.createProject(
+      'Immediate continuation',
+      brief,
+      'office',
+      'template',
+      randomUUID(),
+      'custom',
+    );
+    const first = h.store.state.tasks.find((t) => t.projectId === project.id)!;
+    h.store.state.tasks.push({
+      ...structuredClone(first),
+      id: randomUUID(),
+      title: 'Ready successor',
+      dependencies: [first.id],
+    });
+    const calls: string[] = [];
+    globalThis.fetch = (async (_url, options) => {
+      const input = JSON.parse(JSON.parse(String(options?.body)).messages[1].content);
+      calls.push(input.task.title);
+      return response(
+        result({
+          checks: (input.task.acceptanceCriteria || [])
+            .map((c: any) => ({
+              criterion: `${c.id}: ${c.description}`,
+              status: 'met',
+              evidence: 'Fixture actually checks supplied $35 minus $20 equals $15.',
+            }))
+            .concat(input.task.acceptanceCriteria?.length ? [] : result().checks),
+        }),
+      );
+    }) as typeof fetch;
+    h.engine.start();
+    // Disable only periodic polling: ready work must be driven by completions.
+    clearInterval((h.engine as any).timer);
+    h.engine.runProject(project.id);
+    await until(() => project.status === 'completed');
+    assert.deepEqual(calls, [first.title, 'Ready successor']);
+  } finally {
+    h.close();
+  }
+});
+
+test('growing source catalogs stay within the evidence budget while the full archive index remains retrievable', () => {
+  const teammateOutputs = Array.from({ length: 100 }, (_, index) => ({
+    sourceId: `task:${index}`,
+    title: `Original assignment ${index} with enough descriptive metadata to expose catalog growth`,
+    output: `Saved original result ${index}. ` + 'Evidence '.repeat(80),
+  }));
+  const sources = contextSources({ teammateOutputs });
+  const data = {
+    task: { title: 'Current assignment', description: 'Preserve this exact requirement.' },
+    teammateOutputs,
+    sourceCatalog: sources.map((source) => ({
+      sourceId: source.id,
+      title: source.label,
+      totalCharacters: source.text.length,
+    })),
+  };
+  const packet = assembleContext('Use actual evidence and do the current assignment.', data, 8000),
+    input = JSON.parse(packet.user);
+  assert.ok(packet.report.inputBytes <= 8000);
+  assert.equal(input.task.description, data.task.description);
+  assert.ok(input.sourceCatalog.length < 100);
+  assert.equal(input.sourceCatalogNotice.indexSourceId, 'source-index');
+  assert.ok(input.sourceCatalogNotice.omittedSources > 0);
+  const found = retrieveSources(
+    sources,
+    [{ sourceId: 'source-index', offset: 0, query: 'task:99' }],
+    1000,
+  );
+  assert.match(JSON.stringify(found), /task:99/);
+  assert.match(JSON.stringify(found), /Original assignment 99/);
+  assert.equal(sources.at(-1)!.text, teammateOutputs.at(-1)!.output);
+});
