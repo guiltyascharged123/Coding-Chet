@@ -1,6 +1,26 @@
 import type { Project } from './types.js';
-export function hasProjectTools(project: Project) {
+export function hasProjectTools(project: Pick<Project, 'workflow' | 'workMode'>) {
   return project.workflow === 'software' || project.workMode === 'workspace';
+}
+
+/** Capabilities of task execution, distinct from the planner's own text request. */
+export function taskCapabilities(
+  project: Pick<
+    Project,
+    'provider' | 'workflow' | 'workMode' | 'executor' | 'researchEnabled' | 'deliveryMode'
+  >,
+) {
+  const provider =
+    hasProjectTools(project) && project.executor ? project.executor.provider : project.provider;
+  const files = hasProjectTools(project) && provider === 'codex';
+  return {
+    text: true,
+    fileInspection: files,
+    fileEditing: files && project.deliveryMode !== 'design',
+    commands: files,
+    webResearch: provider === 'codex' && !!project.researchEnabled,
+    externalActions: false,
+  };
 }
 
 /** Explicit execution selection, never an error-triggered fallback. Planning

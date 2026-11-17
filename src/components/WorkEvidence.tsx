@@ -1,4 +1,7 @@
 import type { Task } from '../../shared/types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { isReportedBlocker } from '../../shared/task-blocker';
 
 export default function WorkEvidence({ task }: { task: Task }) {
   const previousIssue =
@@ -71,9 +74,20 @@ export default function WorkEvidence({ task }: { task: Task }) {
               ? task.status === 'failed'
                 ? 'Previous reported result · latest attempt failed'
                 : 'Reported result'
-              : 'Progress and outstanding work'}
+              : task.result.outcome === 'blocked' &&
+                  task.status === 'failed' &&
+                  !isReportedBlocker(task)
+                ? 'Previous reported blocker · latest attempt failed'
+                : 'Progress and outstanding work'}
           </h3>
-          <p>{task.result.summary}</p>
+          {isReportedBlocker(task) ? (
+            <details>
+              <summary>Reported findings summary · work remains blocked</summary>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.result.summary}</ReactMarkdown>
+            </details>
+          ) : (
+            <p>{task.result.summary}</p>
+          )}
           <p className="field-hint">
             Acceptance checks below are reported by the model. Command receipts and independent
             review provide additional evidence.

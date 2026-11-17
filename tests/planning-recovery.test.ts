@@ -284,3 +284,74 @@ test('automatic format correction controls allow zero or two repairs without hid
     }
   }
 });
+
+test('a text-only planner corrects unsupported execution into preparation and a pre-execution review (HTTP fixture)', async () => {
+  const h = fixture((input, call) => {
+    assert.equal(input.availableTaskCapabilities.commands, false);
+    assert.equal(input.availableTaskCapabilities.externalActions, false);
+    assert.match(input.evidenceBoundary.reviewScope, /actual supplied/);
+    if (call === 1) {
+      const bad = plan();
+      bad.tasks[0].workType = 'implementation';
+      bad.tasks[0].acceptanceCriteria[0].evidence = 'artifact';
+      return bad;
+    }
+    assert.match(input.planningCorrection.issues.join(' '), /requires project execution tools/);
+    const corrected = plan(2);
+    corrected.tasks[0].title = 'Prepare the bounded experiment proposal';
+    corrected.tasks[1].title = 'Review the proposal before execution';
+    corrected.tasks[1].workType = 'review';
+    return corrected;
+  });
+  try {
+    const project = await h.create();
+    await until(() => project.planningStatus === 'ready' || project.planningStatus === 'failed');
+    assert.equal(project.planningStatus, 'ready', project.planningError);
+    assert.equal(h.requests.length, 2);
+    const tasks = h.store.state.tasks.filter((t) => t.projectId === project.id);
+    assert.deepEqual(
+      tasks.map((t) => t.workType),
+      ['plan', 'review'],
+    );
+    assert.ok(tasks.every((t) => t.acceptanceCriteria!.every((c) => c.evidence === 'report')));
+  } finally {
+    await h.close();
+  }
+});
+
+test('supplied-result analysis remains valid while tool evidence requires an explicit executor', () => {
+  const supplied = plan();
+  supplied.tasks[0].title = 'Review the supplied experiment report';
+  supplied.tasks[0].workType = 'review';
+  supplied.tasks[0].description =
+    'Review the user-supplied counts and recorded revenue; distinguish reports from independent verification.';
+  assert.deepEqual(
+    validatePlan(JSON.stringify(supplied), { provider: 'compatible' }, agents, 30).issues,
+    [],
+  );
+  const implementation = plan();
+  implementation.tasks[0].workType = 'implementation';
+  implementation.tasks[0].acceptanceCriteria[0].evidence = 'artifact';
+  assert.match(
+    validatePlan(
+      JSON.stringify(implementation),
+      { provider: 'compatible', workMode: 'workspace' },
+      agents,
+      30,
+    ).issues.join(' '),
+    /requires project execution tools/,
+  );
+  assert.deepEqual(
+    validatePlan(
+      JSON.stringify(implementation),
+      {
+        provider: 'compatible',
+        workMode: 'workspace',
+        executor: { provider: 'codex', model: 'fixture-no-inference' },
+      },
+      agents,
+      30,
+    ).issues,
+    [],
+  );
+});

@@ -4,6 +4,7 @@ import type { Agent, Project } from '../shared/types.js';
 import { acceptanceListSchema } from '../shared/verification.js';
 import { INPUT_LIMITS } from '../shared/limits.js';
 import { deliveryPlanIssues } from './delivery-plan.js';
+import { taskCapabilities } from '../shared/capabilities.js';
 
 // Keep legacy optional metadata readable; newly generated plans request the full contract.
 export const planSchema = z.object({
@@ -54,7 +55,8 @@ export function planOutputSchema(team: Agent[], maxTasks: number) {
 
 export function validatePlan(
   output: string,
-  project: Pick<Project, 'deliveryMode'>,
+  project: Pick<Project, 'deliveryMode'> &
+    Partial<Pick<Project, 'provider' | 'workflow' | 'workMode' | 'executor' | 'researchEnabled'>>,
   team: Agent[],
   maxTasks: number,
 ): { tasks: PlannedTask[]; issues: string[]; normalizations: string[] } {
@@ -134,6 +136,20 @@ export function validatePlan(
       issues.push(
         `Task ${index + 1} · dependencies: invalid or circular dependency. Use only zero-based indexes of earlier tasks${index ? ` (0–${index - 1})` : '; the first task must use []'}.`,
       );
+    if (project.provider) {
+      const capabilities = taskCapabilities({ ...project, provider: project.provider });
+      if (!capabilities.commands && ['implementation', 'tests'].includes(task.workType || ''))
+        issues.push(
+          `Task ${index + 1} · workType: ${task.workType} requires project execution tools. This connection can produce supplied-material analysis or a proposed artifact, not executed implementation/tests. Configure an explicit Codex workspace executor or plan a useful preparation milestone; preserve the capability gap.`,
+        );
+      if (
+        !capabilities.fileInspection &&
+        task.acceptanceCriteria?.some((criterion) => criterion.evidence !== 'report')
+      )
+        issues.push(
+          `Task ${index + 1} · acceptanceCriteria: file changes, executed verification and file inspection require project tools. Text-only work must use report evidence and must not claim external execution.`,
+        );
+    }
   }
   if (!issues.length) issues.push(...deliveryPlanIssues(project, parsed.data.tasks));
   return { tasks: parsed.data.tasks, issues: issues.slice(0, 8), normalizations };

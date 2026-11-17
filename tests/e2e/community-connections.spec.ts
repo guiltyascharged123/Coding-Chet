@@ -14,6 +14,7 @@ test('AI Horde is visible before setup, preserves existing settings until saved 
   data = {
     ...data,
     revision: (data.revision || 0) + 1000,
+    state: { ...data.state, provider: 'ollama' },
     runtime: { ...data.runtime, compatibleCommunity: false },
   };
   const saves: any[] = [],

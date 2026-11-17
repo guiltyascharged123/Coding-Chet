@@ -61,3 +61,35 @@ Record accepted deliverables, unsupported claims, unnecessary interruptions, cor
 Conversations, ideas and usage also have paginated history; the previous 100/500 storage caps no longer stop a workspace. Plan revisions are retained for inspection/download. Usage totals query the full ledger even when the browser shows one page. See [the audit repair guide](AUDIT-REPAIRS.md) for migration, stale edits and active-direction handling.
 
 See [Model activity, limits and planning recovery](LIMITS-AND-MODEL-ACTIVITY.md) for visible request stages, the long-title repair, editable retrieval/correction/context settings, field-level diagnostics and removal of arbitrary record-count stops.
+
+## Missing results versus a failed model request
+
+A model can return a valid **blocked** report when required evidence is absent.
+That is different from an unavailable provider, invalid response or failed tool
+command. Task details now show **Work blocked · requirements not yet met**, keep
+the full findings and unmet acceptance checks, and offer **Add evidence in project
+conversation** and **Edit project plan**. A later connection failure is shown as a
+failure even if an older blocked report remains saved. Blocked work is never
+promoted to completed work by these display changes.
+
+An execution plan, forecast or proposed price does not establish that publishing,
+outreach, sales or an experiment happened. AI Horde and Ollama text connections
+can prepare useful assets and critique an experiment before execution; they do not
+provide publishing, payment or analytics tools. Codex file/command tools likewise
+do not automatically grant external-service access or authority.
+
+Generated plans receive the configured task capabilities and a boundary between
+current evidence and future external outcomes. Validation rejects implementation,
+executed testing or file-evidence requirements without a configured workspace
+executor. Text review of supplied experiment reports remains allowed. Planner
+instructions request a useful preparation milestone and pre-execution review when
+an external test cannot currently run; these instructions do not prove every
+model-generated plan semantically correct.
+
+If an experiment actually ran, record its observations, source and date in the
+project conversation before retrying. Saving a direction without requesting a
+coordinator reply makes no model call and leaves the original blocked assignment
+and outputs intact. If it has not run, explicitly edit the assignment to review
+the proposal before execution, or retain the results review until evidence exists.
+Retry alone does not execute the experiment, manufacture measurements or achieve
+the original external goal. Existing projects are not automatically rewritten.

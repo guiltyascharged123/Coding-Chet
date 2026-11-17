@@ -56,6 +56,7 @@ import type {
 } from '../shared/types';
 import { STATUS_LABELS } from '../shared/types';
 import { providerLabel } from '../shared/connections';
+import { isReportedBlocker } from '../shared/task-blocker';
 import { api, ApiError, download, getState, relativeTime } from './api';
 import Modal from './components/Modal';
 import Avatar from './components/Avatar';
@@ -1317,7 +1318,11 @@ export default function App() {
                                 </span>
                               )}
                               {task.status === 'failed' && (
-                                <span className="failed-label">Task failed · retry available</span>
+                                <span className="failed-label">
+                                  {isReportedBlocker(task)
+                                    ? 'Blocked · requirements unmet'
+                                    : 'Task failed · retry available'}
+                                </span>
                               )}
                               <div className="task-card-footer">
                                 <Avatar color={agent.color} size={25} />
@@ -1662,7 +1667,7 @@ export default function App() {
         <Modal
           wide
           title={selectedTask.title}
-          subtitle={`${state.agents.find((a) => a.id === selectedTask.agentId)?.name} · ${taskLabels[selectedTask.status]}`}
+          subtitle={`${state.agents.find((a) => a.id === selectedTask.agentId)?.name} · ${isReportedBlocker(selectedTask) ? 'Blocked' : taskLabels[selectedTask.status]}`}
           onClose={() => setTaskId(undefined)}
         >
           <div className="task-detail">
@@ -1697,9 +1702,59 @@ export default function App() {
               </details>
             )}
             {selectedTask.error && (
-              <div className="task-error">
-                <strong>The task couldn’t finish</strong>
-                <p>{selectedTask.error}</p>
+              <div
+                className="task-error"
+                aria-label={isReportedBlocker(selectedTask) ? 'Blocked task' : 'Task failure'}
+              >
+                <strong>
+                  {isReportedBlocker(selectedTask)
+                    ? 'Work blocked · requirements not yet met'
+                    : 'The task couldn’t finish'}
+                </strong>
+                {isReportedBlocker(selectedTask) ? (
+                  <>
+                    <p>
+                      The specialist returned a blocker. The findings and unmet checks are saved;
+                      this is not completed work. Add the missing evidence or revise the assignment
+                      before retrying. A written experiment plan does not establish that the
+                      experiment ran.
+                    </p>
+                    <details>
+                      <summary>Reported blocker summary</summary>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {selectedTask.error}
+                      </ReactMarkdown>
+                    </details>
+                    <div className="provider-actions">
+                      <button
+                        className="button secondary"
+                        disabled={busy}
+                        onClick={() => {
+                          setProjectId(selectedTask.projectId);
+                          setTaskId(undefined);
+                          setView('conversation');
+                        }}
+                      >
+                        Add evidence in project conversation
+                      </button>
+                      {!selectedTask.conversationMessageId && (
+                        <button
+                          className="button secondary"
+                          disabled={busy}
+                          onClick={() => {
+                            setProjectId(selectedTask.projectId);
+                            setTaskId(undefined);
+                            setModal('plan');
+                          }}
+                        >
+                          Edit project plan
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p>{selectedTask.error}</p>
+                )}
                 {selectedTask.recovery?.hasResponse && (
                   <button
                     className="button secondary"
@@ -1741,6 +1796,12 @@ export default function App() {
                   <RefreshCw size={15} />
                   Retry task
                 </button>
+                {isReportedBlocker(selectedTask) && (
+                  <p className="field-hint">
+                    Retry sends a new model request. It does not run an external experiment or
+                    create missing measurements.
+                  </p>
+                )}
               </div>
             )}
             {selectedTask.output ? (
@@ -1752,7 +1813,7 @@ export default function App() {
                   </span>
                   <DocumentActions
                     title={selectedTask.title}
-                    content={`> Workflow status: ${taskLabels[selectedTask.status]}\n\n${selectedTask.output}`}
+                    content={`> Workflow status: ${isReportedBlocker(selectedTask) ? 'Blocked' : taskLabels[selectedTask.status]}\n\n${selectedTask.output}`}
                   />
                 </div>
                 <article className="markdown">

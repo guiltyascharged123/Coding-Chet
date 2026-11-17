@@ -261,6 +261,23 @@ const modelServer = createServer(async (req, res) => {
         },
       ],
     };
+    if (input.project.title === 'Unexecuted experiment fixture') {
+      result.outcome = 'blocked';
+      result.summary = 'Actual experiment measurements are missing.';
+      result.deliverable =
+        '## Missing evidence\n\nThe supplied **execution plan** is not an executed experiment. No pre-order count, actual revenue or engagement measurements were supplied. Do not infer zero sales or a successful test. Record real observations and their source before deciding whether to scale.';
+      result.checks = (input.task.acceptanceCriteria || []).map((c) => ({
+        criterion: `${c.id}: ${c.description}`,
+        status: 'unverified',
+        evidence: 'The provided source is an execution plan; observed outcome data is absent.',
+      }));
+      result.handoff = {
+        facts: [],
+        assumptions: ['Execution has not been verified.'],
+        next: 'Provide the observed results or explicitly review the proposal before execution.',
+      };
+      result.improvements = [];
+    }
     if (input.task.description?.includes('Propose up to three'))
       result.ideas = [
         {
