@@ -15,9 +15,12 @@ vary and anonymous jobs have low priority. Replies appear when complete rather
 than streaming token by token. Stopping closes the request; already queued
 work can still finish upstream.
 
-To use it for project specialists, choose **Model connections → Compatible →
-Use free AI Horde connection**, check availability, and deliberately select this
-connection for a new project or pause/change an existing one. This sends the
+To use it for project specialists, choose **Model connections → AI Horde · free community AI →
+Configure AI Horde → Save AI Horde connection**, check availability, and deliberately select this
+connection for a new project or pause/change an existing one. The AI Horde card
+is always visible, even before setup. Opening it only prefills the form; saving
+replaces the shared OpenAI-compatible server configuration for projects using
+that connection. Their model IDs remain saved. This sends the
 project context needed by those tasks to volunteers. It uses the artifact-first
 pipeline. Community billing is exempt from dollar estimates only for the exact
 allowlisted HTTPS endpoint; request, output and other workspace limits remain.

@@ -74,6 +74,7 @@ export default function RuntimeModal({
   serverConnected: boolean;
 }) {
   const [openSetup, setOpenSetup] = useState<string | undefined>(project?.provider);
+  const communityConfigured = !!data.runtime.compatibleCommunity;
   const blocked =
     !!data.connectionChange ||
     data.state.projects.some((p) => p.status === 'running' || p.planningStatus === 'planning') ||
@@ -135,6 +136,100 @@ export default function RuntimeModal({
         <p role="status">{message}</p>
       </div>
       <div className="runtime-options">
+        <article
+          className={`runtime-option ${communityConfigured && project?.provider === 'compatible' ? 'chosen' : ''}`}
+          aria-label="AI Horde connection"
+        >
+          <span className="provider-icon provider-compatible">
+            <Zap size={20} />
+          </span>
+          <div>
+            <strong>
+              AI Horde · free community AI{' '}
+              {communityConfigured && project?.provider === 'compatible' && (
+                <span className="tag">Selected for this project</span>
+              )}
+              {communityConfigured && data.state.provider === 'compatible' && (
+                <span className="tag">Default for new projects</span>
+              )}
+            </strong>
+            <p>Free anonymous volunteer inference. No account or personal API key required.</p>
+            <p>
+              Volunteer workers can see prompts. Use nonconfidential material; model availability
+              and queues vary.
+            </p>
+            {communityConfigured ? (
+              <>
+                <p className="provider-model">{data.runtime.models.compatible}</p>
+                <ConnectionStatus info={connectionInfo(data.runtime, 'compatible')} />
+                <small>{connectionInfo(data.runtime, 'compatible').message}</small>
+                {!!data.runtime.listedModels?.compatible?.length && (
+                  <details>
+                    <summary>
+                      Available community models ({data.runtime.listedModels.compatible.length})
+                    </summary>
+                    <ul>
+                      {data.runtime.listedModels.compatible.map((id) => (
+                        <li key={id}>
+                          <code>{id}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
+            ) : (
+              <small>Not configured. Open setup to prefill the AI Horde connection.</small>
+            )}
+            <div className="provider-actions">
+              <button
+                className="button secondary small"
+                onClick={() => setOpenSetup(openSetup === 'community' ? undefined : 'community')}
+              >
+                {openSetup === 'community' ? 'Close AI Horde setup' : 'Configure AI Horde'}
+              </button>
+              <button
+                className="button secondary small"
+                disabled={
+                  !communityConfigured ||
+                  !modelReadiness(data.runtime, 'compatible').ready ||
+                  saving ||
+                  data.state.provider === 'compatible'
+                }
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await onChange('compatible');
+                  } catch (e) {
+                    setMessage((e as Error).message);
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                {communityConfigured && data.state.provider === 'compatible'
+                  ? 'Selected default'
+                  : 'Use for new projects'}
+              </button>
+              <a
+                href="https://github.com/guiltyascharged123/Coding-Chet/blob/main/docs/FREE-COMMUNITY-MODELS.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                AI Horde guide ↗
+              </a>
+            </div>
+            {openSetup === 'community' && (
+              <ConnectionSetup
+                key="community"
+                provider="compatible"
+                preset="community"
+                onRefresh={onRefresh}
+                blocked={blocked}
+              />
+            )}
+          </div>
+        </article>
         {(['ollama', 'codex', 'openai', 'gemini', 'compatible', 'external'] as Provider[]).map(
           (provider) => {
             const ready = modelReadiness(data.runtime, provider).ready;
@@ -230,7 +325,7 @@ export default function RuntimeModal({
                         : 'Use for new projects'}
                     </button>
                     <a
-                      href={`https://github.com/guiltyascharged123/Coding-Chet/blob/workroom-starter/docs/LOCAL-MODELS.md#${provider}`}
+                      href={`https://github.com/guiltyascharged123/Coding-Chet/blob/main/docs/LOCAL-MODELS.md#${provider}`}
                       target="_blank"
                       rel="noreferrer"
                     >

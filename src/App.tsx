@@ -54,7 +54,8 @@ import type {
   TaskStatus,
   Meeting,
 } from '../shared/types';
-import { PROVIDER_LABELS, STATUS_LABELS } from '../shared/types';
+import { STATUS_LABELS } from '../shared/types';
+import { providerLabel } from '../shared/connections';
 import { api, ApiError, download, getState, relativeTime } from './api';
 import Modal from './components/Modal';
 import Avatar from './components/Avatar';
@@ -380,7 +381,7 @@ export default function App() {
           Connect your model, describe a goal, and review the task plan before running the team.
         </p>
         <p>
-          Current connection: {PROVIDER_LABELS[state.provider]}.{' '}
+          Current connection: {providerLabel(data.runtime, state.provider)}.{' '}
           {data.runtime.available[state.provider]
             ? 'Connection ready. Planning and tasks use this model.'
             : 'Setup needed. Open Model connections to see the connection error and setup guide.'}
@@ -490,7 +491,7 @@ export default function App() {
               <Zap size={17} />
             </span>
             <span>
-              <strong>{PROVIDER_LABELS[state.provider]}</strong>
+              <strong>{providerLabel(data.runtime, state.provider)}</strong>
               <small>
                 Default for new projects ·{' '}
                 {data.runtime.available[state.provider] ? 'Ready' : 'Setup needed'}
@@ -663,7 +664,7 @@ export default function App() {
                 CURRENT PROJECT <span>·</span>{' '}
                 {project.provider === 'demo'
                   ? 'DEMO SESSION'
-                  : PROVIDER_LABELS[project.provider].toUpperCase()}
+                  : providerLabel(data.runtime, project.provider).toUpperCase()}
               </div>
               <h2 aria-label={project.title}>
                 <button
@@ -688,7 +689,7 @@ export default function App() {
                 {project.model ||
                   (project.provider === 'demo'
                     ? 'Demo · no AI connected'
-                    : PROVIDER_LABELS[project.provider])}{' '}
+                    : providerLabel(data.runtime, project.provider))}{' '}
                 · Change
               </button>
               {project.executor && (

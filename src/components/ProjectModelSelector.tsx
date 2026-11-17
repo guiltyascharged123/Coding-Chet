@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import type { Bootstrap, Project, Provider } from '../../shared/types';
 import { PROVIDER_LABELS } from '../../shared/types';
+import { providerLabel } from '../../shared/connections';
 import { api } from '../api';
 import { hasProjectTools } from '../../shared/capabilities';
 import { modelReadiness } from '../../shared/model-readiness';
@@ -77,7 +78,7 @@ export default function ProjectModelSelector({
     <section className="project-model-selector" aria-label="Selected project model">
       <h2>Model used by {project.title}</h2>
       <p className="selected-project-model">
-        <strong>Selected: {PROVIDER_LABELS[project.provider]}</strong>
+        <strong>Selected: {providerLabel(data.runtime, project.provider)}</strong>
         <code>
           {project.model ||
             (project.provider === 'external' ? 'Worker-managed model' : 'No model ID')}
@@ -128,13 +129,13 @@ export default function ProjectModelSelector({
           >
             {Object.entries(PROVIDER_LABELS)
               .filter(([id]) => id !== 'demo' || project.provider === 'demo')
-              .map(([id, label]) => (
+              .map(([id]) => (
                 <option
                   key={id}
                   value={id}
                   disabled={project.workflow === 'software' && id !== 'codex'}
                 >
-                  {label}
+                  {providerLabel(data.runtime, id as Provider)}
                 </option>
               ))}
           </select>

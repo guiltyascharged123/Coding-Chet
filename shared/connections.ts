@@ -1,5 +1,12 @@
 import type { ConnectionInfo, Provider, RuntimeInfo } from './types.js';
 import { modelReadiness } from './model-readiness.js';
+import { PROVIDER_LABELS } from './types.js';
+
+export function providerLabel(runtime: RuntimeInfo, provider: Provider) {
+  return provider === 'compatible' && runtime.compatibleCommunity
+    ? 'AI Horde · free community AI'
+    : PROVIDER_LABELS[provider];
+}
 
 export function connectionInfo(
   runtime: RuntimeInfo,

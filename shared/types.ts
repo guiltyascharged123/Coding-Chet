@@ -247,6 +247,7 @@ export interface ConnectionInfo {
   model?: string;
 }
 export interface RuntimeInfo {
+  compatibleCommunity?: boolean;
   connections?: Partial<Record<Provider, ConnectionInfo>>;
   modelConnections?: Partial<Record<'openai' | 'gemini', Record<string, ConnectionInfo>>>;
   codex?: { enabled: boolean; code: string; checkedAt?: number };

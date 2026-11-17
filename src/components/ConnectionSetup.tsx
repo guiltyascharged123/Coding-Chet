@@ -24,12 +24,15 @@ export default function ConnectionSetup({
   onRefresh,
   blocked,
   projectModel,
+  preset,
 }: {
   provider: Exclude<Provider, 'demo' | 'external'>;
   onRefresh: (data: Bootstrap) => void;
   blocked: boolean;
   projectModel?: string;
+  preset?: 'community';
 }) {
+  const communityPreset = provider === 'compatible' && preset === 'community';
   const [settings, setSettings] = useState<Settings>();
   const [model, setModel] = useState(''),
     [url, setUrl] = useState('');
@@ -48,10 +51,16 @@ export default function ConnectionSetup({
     try {
       const value = await api<Settings>('/connections/settings', undefined, 'GET');
       setSettings(value);
-      setModel(value[provider].model || (provider === 'codex' ? projectModel || '' : ''));
-      if (provider === 'ollama' || provider === 'compatible') setUrl(value[provider].url);
+      setModel(
+        communityPreset
+          ? (value.compatible.billing === 'community' && value.compatible.model) ||
+              COMMUNITY_EXAMPLE_MODEL
+          : value[provider].model || (provider === 'codex' ? projectModel || '' : ''),
+      );
+      if (provider === 'ollama' || provider === 'compatible')
+        setUrl(communityPreset ? COMMUNITY_API_URL : value[provider].url);
       setEnabled(value.codex.enabled);
-      setBilling(value.compatible.billing);
+      setBilling(communityPreset ? 'community' : value.compatible.billing);
       setKey('');
       setClearKey(false);
       setError('');
@@ -106,6 +115,13 @@ export default function ConnectionSetup({
       {!settings && !error && <p role="status">Loading saved settings…</p>}
       {settings && (
         <form onSubmit={submit}>
+          {communityPreset && (
+            <p className="field-hint">
+              AI Horde is prefilled below. Saving replaces the OpenAI-compatible connection for
+              projects using it; their model IDs remain saved. Volunteer workers can see prompts.
+              Save first, then check connections and choose an available model.
+            </p>
+          )}
           {provider === 'codex' && (
             <label className="checkbox-label">
               <input
@@ -127,7 +143,7 @@ export default function ConnectionSetup({
             />
           </label>
           <p className="field-hint">Saved projects keep their own model.</p>
-          {(provider === 'ollama' || provider === 'compatible') && (
+          {(provider === 'ollama' || (provider === 'compatible' && !communityPreset)) && (
             <label>
               Server URL
               <input
@@ -174,7 +190,7 @@ export default function ConnectionSetup({
                 )}
               </>
             )}
-          {provider === 'compatible' && (
+          {provider === 'compatible' && !communityPreset && (
             <label>
               Billing mode
               <select
@@ -187,7 +203,7 @@ export default function ConnectionSetup({
               </select>
             </label>
           )}
-          {provider === 'compatible' && (
+          {provider === 'compatible' && !communityPreset && (
             <div className="control-section">
               <button
                 type="button"
@@ -226,7 +242,7 @@ export default function ConnectionSetup({
             </p>
           )}
           <button className="button secondary small" disabled={busy || blocked}>
-            Save connection
+            {communityPreset ? 'Save AI Horde connection' : 'Save connection'}
           </button>
         </form>
       )}
@@ -280,7 +296,7 @@ export default function ConnectionSetup({
           <p>Choosing an ID does not download weights or change an existing project's model.</p>
         </details>
       )}
-      {provider === 'compatible' && (
+      {provider === 'compatible' && !communityPreset && (
         <details className="local-model-help" aria-label="Other local model server instructions">
           <summary>LM Studio or llama.cpp setup</summary>
           <p>

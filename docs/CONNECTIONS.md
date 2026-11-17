@@ -11,6 +11,18 @@ Start Workroom with `npm run local`, then open **Models & sign-in** at the top o
 
 The Workroom server being online is separate from model access. None of these checks prove remaining subscription allowance, API quota or output quality. Click **Check connections** after starting a local service or completing sign-in. Opening the page also refreshes readiness without generating work.
 
+## Free AI Horde connection
+
+The **AI Horde · free community AI** card is always visible on Model connections.
+Choose **Configure AI Horde → Save AI Horde connection**, then **Check connections**.
+No personal API key is required. Opening setup only prefills the form; saving
+replaces the shared OpenAI-compatible server configuration for projects using it.
+Choose **Use for new projects** separately, or change an existing project's
+connection and exact model in its Selected panel. Once configured, those selectors
+identify the connection as AI Horde. Use the card's available-model list if the
+example model is unavailable. Volunteer workers can see prompts; use
+nonconfidential material. See [the community guide](FREE-COMMUNITY-MODELS.md).
+
 ## ChatGPT / Codex on the same Ubuntu computer
 
 If a saved project says Codex is disabled, its project records are still there. The project remembers its selected model, but the running Workroom server also needs Codex enabled. Signing into ChatGPT in Chrome alone does not sign the Codex CLI in.

@@ -10,6 +10,8 @@ import {
 } from '../shared/community.js';
 import { compatibleKey } from '../server/community-provider.js';
 import { billingFor } from '../server/policy.js';
+import { runtimeInfo } from '../server/providers.js';
+import { providerLabel } from '../shared/connections.js';
 
 test('community billing is restricted to the official endpoint and never forwards a private key', () => {
   const names = ['COMPATIBLE_BILLING', 'COMPATIBLE_API_URL', 'COMPATIBLE_API_KEY'];
@@ -26,14 +28,19 @@ test('community billing is restricted to the official endpoint and never forward
     ]) {
       assert.equal(isCommunityEndpoint(endpoint), false);
       process.env.COMPATIBLE_API_URL = endpoint;
+      assert.equal(runtimeInfo().compatibleCommunity, false);
       assert.throws(() => billingFor('compatible'), /exact AI Horde/);
       assert.throws(() => compatibleKey());
     }
     process.env.COMPATIBLE_API_URL = COMMUNITY_API_URL;
     assert.equal(billingFor('compatible'), 'none');
+    assert.equal(runtimeInfo().compatibleCommunity, true);
+    assert.equal(providerLabel(runtimeInfo(), 'compatible'), 'AI Horde · free community AI');
     assert.equal(compatibleKey(), COMMUNITY_ANONYMOUS_KEY);
     process.env.COMPATIBLE_BILLING = 'api';
     assert.equal(billingFor('compatible'), 'api');
+    assert.equal(runtimeInfo().compatibleCommunity, false);
+    assert.equal(providerLabel(runtimeInfo(), 'compatible'), 'OpenAI-compatible model');
   } finally {
     names.forEach((name, index) => {
       if (previous[index] === undefined) delete process.env[name];

@@ -14,6 +14,7 @@ import {
 } from './local-artifact.js';
 import { calculate } from './calculator.js';
 import { communityConnection, compatibleKey } from './community-provider.js';
+import { isCommunityEndpoint } from '../shared/community.js';
 import { z } from 'zod';
 import { QUALITY_STANDARD } from '../shared/quality.js';
 import { agentContext } from '../shared/agent-context.js';
@@ -66,6 +67,9 @@ export function runtimeInfo(projects: Pick<Project, 'provider' | 'model'>[] = []
   const openaiModel = process.env.OPENAI_MODEL || 'gpt-4.1-mini',
     geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   return {
+    compatibleCommunity:
+      process.env.COMPATIBLE_BILLING === 'community' &&
+      isCommunityEndpoint(process.env.COMPATIBLE_API_URL || ''),
     modelConnections: Object.fromEntries(
       (['openai', 'gemini'] as const).map((provider) => [
         provider,
