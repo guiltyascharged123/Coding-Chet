@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import type { Bootstrap, Project, Provider } from '../../shared/types';
 import { PROVIDER_LABELS } from '../../shared/types';
 import { providerLabel } from '../../shared/connections';
-import { api } from '../api';
+import { api, getState } from '../api';
 import { hasProjectTools } from '../../shared/capabilities';
 import { modelReadiness } from '../../shared/model-readiness';
 
@@ -65,8 +65,7 @@ export default function ProjectModelSelector({
         expectedRevision: revision,
       });
       setRevision(saved.revision);
-      const response = await fetch('/api/state');
-      if (response.ok) onRefresh?.(await response.json());
+      onRefresh?.(await getState());
       setMessage('Project model saved. Upcoming assignments will use this selection.');
     } catch (error) {
       setMessage((error as Error).message);
@@ -236,8 +235,7 @@ export default function ProjectModelSelector({
                   setMessage('');
                   try {
                     await api(`/projects/${project.id}/pause`);
-                    const response = await fetch('/api/state');
-                    if (response.ok) onRefresh?.(await response.json());
+                    onRefresh?.(await getState());
                     setMessage(
                       'Pause requested. Allow any stopping worker to finish before saving a new model.',
                     );

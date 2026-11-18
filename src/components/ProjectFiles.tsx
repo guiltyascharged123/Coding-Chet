@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Project } from '../../shared/types';
-import { api, saveBlob } from '../api';
+import { api, apiResponse, saveBlob } from '../api';
 
 export default function ProjectFiles({
   project,
@@ -36,11 +36,9 @@ export default function ProjectFiles({
     setSelected(path);
     setContent('Loading…');
     try {
-      const response = await fetch(
-        `/api/projects/${project.id}/file?path=${encodeURIComponent(path)}`,
+      const response = await apiResponse(
+        `/projects/${project.id}/file?path=${encodeURIComponent(path)}`,
       );
-      if (!response.ok)
-        throw new Error('This file cannot be previewed. Use the local project folder.');
       const text = await response.text();
       if (request !== previewRequest.current) return;
       setContent(
@@ -53,11 +51,7 @@ export default function ProjectFiles({
   }
   async function exportSource() {
     try {
-      const response = await fetch(`/api/projects/${project.id}/source.zip`);
-      if (!response.ok) {
-        const body = await response.json();
-        throw new Error(body.error || 'Source download failed.');
-      }
+      const response = await apiResponse(`/projects/${project.id}/source.zip`);
       saveBlob(`${project.workspaceFolder || 'project'}-source.zip`, await response.blob());
     } catch (e) {
       setError((e as Error).message);

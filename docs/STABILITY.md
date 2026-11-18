@@ -93,3 +93,24 @@ and outputs intact. If it has not run, explicitly edit the assignment to review
 the proposal before execution, or retain the results review until evidence exists.
 Retry alone does not execute the experiment, manufacture measurements or achieve
 the original external goal. Existing projects are not automatically rewritten.
+
+## Backup export after a browser session expires
+
+Backup export previously used a direct fetch that did not renew an expired browser
+session. Fresh-session browser tests passed while a long-open workspace could fail
+with only “Backup export failed.” JSON requests, file previews, source ZIPs and
+streamed replies now share the session-aware transport. It renews the session once
+only after an explicit authentication rejection; other failures are not retried.
+
+Export shows the server's error, rejects invalid JSON or non-backup responses, and
+starts a download only for a successful Workroom backup. The server builds and
+validates the backup before adding attachment headers. The restore file picker
+uses the same 25 MiB byte limit as the server. Download initiation is reported as
+started; the app cannot confirm that a browser saved a file to disk.
+
+Regression coverage downloads a populated backup after cookie/session loss,
+validates its JSON, restores that exact file, and compares Unicode blocked reports
+and saved model replies. It also checks a valid JSON file between 25 MB and 25 MiB,
+server/proxy errors, invalid success responses, recovery after an export failure,
+and real source-file preview/ZIP downloads after session loss. These tests use
+local HTTP/model fixtures and do not claim live-model or external campaign results.

@@ -1,5 +1,5 @@
 import LimitsReference from './LimitsReference';
-import { POLICY_FIELDS } from '../../shared/limits';
+import { POLICY_FIELDS, RESOURCE_LIMITS } from '../../shared/limits';
 import UsageHistory from './UsageHistory';
 import { useState, type FormEvent } from 'react';
 import type { Bootstrap, CostPolicy, Project } from '../../shared/types';
@@ -68,11 +68,22 @@ export default function WorkspaceControls({
     }
   }
   async function exportBackup() {
-    const response = await fetch('/api/backup');
-    if (!response.ok) throw new Error('Backup export failed.');
+    const backup = await api<{
+      format: string;
+      version: number;
+      state: unknown;
+      attempts: unknown[];
+    }>('/backup', undefined, 'GET');
+    if (
+      backup?.format !== 'workroom' ||
+      backup.version !== 2 ||
+      !backup.state ||
+      !Array.isArray(backup.attempts)
+    )
+      throw new Error('The server did not return a Workroom backup. No file was downloaded.');
     saveBlob(
       `workroom-backup-${new Date().toISOString().slice(0, 10)}.json`,
-      await response.blob(),
+      new Blob([JSON.stringify(backup)], { type: 'application/json;charset=utf-8' }),
     );
   }
   const fields = POLICY_FIELDS;
@@ -374,7 +385,9 @@ export default function WorkspaceControls({
             <button
               className="button primary"
               disabled={busy}
-              onClick={() => act(exportBackup, 'Portable backup downloaded.')}
+              onClick={() =>
+                act(exportBackup, 'Backup download started. Check your browser’s downloads.')
+              }
             >
               Download workspace backup
             </button>
@@ -393,8 +406,10 @@ export default function WorkspaceControls({
                 setConfirmed(false);
                 const file = e.target.files?.[0];
                 if (!file) return;
-                if (file.size > 25000000) {
-                  setMessage('Backup is larger than 25 MB.');
+                if (file.size > RESOURCE_LIMITS.restoreBytes) {
+                  setMessage(
+                    `Backup exceeds the ${RESOURCE_LIMITS.restoreBytes.toLocaleString()}-byte restore limit.`,
+                  );
                   return;
                 }
                 try {

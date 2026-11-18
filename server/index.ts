@@ -635,8 +635,9 @@ app.post(
 app.get(
   '/api/backup',
   route((_req, res) => {
+    const backup = store.backup();
     res.setHeader('Content-Disposition', 'attachment; filename="workroom-backup.json"');
-    res.json(store.backup());
+    res.json(backup);
   }),
 );
 app.post(

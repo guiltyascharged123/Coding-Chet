@@ -469,6 +469,7 @@ test('failed AI planning remains visible after reload and retries the saved proj
 test('software projects expose actual source files and ZIPs, project roles, and a saved network choice', async ({
   page,
   request,
+  context,
 }) => {
   await request.post('/api/runtime', { data: { provider: 'demo' } });
   const created = await request.post('/api/projects', {
@@ -492,8 +493,10 @@ test('software projects expose actual source files and ZIPs, project roles, and 
   await page.getByLabel('Allow tool network for this project', { exact: false }).check();
   await page.getByRole('button', { name: 'Save plan', exact: true }).click();
   await page.getByRole('button', { name: /^Outputs/ }).click();
+  await context.clearCookies();
   await page.getByRole('button', { name: /index.js/ }).click();
   await expect(page.locator('.file-preview')).toContainText('export const actualSource = true;');
+  await context.clearCookies();
   const pending = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download source ZIP', exact: true }).click();
   const download = await pending;
