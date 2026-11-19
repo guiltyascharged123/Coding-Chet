@@ -28,6 +28,7 @@ async function fixture() {
     path = join(root, 'workspace.sqlite');
   let store = new Store(path),
     engine = new Engine(store);
+  store.state.policy!.unlimitedWorkflow = false;
   const project = await engine.createProject(
     'Artifact recovery',
     'A = $20 and B = $35. Compare the supplied prices only.',

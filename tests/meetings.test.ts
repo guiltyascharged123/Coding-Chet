@@ -29,6 +29,7 @@ test('meeting contributions survive failure and retry; usage is counted and comp
     store.state.provider = 'openai';
     store.state.policy = {
       ...structuredClone(defaultPolicy),
+      unlimitedWorkflow: false,
       allowPaid: true,
       rates: { openai: { model: 'gpt-4.1-mini', inputPerMillion: 0, outputPerMillion: 0 } },
     };
@@ -246,6 +247,7 @@ test('meeting request limits stop a discussion without inventing missing contrib
     store.state.provider = 'openai';
     store.state.policy = {
       ...structuredClone(defaultPolicy),
+      unlimitedWorkflow: false,
       maxRequests24h: 1,
       allowPaid: true,
       rates: { openai: { model: 'gpt-4.1-mini', inputPerMillion: 0, outputPerMillion: 0 } },

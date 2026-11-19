@@ -569,7 +569,9 @@ test('review feedback and memory drafts survive rejection, settings navigation a
     })
   ).json();
   const current = await (await request.get('/api/state')).json();
-  await request.post('/api/policy', { data: { ...current.state.policy, maxRevisions: 0 } });
+  await request.post('/api/policy', {
+    data: { ...current.state.policy, unlimitedWorkflow: false, maxRevisions: 0 },
+  });
   await request.post(`/api/projects/${project.id}/run`);
   await page.goto('/');
   await page.evaluate((id) => localStorage.setItem('workroom-project', id), project.id);

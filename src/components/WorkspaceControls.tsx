@@ -164,6 +164,16 @@ export default function WorkspaceControls({
                 Enable separately billed API requests
               </label>
               <div className="controls-grid">
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    aria-label="Unlimited workflow"
+                    checked={draft.unlimitedWorkflow ?? true}
+                    onChange={(e) => setDraft({ ...draft, unlimitedWorkflow: e.target.checked })}
+                  />
+                  Unlimited workflow: no task, revision or model-request count ceilings. API money
+                  budgets still apply.
+                </label>
                 {fields.map(([name, label, min, max, why]) => (
                   <label key={name}>
                     {label}
@@ -171,13 +181,20 @@ export default function WorkspaceControls({
                       aria-label={label}
                       min={min}
                       max={max}
-                      step={name.endsWith('Usd') ? '0.01' : '1'}
+                      step={name.endsWith('Usd') || name === 'toolCpus' ? '0.01' : '1'}
                       value={draft[name] as number}
+                      disabled={
+                        (draft.unlimitedWorkflow ?? true) &&
+                        ['maxTasks', 'maxRevisions', 'maxRequests24h'].includes(name)
+                      }
                       required
                       onValue={(value) => setDraft({ ...draft, [name]: value })}
                     />
                     <small className="field-hint">
-                      Allowed range: {min}–{max}. {why}
+                      {max === undefined
+                        ? `Minimum: ${min}; no application maximum. `
+                        : `Allowed range: ${min}–${max}. `}
+                      {why}
                     </small>
                   </label>
                 ))}

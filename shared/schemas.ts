@@ -15,6 +15,13 @@ export const providers = [
 ] as const;
 export const providerSchema = z.enum(providers);
 export const defaultPolicy = {
+  unlimitedWorkflow: true,
+  maxToolActions: 0,
+  toolTimeoutSeconds: 0,
+  toolMemoryMb: 512,
+  toolCpus: 1,
+  toolProcesses: 128,
+  toolTempMb: 64,
   allowPaid: false,
   maxConcurrent: 1,
   maxTasks: 30,
@@ -35,18 +42,25 @@ const rate = z.object({
   outputPerMillion: z.number().finite().min(0).max(1000),
 });
 export const policySchema = z.object({
+  unlimitedWorkflow: z.boolean().default(true),
+  maxToolActions: z.number().int().nonnegative().default(0),
+  toolTimeoutSeconds: z.number().int().nonnegative().default(0),
+  toolMemoryMb: z.number().int().min(1).default(512),
+  toolCpus: z.number().finite().min(0.01).default(1),
+  toolProcesses: z.number().int().min(1).default(128),
+  toolTempMb: z.number().int().min(1).default(64),
   allowPaid: z.boolean(),
-  maxConcurrent: z.number().int().min(1).max(4),
-  maxTasks: z.number().int().min(1).max(100),
-  maxRevisions: z.number().int().min(0).max(20),
-  maxFormatCorrections: z.number().int().min(0).max(2).default(1),
-  maxRetrievalRounds: z.number().int().min(0).max(8).default(2),
-  localContextTokens: z.number().int().min(8192).max(131072).default(32768),
-  maxRequests24h: z.number().int().min(1).max(10000),
-  maxInputBytes: z.number().int().min(2000).max(200000),
-  maxOutputTokens: z.number().int().min(256).max(16000),
-  dailyBudgetUsd: z.number().finite().min(0).max(1000),
-  projectBudgetUsd: z.number().finite().min(0).max(1000),
+  maxConcurrent: z.number().int().min(1),
+  maxTasks: z.number().int().min(1),
+  maxRevisions: z.number().int().min(0),
+  maxFormatCorrections: z.number().int().min(0).default(1),
+  maxRetrievalRounds: z.number().int().min(0).default(2),
+  localContextTokens: z.number().int().min(8192).default(32768),
+  maxRequests24h: z.number().int().min(1),
+  maxInputBytes: z.number().int().min(2000),
+  maxOutputTokens: z.number().int().min(256),
+  dailyBudgetUsd: z.number().finite().min(0),
+  projectBudgetUsd: z.number().finite().min(0),
   rates: z.object({
     openai: rate.optional(),
     gemini: rate.optional(),
@@ -262,7 +276,7 @@ export const stateSchema = z
           .optional(),
         workspaceFolder: text.regex(/^[a-z0-9-]{1,160}$/).optional(),
         toolNetwork: z.boolean().optional(),
-        workMode: z.enum(['text', 'workspace']).optional(),
+        workMode: z.enum(['text', 'workspace', 'container']).optional(),
       }),
     ),
     tasks: z.array(
@@ -272,7 +286,7 @@ export const stateSchema = z
         title: text.min(1).max(INPUT_LIMITS.taskTitle),
         description: text.max(INPUT_LIMITS.taskDescription),
         agentId: id,
-        dependencies: z.array(id).max(100),
+        dependencies: z.array(id),
         status: z.enum(['queued', 'working', 'review', 'done', 'failed']),
         requiresApproval: z.boolean(),
         conversationMessageId: id.optional(),
@@ -314,7 +328,19 @@ export const stateSchema = z
         readOnly: z.boolean().optional(),
         workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
         acceptanceCriteria: acceptanceListSchema.optional(),
-        observations: z.array(observationSchema).max(100).optional(),
+        observations: z.array(observationSchema).optional(),
+        sandboxJournal: z
+          .array(
+            z.object({
+              id: text.min(1).max(80),
+              action: z.enum(['run', 'read', 'write']),
+              reference: text.max(4000),
+              status: z.enum(['started', 'completed', 'failed']),
+              output: text.max(16000),
+              exitCode: z.number().int().optional(),
+            }),
+          )
+          .optional(),
         result: workResultSchema.optional(),
         localArtifact: z
           .object({
@@ -404,6 +430,13 @@ export const stateSchema = z
         fail('Invalid meeting references.');
     }
     for (const p of s.projects) {
+      if (
+        p.workMode === 'container' &&
+        (['demo', 'external', 'codex'].includes(p.provider) || p.executor || p.toolNetwork)
+      )
+        fail(
+          'Isolated Linux execution needs a direct text model, no separate executor, and offline tools.',
+        );
       if (
         p.executor &&
         (p.workMode !== 'workspace' || ['demo', 'external', 'codex'].includes(p.provider))
@@ -521,32 +554,30 @@ export const backupSchema = z.object({
         projectId: id,
         revision: z.number().int().nonnegative(),
         createdAt: z.number().finite(),
-        tasks: z
-          .array(
-            z.object({
-              id,
-              title: text.min(1).max(INPUT_LIMITS.taskTitle),
-              description: text.max(INPUT_LIMITS.taskDescription),
-              agentId: id,
-              dependencies: z.array(id).max(100),
-              requiresApproval: z.boolean(),
-              readOnly: z.boolean().optional(),
-              workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
-              acceptanceCriteria: acceptanceListSchema.optional(),
-              documentKind: z
-                .enum([
-                  'brief',
-                  'project_plan',
-                  'budget',
-                  'risk_register',
-                  'meeting_minutes',
-                  'status_report',
-                  'notes',
-                ])
-                .optional(),
-            }),
-          )
-          .max(100),
+        tasks: z.array(
+          z.object({
+            id,
+            title: text.min(1).max(INPUT_LIMITS.taskTitle),
+            description: text.max(INPUT_LIMITS.taskDescription),
+            agentId: id,
+            dependencies: z.array(id),
+            requiresApproval: z.boolean(),
+            readOnly: z.boolean().optional(),
+            workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
+            acceptanceCriteria: acceptanceListSchema.optional(),
+            documentKind: z
+              .enum([
+                'brief',
+                'project_plan',
+                'budget',
+                'risk_register',
+                'meeting_minutes',
+                'status_report',
+                'notes',
+              ])
+              .optional(),
+          }),
+        ),
       }),
     )
     .optional(),
@@ -556,7 +587,7 @@ export const backupSchema = z.object({
         attemptId: id,
         text: text.max(200000),
         outputLimitReached: z.boolean().optional(),
-        observations: z.array(observationSchema).max(100).optional(),
+        observations: z.array(observationSchema).optional(),
       }),
     )
     .optional(),

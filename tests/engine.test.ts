@@ -19,6 +19,7 @@ async function until(engine: Engine, predicate: () => boolean) {
 
 test('task dependencies, human revision, approval, and final handoff work end to end', async () => {
   const store = new Store(':memory:');
+  store.state.policy!.unlimitedWorkflow = false;
   const engine = new Engine(store, 20);
   try {
     const project = engine.state.projects[0];

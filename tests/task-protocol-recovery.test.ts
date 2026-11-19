@@ -182,7 +182,11 @@ test('Ollama correction becomes real analyst and reviewer assignments whose resu
   Object.assign(managedInfo, { ollamaReady: true, ollamaModels: ['offline-protocol-fixture'] });
   const store = new Store(':memory:'),
     engine = new Engine(store, 1);
-  store.state.policy = { ...structuredClone(defaultPolicy), maxInputBytes: 50000 };
+  store.state.policy = {
+    ...structuredClone(defaultPolicy),
+    unlimitedWorkflow: false,
+    maxInputBytes: 50000,
+  };
   const calls: { input: any; request: any }[] = [];
   try {
     const project = await engine.createProject(
@@ -239,7 +243,10 @@ test('Ollama correction becomes real analyst and reviewer assignments whose resu
         });
       } else if (actor === parent.agentId && parentTurns === 2) {
         assert.match(input.validationIssues.join(' '), /followUps.*empty/);
-        assert.equal(input.delegationState.maxFollowUpsThisTurn, 3);
+        assert.equal(
+          input.delegationState.maxFollowUpsThisTurn,
+          input.delegationState.availableTaskSlots,
+        );
         assert.deepEqual(
           continuation.properties.followUps.items.properties.agentId.enum,
           project.team!.map((agent) => agent.id),

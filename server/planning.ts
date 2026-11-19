@@ -14,7 +14,7 @@ export const planSchema = z.object({
         title: z.string().trim().min(1).max(INPUT_LIMITS.taskTitle),
         description: z.string().trim().min(1).max(INPUT_LIMITS.taskDescription),
         agentId: z.string().min(1),
-        dependencies: z.array(z.number().int().min(0)).max(100),
+        dependencies: z.array(z.number().int().min(0)),
         requiresApproval: z.boolean(),
         workType: z.enum(['plan', 'implementation', 'review', 'tests']).optional(),
         acceptanceCriteria: acceptanceListSchema.optional(),
@@ -31,8 +31,7 @@ export const planSchema = z.object({
           .optional(),
       }),
     )
-    .min(1)
-    .max(100),
+    .min(1),
 });
 export type PlannedTask = z.infer<typeof planSchema>['tasks'][number];
 
@@ -40,17 +39,22 @@ export type PlannedTask = z.infer<typeof planSchema>['tasks'][number];
 export function planOutputSchema(team: Agent[], maxTasks: number) {
   const task = planSchema.shape.tasks.element.omit({ documentKind: true }).extend({
     agentId: z.enum(team.map((agent) => agent.id) as [string, ...string[]]),
-    dependencies: z
-      .array(
-        z
-          .number()
-          .int()
-          .min(0)
-          .max(Math.max(0, maxTasks - 2)),
-      )
-      .max(100),
+    dependencies: z.array(
+      z
+        .number()
+        .int()
+        .min(0)
+        .max(Math.max(0, maxTasks - 2)),
+    ),
   });
-  return strictResponseSchema(z.object({ tasks: z.array(task).min(1).max(maxTasks) }));
+  return strictResponseSchema(
+    z.object({
+      tasks:
+        maxTasks === Number.MAX_SAFE_INTEGER
+          ? z.array(task).min(1)
+          : z.array(task).min(1).max(maxTasks),
+    }),
+  );
 }
 
 export function validatePlan(

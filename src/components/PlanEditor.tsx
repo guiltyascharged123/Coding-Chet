@@ -65,7 +65,7 @@ export default function PlanEditor({
           `/projects/${project.id}/collaboration`,
           {
             expectedRevision: draft.settingsRevision,
-            toolNetwork: network,
+            toolNetwork: project.workMode === 'container' ? false : network,
             researchEnabled: draft.researchEnabled,
             exploration: draft.exploration || 'focused',
             requestTimeoutSeconds: draft.timeout === undefined ? 900 : draft.timeout,
@@ -87,7 +87,7 @@ export default function PlanEditor({
           tasks: rows,
           expectedRevision: draft.revision,
           expectedSettingsRevision: draft.settingsRevision,
-          toolNetwork: network,
+          toolNetwork: project.workMode === 'container' ? false : network,
           collaboration: {
             ...(project.workflow === 'software'
               ? { deliveryMode: draft.deliveryMode || 'build' }
@@ -537,7 +537,8 @@ export default function PlanEditor({
           <label className="checkbox-label">
             <input
               type="checkbox"
-              checked={network}
+              checked={project.workMode === 'container' ? false : network}
+              disabled={project.workMode === 'container'}
               onChange={(e) => setNetwork(e.target.checked)}
             />
             Allow tool network for this project (dependencies, project data and authorized

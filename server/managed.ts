@@ -1,6 +1,7 @@
 // @ts-expect-error Shared dependency-free hardware helper.
 import { localThreadOptions } from '../scripts/cpu-capacity.mjs';
 import './network.js';
+import { refreshContainerInfo } from './container-sandbox.js';
 import { RESOURCE_LIMITS } from '../shared/limits.js';
 import { createHash } from 'node:crypto';
 import { codexReadiness } from './codex-readiness.js';
@@ -168,6 +169,7 @@ export async function refreshManagedInfo(
   selected?: { provider: string; model?: string },
 ) {
   const generation = ++refreshGeneration;
+  await refreshContainerInfo();
   const next = { ...managedInfo };
   const enabled = process.env.WORKROOM_CODEX_ENABLED === '1';
   const proof = enabled ? await checkCodexSignIn() : undefined;

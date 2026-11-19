@@ -19,6 +19,7 @@ export default function ProjectModelSelector({
   const [model, setModel] = useState(project.model || '');
   const [tools, setTools] = useState(hasProjectTools(project));
   const [executor, setExecutor] = useState(!!project.executor);
+  const [container, setContainer] = useState(project.workMode === 'container');
   const [executorModel, setExecutorModel] = useState(
     project.executor?.model || data.runtime.models.codex || '',
   );
@@ -31,6 +32,7 @@ export default function ProjectModelSelector({
     setModel(project.model || '');
     setTools(hasProjectTools(project));
     setExecutor(!!project.executor);
+    setContainer(project.workMode === 'container');
     setExecutorModel(project.executor?.model || data.runtime.models.codex || '');
     setRevision(project.settingsRevision || 0);
   }, [project.id]);
@@ -59,7 +61,11 @@ export default function ProjectModelSelector({
       const saved = await api<{ revision: number }>(`/projects/${project.id}/runtime`, {
         provider,
         model,
-        workMode: (tools && provider === 'codex') || executor ? 'workspace' : 'text',
+        workMode: container
+          ? 'container'
+          : (tools && provider === 'codex') || executor
+            ? 'workspace'
+            : 'text',
         executor:
           executor && provider !== 'codex' ? { provider: 'codex', model: executorModel } : null,
         expectedRevision: revision,
@@ -98,6 +104,7 @@ export default function ProjectModelSelector({
             setModel(project.model || '');
             setTools(hasProjectTools(project));
             setExecutor(!!project.executor);
+            setContainer(project.workMode === 'container');
             setExecutorModel(project.executor?.model || data.runtime.models.codex || '');
             setRevision(project.settingsRevision || 0);
             setMessage('Saved project model reloaded.');
@@ -124,6 +131,7 @@ export default function ProjectModelSelector({
               if (next !== 'codex') setTools(false);
               else if (project.workflow === 'software') setTools(true);
               if (['codex', 'external', 'demo'].includes(next)) setExecutor(false);
+              if (['codex', 'external', 'demo'].includes(next)) setContainer(false);
             }}
           >
             {Object.entries(PROVIDER_LABELS)
@@ -192,10 +200,33 @@ export default function ProjectModelSelector({
             <label className="check-row">
               <input
                 type="checkbox"
+                aria-label="Use isolated Linux workspace"
+                checked={container}
+                disabled={busy || locked}
+                onChange={(event) => {
+                  setContainer(event.target.checked);
+                  if (event.target.checked) setExecutor(false);
+                }}
+              />
+              Let this model build and run tools in an isolated Linux workspace
+            </label>
+            <p className="field-hint">
+              Specialists share real files, run commands, save action receipts and continue without
+              routine approval prompts. The workspace is offline; the host and its credentials are
+              not exposed. Rootless Docker and the sandbox image are required.{' '}
+              {data.runtime.container?.message ||
+                'Refresh Model connections to check isolated execution.'}
+            </p>
+            <label className="check-row">
+              <input
+                type="checkbox"
                 aria-label="Use Codex workspace executor"
                 checked={executor}
                 disabled={busy || locked}
-                onChange={(event) => setExecutor(event.target.checked)}
+                onChange={(event) => {
+                  setExecutor(event.target.checked);
+                  if (event.target.checked) setContainer(false);
+                }}
               />
               Use Codex to build and run project tools; keep this model for planning
             </label>
@@ -261,6 +292,7 @@ export default function ProjectModelSelector({
           model !== (project.model || '') ||
           (provider === 'codex' && tools !== hasProjectTools(project)) ||
           executor !== !!project.executor ||
+          container !== (project.workMode === 'container') ||
           (executor && executorModel !== project.executor?.model)) && (
           <p className="field-hint">
             This selection has not been applied. Use the button above to save it.

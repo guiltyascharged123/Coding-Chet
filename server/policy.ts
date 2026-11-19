@@ -110,7 +110,15 @@ export function relevantContext(task: Task, context: Task[]) {
     }));
 }
 export function policy(store?: Store): CostPolicy {
-  return store?.state.policy || structuredClone(defaultPolicy);
+  const configured = { ...structuredClone(defaultPolicy), ...store?.state.policy };
+  return configured.unlimitedWorkflow
+    ? {
+        ...configured,
+        maxTasks: Number.MAX_SAFE_INTEGER,
+        maxRevisions: Number.MAX_SAFE_INTEGER,
+        maxRequests24h: Number.MAX_SAFE_INTEGER,
+      }
+    : configured;
 }
 export function reserve(
   store: Store,

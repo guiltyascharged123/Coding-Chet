@@ -36,6 +36,8 @@ import { workResultSchema } from '../shared/work.js';
 import { jsonValue, normalizeWorkReply } from './work-results.js';
 import { attachLocalArtifact } from './local-artifact.js';
 import { hasProjectTools, taskExecutionProject } from '../shared/capabilities.js';
+import { taskCapabilities } from '../shared/capabilities.js';
+import { containerInfo } from './container-sandbox.js';
 import type { ConsoleEvent } from '../shared/console.js';
 import type { CostPolicy } from '../shared/types.js';
 
@@ -220,6 +222,7 @@ export class Engine extends EventEmitter {
     workflow?: Workflow,
     collaboration?: {
       researchEnabled?: boolean;
+      execution?: 'text' | 'container';
       exploration?: 'focused' | 'expansive';
       requestTimeoutSeconds?: number;
       deliveryMode?: 'build' | 'design';
@@ -237,6 +240,7 @@ export class Engine extends EventEmitter {
         existing.workflow !== workflow ||
         existing.documentPack !== documentPack ||
         existing.planning !== planning ||
+        (existing.workMode === 'container') !== (collaboration?.execution === 'container') ||
         (existing.officeCapacity || 4) !== officeCapacity
       )
         throw new AppError(
@@ -244,6 +248,11 @@ export class Engine extends EventEmitter {
           409,
         );
       return existing;
+    }
+    if (collaboration?.execution === 'container') {
+      if (['codex', 'demo', 'external'].includes(this.state.provider))
+        throw new AppError('Isolated Linux execution needs a direct text model.');
+      if (!containerInfo.ready) throw new AppError(containerInfo.message, 400, 'connections');
     }
     const project: Project = {
       id: requestId || randomUUID(),
@@ -255,6 +264,7 @@ export class Engine extends EventEmitter {
       documentPack,
       planning,
       workflow,
+      workMode: collaboration?.execution === 'container' ? 'container' : undefined,
       reasoningEffort: collaboration?.reasoningEffort || 'medium',
       meetingPolicy: collaboration?.meetingPolicy,
       researchEnabled: !!collaboration?.researchEnabled,
@@ -275,7 +285,7 @@ export class Engine extends EventEmitter {
       project.team = expandTeam(project.team || this.state.agents, officeCapacity, workflow);
     if (selectedTeam) project.team = structuredClone(selectedTeam);
     stateSchema.parse({ ...this.state, projects: [...this.state.projects, project] });
-    if (workflow === 'software') {
+    if (hasProjectTools(project)) {
       project.workspaceFolder = workspaceFolder(project);
       ensureProjectTools(projectWorkspace(this.store.path, project));
     }
@@ -636,6 +646,10 @@ export class Engine extends EventEmitter {
   ) {
     const project = this.project(id);
     this.checkRevision(project.planRevision, expectedRevision, 'The task plan');
+    if (project.workMode === 'container' && toolNetwork)
+      throw new AppError(
+        'Isolated Linux tools are offline. Disable tool network access for this mode.',
+      );
     if (collaboration !== undefined || toolNetwork !== undefined)
       this.checkRevision(project.settingsRevision, expectedSettingsRevision, 'Project settings');
     if (
@@ -762,7 +776,7 @@ export class Engine extends EventEmitter {
     id: string,
     provider: Provider,
     model?: string,
-    workMode?: 'text' | 'workspace',
+    workMode?: 'text' | 'workspace' | 'container',
     expectedRevision?: number,
     executor?: Project['executor'] | null,
   ) {
@@ -790,9 +804,17 @@ export class Engine extends EventEmitter {
       );
     const readiness = modelReadiness(runtimeInfo(), provider, selected);
     if (!readiness.ready) throw new AppError(readiness.message);
-    const tools = p.workflow === 'software' || (workMode || p.workMode) === 'workspace';
+    const container = (workMode || p.workMode) === 'container';
+    if (container && (['codex', 'demo', 'external'].includes(provider) || executor))
+      throw new AppError(
+        'Choose a direct text model without a separate executor for isolated Linux execution.',
+      );
+    if (container && !containerInfo.ready) throw new AppError(containerInfo.message);
+    const tools =
+      p.workflow === 'software' ||
+      ['workspace', 'container'].includes(workMode || p.workMode || '');
     const execution =
-      !tools || provider === 'codex'
+      !tools || provider === 'codex' || container
         ? undefined
         : executor === undefined
           ? p.executor
@@ -808,14 +830,18 @@ export class Engine extends EventEmitter {
       const ready = modelReadiness(runtimeInfo(), 'codex', execution.model);
       if (!ready.ready) throw new AppError(ready.message);
     }
-    if (tools && provider !== 'codex' && !execution)
+    if (tools && provider !== 'codex' && !execution && !container)
       throw new AppError(
         'Managed project tools require Codex. Disable that option before choosing a text connection. Software delivery always requires Codex.',
       );
     const folder = tools ? p.workspaceFolder || workspaceFolder(p) : p.workspaceFolder;
     if (tools)
       ensureProjectTools(projectWorkspace(this.store.path, { ...p, workspaceFolder: folder }));
-    const nextMode = p.workflow === 'software' ? 'workspace' : workMode || p.workMode;
+    const nextMode = container
+      ? 'container'
+      : p.workflow === 'software'
+        ? 'workspace'
+        : workMode || p.workMode;
     if (
       p.provider !== provider ||
       p.model !== selected ||
@@ -824,6 +850,7 @@ export class Engine extends EventEmitter {
     )
       for (const task of this.state.tasks.filter((t) => t.projectId === id)) delete task.recovery;
     p.workMode = nextMode;
+    if (container) p.toolNetwork = false;
     p.executor = execution;
     p.workspaceFolder = folder;
     p.provider = provider;
@@ -1211,7 +1238,11 @@ export class Engine extends EventEmitter {
     )
       throw new AppError('Finish or retry planning before running the team. Your brief is saved.');
     const execution = taskExecutionProject(project);
-    if (hasProjectTools(project) && execution.provider !== 'codex')
+    if (
+      hasProjectTools(project) &&
+      execution.provider !== 'codex' &&
+      project.workMode !== 'container'
+    )
       throw new AppError(
         'Software delivery requires the Codex connection for real file and command tools. Select it in Workspace controls.',
       );
@@ -1222,12 +1253,18 @@ export class Engine extends EventEmitter {
         400,
         'connections',
       );
-    if (hasProjectTools(project) && !runtimeInfo().coding?.ready)
+    if (
+      hasProjectTools(project) &&
+      project.workMode !== 'container' &&
+      !runtimeInfo().coding?.ready
+    )
       throw new AppError(
         runtimeInfo().coding?.message || 'Check coding sandbox readiness in Model connections.',
         400,
         'connections',
       );
+    if (project.workMode === 'container' && !containerInfo.ready)
+      throw new AppError(containerInfo.message, 400, 'connections');
     const mainTasks = this.state.tasks.filter(
       (task) => task.projectId === id && !task.conversationMessageId,
     );
@@ -1430,6 +1467,7 @@ export class Engine extends EventEmitter {
       throw new AppError('Retry or skip the failed meeting before retrying work.');
     if (
       hasProjectTools(target) &&
+      target.workMode !== 'container' &&
       (execution.provider !== 'codex' ||
         !runtimeInfo().available.codex ||
         !runtimeInfo().coding?.ready)
@@ -1437,6 +1475,14 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'Software delivery requires a ready Codex connection and coding sandbox. Check Model connections.',
       );
+    if (target.workMode === 'container' && !containerInfo.ready)
+      throw new AppError(containerInfo.message, 400, 'connections');
+    for (const entry of task.sandboxJournal || [])
+      if (entry.status === 'started') {
+        entry.status = 'failed';
+        entry.output =
+          'Interrupted action acknowledged by explicit task retry. Inspect existing files before making further changes; the old action ID will not be replayed.';
+      }
     if (!modelReadiness(runtimeInfo(), execution.provider, execution.model).ready)
       throw new AppError(
         modelReadiness(runtimeInfo(), execution.provider, execution.model).message,
@@ -1521,6 +1567,10 @@ export class Engine extends EventEmitter {
   ) {
     const project = this.project(id);
     this.checkRevision(project.settingsRevision, expectedRevision, 'Project settings');
+    if (project.workMode === 'container' && toolNetwork)
+      throw new AppError(
+        'Isolated Linux tools are offline. Disable tool network access for this mode.',
+      );
     if (
       project.status === 'running' ||
       this.state.tasks.some((t) => t.projectId === id && this.active.has(t.id)) ||
@@ -2109,7 +2159,7 @@ export class Engine extends EventEmitter {
           : [...prerequisites, ...f.dependsOn.map((index) => created[index].id)];
       const project = this.project(task.projectId),
         owner = team.find((agent) => agent.id === f.agentId)!;
-      const tools = taskExecutionProject(project).provider === 'codex' && hasProjectTools(project);
+      const tools = taskCapabilities(project).commands;
       const workType =
         f.workType ||
         (!tools
@@ -2126,7 +2176,8 @@ export class Engine extends EventEmitter {
       // builder in the same writable project. Design-only and legacy read-only
       // task permissions are preserved.
       const delegatedBuilder =
-        (project.workMode === 'workspace' || project.deliveryMode === 'build') &&
+        (['workspace', 'container'].includes(project.workMode || '') ||
+          project.deliveryMode === 'build') &&
         tools &&
         project.deliveryMode !== 'design' &&
         task.workType === 'plan' &&

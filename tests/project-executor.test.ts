@@ -10,6 +10,7 @@ import { Engine } from '../server/engine.js';
 import { managedInfo } from '../server/managed.js';
 import { projectWorkspace } from '../server/workspaces.js';
 import { taskExecutionProject } from '../shared/capabilities.js';
+import { containerInfo } from '../server/container-sandbox.js';
 import { backupSchema } from '../shared/schemas.js';
 import type { Task } from '../shared/types.js';
 import { result } from './work-fixtures.js';
@@ -170,11 +171,13 @@ test('an explicit Codex executor builds, reviews and reuses an actual project ut
 });
 
 test('an explicitly authorized workspace coordinator delegates tool building while design-only mode remains read-only', async () => {
-  for (const mode of ['hybrid', 'direct', 'design']) {
+  for (const mode of ['hybrid', 'direct', 'design', 'container']) {
     const design = mode === 'design';
     const root = mkdtempSync(join(tmpdir(), 'workroom-delegate-tool-'));
     const old = { ...managedInfo },
       before = process.env.AGENT_PROVIDER;
+    const oldContainer = { ...containerInfo };
+    if (mode === 'container') containerInfo.ready = true; // Injected-worker scheduler test; no Docker/model claim.
     process.env.AGENT_PROVIDER = 'ollama';
     Object.assign(managedInfo, {
       ollamaReady: true,
@@ -189,7 +192,7 @@ test('an explicitly authorized workspace coordinator delegates tool building whi
       store,
       1,
       async (provider, connection, task, agent, context, _signal, ctx) => {
-        assert.equal(provider, 'codex');
+        assert.equal(provider, mode === 'container' ? 'ollama' : 'codex');
         if (agent.id === 'mira' && coordinatorTurns++ === 0) {
           assert.equal(ctx?.readOnly, true);
           task.result = result({
@@ -250,7 +253,9 @@ test('an explicitly authorized workspace coordinator delegates tool building whi
         'custom',
       );
       project.model = 'local-fixture';
-      if (mode === 'direct')
+      if (mode === 'container')
+        engine.setProjectProvider(project.id, 'ollama', 'local-fixture', 'container', 0, null);
+      else if (mode === 'direct')
         engine.setProjectProvider(project.id, 'codex', 'coding-fixture', 'workspace', 0);
       else
         engine.setProjectProvider(project.id, 'ollama', 'local-fixture', 'workspace', 0, {
@@ -300,6 +305,7 @@ test('an explicitly authorized workspace coordinator delegates tool building whi
       await new Promise((r) => setTimeout(r, 10));
       store.close();
       Object.assign(managedInfo, old);
+      Object.assign(containerInfo, oldContainer);
       if (before === undefined) delete process.env.AGENT_PROVIDER;
       else process.env.AGENT_PROVIDER = before;
       rmSync(root, { recursive: true, force: true });

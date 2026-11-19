@@ -94,7 +94,11 @@ test('paid reservations cover planning, retries, context, concurrency, and budge
       () => guarded('openai', 'system', 'assignment', ctx, generate),
       /Paid APIs are disabled/,
     );
-    store.state.policy = { ...structuredClone(defaultPolicy), allowPaid: true };
+    store.state.policy = {
+      ...structuredClone(defaultPolicy),
+      unlimitedWorkflow: false,
+      allowPaid: true,
+    };
     await assert.rejects(
       () => guarded('openai', 'system', 'assignment', ctx, generate),
       /price estimate/,
@@ -171,7 +175,11 @@ test('backup restore validates before replacing, preserves receipts, clears cach
     );
     store.putAttempt({ ...receipt, status: 'uncertain' });
     store.cache('example', '# Cached');
-    backup.state.policy = { ...structuredClone(defaultPolicy), allowPaid: true };
+    backup.state.policy = {
+      ...structuredClone(defaultPolicy),
+      unlimitedWorkflow: false,
+      allowPaid: true,
+    };
     backup.state.tasks[0].status = 'working';
     backup.state.projects[0].status = 'running';
     store.restore(backup);

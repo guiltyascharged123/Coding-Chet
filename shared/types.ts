@@ -53,6 +53,14 @@ export interface Agent {
   goal?: string;
 }
 export interface Task {
+  sandboxJournal?: {
+    id: string;
+    action: 'run' | 'read' | 'write';
+    reference: string;
+    status: 'started' | 'completed' | 'failed';
+    output: string;
+    exitCode?: number;
+  }[];
   id: string;
   projectId: string;
   title: string;
@@ -130,7 +138,7 @@ export interface Project {
   team?: Agent[];
   workspaceFolder?: string;
   toolNetwork?: boolean;
-  workMode?: 'text' | 'workspace';
+  workMode?: 'text' | 'workspace' | 'container';
   executor?: { provider: 'codex'; model: string };
   reasoningEffort?: ReasoningEffort;
   meetingPolicy?: { enabled: boolean; everyTasks: number };
@@ -157,6 +165,13 @@ export interface MemoryItem {
   stale?: boolean;
 }
 export interface CostPolicy {
+  unlimitedWorkflow?: boolean;
+  maxToolActions?: number;
+  toolTimeoutSeconds?: number;
+  toolMemoryMb?: number;
+  toolCpus?: number;
+  toolProcesses?: number;
+  toolTempMb?: number;
   allowPaid: boolean;
   maxConcurrent: number;
   maxTasks: number;
@@ -247,6 +262,7 @@ export interface ConnectionInfo {
   model?: string;
 }
 export interface RuntimeInfo {
+  container?: { ready: boolean; message: string; image: string };
   compatibleCommunity?: boolean;
   connections?: Partial<Record<Provider, ConnectionInfo>>;
   modelConnections?: Partial<Record<'openai' | 'gemini', Record<string, ConnectionInfo>>>;

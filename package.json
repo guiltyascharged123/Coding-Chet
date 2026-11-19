@@ -13,6 +13,7 @@
     "setup:local": "node scripts/local-model.mjs",
     "local:inspect": "node --env-file-if-exists=.env scripts/local-hardware.mjs",
     "evaluate:local": "tsx scripts/evaluate-local.ts",
+    "audit:backup": "tsx scripts/audit-backup.ts",
     "local:prepare": "node scripts/launch.mjs --prepare-only --workspace",
     "demo:prepare": "node scripts/launch.mjs --prepare-only",
     "codespace:start": "node scripts/codespace.mjs",

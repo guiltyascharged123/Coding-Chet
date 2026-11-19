@@ -48,6 +48,90 @@ async function openProject(page: any, id: string) {
   await page.reload();
 }
 
+test('a direct model can select and persist isolated Linux execution without sending inference or enabling internet', async ({
+  page,
+  request,
+}) => {
+  const before = await (await request.get('/api/state')).json();
+  test.skip(
+    !before.runtime.container?.ready,
+    'Rootless Docker and the configured image are required for actual configuration.',
+  );
+  const original = await (await request.get('/api/backup')).json();
+  try {
+    const { project } = await savedProject(request, 'General-purpose tool execution');
+    await openProject(page, project.id);
+    await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
+    const selector = page.getByRole('region', { name: 'Selected project model', exact: true });
+    await selector.getByLabel('Use isolated Linux workspace', { exact: true }).check();
+    await selector
+      .getByRole('button', { name: 'Use this model for this project', exact: true })
+      .click();
+    await expect(selector).toContainText('Project model saved.');
+    const after = await (await request.get('/api/state')).json();
+    const saved = after.state.projects.find((p: any) => p.id === project.id);
+    expect(saved.workMode).toBe('container');
+    expect(saved.provider).toBe('compatible');
+    expect(saved.model).toBe(project.model);
+    expect(saved.toolNetwork).toBe(false);
+    expect(after.attempts.filter((a: any) => a.projectId === project.id)).toHaveLength(0);
+    await page.reload();
+    await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
+    await expect(page.getByLabel('Use isolated Linux workspace', { exact: true })).toBeChecked();
+    const rejected = await request.put(`/api/projects/${project.id}/plan`, {
+      data: {
+        tasks: after.state.tasks.filter((t: any) => t.projectId === project.id),
+        toolNetwork: true,
+      },
+    });
+    expect(rejected.status()).toBe(400);
+    expect((await rejected.json()).error).toContain('offline');
+  } finally {
+    expect((await request.post('/api/restore', { data: original })).ok()).toBe(true);
+  }
+});
+
+test('new-project tools are configured before planning and the draft preserves the explicit choice', async ({
+  page,
+  request,
+}) => {
+  const data = await (await request.get('/api/state')).json();
+  test.skip(!data.runtime.container?.ready, 'Rootless Docker and image required.');
+  const original = await (await request.get('/api/backup')).json();
+  try {
+    await request.post('/api/runtime', { data: { provider: 'ollama' } });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Project name').fill('Build a general-purpose local tool');
+    await page
+      .getByLabel('The brief')
+      .fill(
+        'Build an actual useful utility and independently review it with the supplied team. Do not replace execution with documents.',
+      );
+    await page.getByLabel('Task planning', { exact: true }).selectOption('manual');
+    await page.getByLabel('Enable isolated Linux tools for this project', { exact: true }).check();
+    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await expect(
+      page.getByLabel('Enable isolated Linux tools for this project', { exact: true }),
+    ).toBeChecked();
+    await page.getByRole('button', { name: 'Create project', exact: true }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Build a general-purpose local tool', exact: true }),
+    ).toBeVisible();
+    const after = await (await request.get('/api/state')).json();
+    const p = after.state.projects.find(
+      (p: any) => p.title === 'Build a general-purpose local tool',
+    );
+    expect(p.workMode).toBe('container');
+    expect(p.provider).toBe('ollama');
+    expect(p.workspaceFolder).toBeTruthy();
+    expect(after.attempts.filter((a: any) => a.projectId === p.id)).toHaveLength(0);
+  } finally {
+    expect((await request.post('/api/restore', { data: original })).ok()).toBe(true);
+  }
+});
+
 test('a local planning connection can explicitly select a persistent Codex workspace executor without inference', async ({
   page,
   request,
@@ -158,6 +242,7 @@ test('every economy number can be cleared and replaced without an inserted zero,
   await openProject(page, project.id);
   await page.getByRole('button', { name: 'Workspace controls', exact: true }).click();
   const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Unlimited workflow', { exact: true }).uncheck();
   const fields = [
     ['Active tasks across the workspace', '2'],
     ['Tasks allowed per project', '40'],

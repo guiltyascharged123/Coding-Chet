@@ -20,6 +20,8 @@ export function reportedAcceptanceGaps(
 }
 
 export function commandKind(command: string): 'verification' | 'inspection' | undefined {
+  // Executor-generated file-tool references, not a claimed shell invocation.
+  if (/^read-file [^\n]+$/.test(command)) return 'inspection';
   // Recognize an actual invocation, not a quoted claim such as echo "npm test".
   const unwrapped = command.replace(
     /^(?:\/\S+\/)?(?:bash|sh|zsh)\s+-[lc]+\s+(['"])([\s\S]*)\1$/,

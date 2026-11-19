@@ -13,12 +13,19 @@ import { localContextTokens } from '../server/managed.js';
 
 test('the visible reference reflects actual validators and adjustable policy ranges, without credentials', () => {
   const store = new Store(':memory:');
+  store.state.policy!.unlimitedWorkflow = false;
   try {
     const reference = limitsCatalog(store),
       schema = z.toJSONSchema(policySchema) as any;
     for (const [key, , min, max] of POLICY_FIELDS) {
       assert.equal(schema.properties[key].minimum, min, key);
-      assert.equal(schema.properties[key].maximum, max, key);
+      if (max !== undefined) assert.equal(schema.properties[key].maximum, max, key);
+      else
+        assert.ok(
+          schema.properties[key].maximum === undefined ||
+            schema.properties[key].maximum === Number.MAX_SAFE_INTEGER,
+          key,
+        );
       assert.equal(
         reference.editable.find((value) => value.key === key)!.value,
         defaultPolicy[key as keyof typeof defaultPolicy],
@@ -49,7 +56,7 @@ test('the visible reference reflects actual validators and adjustable policy ran
     );
     assert.equal(WORK_RESULT_JSON_SCHEMA.properties.summary.maxLength, 1200);
     assert.equal(WORK_RESULT_JSON_SCHEMA.properties.deliverable.maxLength, 100000);
-    assert.equal(WORK_RESULT_JSON_SCHEMA.properties.followUps.maxItems, 3);
+    assert.equal(WORK_RESULT_JSON_SCHEMA.properties.followUps.maxItems, undefined);
     assert.equal(
       WORK_RESULT_JSON_SCHEMA.properties.followUps.items.properties.description.maxLength,
       2000,

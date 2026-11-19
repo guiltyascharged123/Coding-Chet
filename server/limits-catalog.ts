@@ -122,7 +122,7 @@ export function limitsCatalog(store: Store, project?: Project) {
       'Backup & restore. File import also has a 25 MiB transport bound; full local .data copies preserve large databases, source files and console logs.',
     ),
   ];
-  const current = policy(store);
+  const current = { ...policy(store), ...store?.state.policy };
   const localTokens = current.localContextTokens ?? RESOURCE_LIMITS.ollamaContextTokens;
   return {
     editable: POLICY_FIELDS.map(([key, name, min, max, why]) => ({
@@ -131,7 +131,10 @@ export function limitsCatalog(store: Store, project?: Project) {
       value: current[key],
       min,
       max,
-      why,
+      why:
+        (current.unlimitedWorkflow && ['maxTasks', 'maxRevisions', 'maxRequests24h'].includes(key)
+          ? 'Ignored while Unlimited workflow is enabled. '
+          : '') + why,
       edit: 'Workspace controls → Limits & connections',
     })),
     project: [

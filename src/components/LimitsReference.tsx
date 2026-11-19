@@ -67,7 +67,10 @@ export default function LimitsReference({
                 {limit.name}: {String(limit.value)}
               </strong>
               <p>
-                Allowed range: {limit.min}–{limit.max}. {limit.why}
+                {limit.max === undefined
+                  ? `Minimum: ${limit.min}; no application maximum. `
+                  : `Allowed range: ${limit.min}–${limit.max}. `}
+                {limit.why}
               </p>
               <small>{limit.edit}</small>
             </article>

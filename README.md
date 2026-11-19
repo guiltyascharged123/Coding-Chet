@@ -53,7 +53,7 @@ The Workroom logo returns to Workspace. Sidebar pages, model settings and recove
 - Checked Workroom patch proposals from a separate project checkout, with build, unit and relevant browser test receipts.
 - Project memory with provenance, versioned instructions and portable backup/restore. An empty workspace can import a backup.
 
-**Tool capabilities depend on the connection.** Ollama, OpenAI, Gemini and compatible adapters generate text from supplied material. Codex projects can explicitly enable managed file editing and commands after a sandbox readiness check; software teams require Codex. Optional Codex research enables built-in read-only web search. Role names alone do not grant tools or establish expertise.
+**Tool capabilities depend on the configured executor.** Direct Ollama, OpenAI, Gemini and compatible connections default to text. They can now explicitly enable an isolated Linux workspace to build and run tools using the same model, without routine approval prompts. This requires rootless Docker and a prepared image; it currently runs offline. Codex remains a separate managed file/command executor with optional read-only web research. Role names alone do not grant tools or establish expertise. See [General-purpose specialist execution](docs/AUTONOMOUS-EXECUTION.md) for setup, the backup review, action durability, autonomy boundaries and the next required connectors.
 
 A direct text connection can also keep local planning while explicitly selecting a **Codex workspace executor** for all task roles. See [Project tools and internet access](docs/PROJECT-TOOLS-AND-INTERNET.md) for enabling it, building/reusing connectors, crawling/searching saved site data and safely preparing tool or app changes.
 

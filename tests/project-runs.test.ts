@@ -25,6 +25,7 @@ function fixture(respond?: (input: any) => any) {
   store.state.provider = 'openai';
   store.state.policy = {
     ...structuredClone(defaultPolicy),
+    unlimitedWorkflow: false,
     allowPaid: true,
     rates: { openai: { model: 'fixture-model', inputPerMillion: 0, outputPerMillion: 0 } },
   };

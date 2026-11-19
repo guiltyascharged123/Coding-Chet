@@ -1,6 +1,10 @@
 import type { Project } from './types.js';
 export function hasProjectTools(project: Pick<Project, 'workflow' | 'workMode'>) {
-  return project.workflow === 'software' || project.workMode === 'workspace';
+  return (
+    project.workflow === 'software' ||
+    project.workMode === 'workspace' ||
+    project.workMode === 'container'
+  );
 }
 
 /** Capabilities of task execution, distinct from the planner's own text request. */
@@ -12,7 +16,8 @@ export function taskCapabilities(
 ) {
   const provider =
     hasProjectTools(project) && project.executor ? project.executor.provider : project.provider;
-  const files = hasProjectTools(project) && provider === 'codex';
+  const files =
+    hasProjectTools(project) && (provider === 'codex' || project.workMode === 'container');
   return {
     text: true,
     fileInspection: files,

@@ -305,7 +305,10 @@ app.post(
         planning: z.enum(['template', 'ai', 'manual']).optional(),
         requestId: z.string().uuid().optional(),
         collaboration: collaborationSchema
-          .extend({ exploration: z.enum(['focused', 'expansive']).optional() })
+          .extend({
+            exploration: z.enum(['focused', 'expansive']).optional(),
+            execution: z.enum(['text', 'container']).optional(),
+          })
           .optional(),
         officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(4),
         team: z.array(teamMemberSchema).min(1).max(12).optional(),
@@ -671,7 +674,7 @@ app.post(
       .object({
         provider: providerSchema,
         model: z.string().trim().max(150).optional(),
-        workMode: z.enum(['text', 'workspace']).optional(),
+        workMode: z.enum(['text', 'workspace', 'container']).optional(),
         executor: executorSchema.nullable().optional(),
         expectedRevision: z.number().int().nonnegative(),
       })

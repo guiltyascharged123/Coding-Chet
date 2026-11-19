@@ -18,6 +18,7 @@ type Draft = {
   reasoningEffort?: ReasoningEffort;
   meetings?: boolean;
   researchEnabled?: boolean;
+  execution?: 'text' | 'container';
   exploration?: 'focused' | 'expansive';
   officeCapacity?: 4 | 8 | 12;
   members?: Agent[];
@@ -110,6 +111,10 @@ export default function ProjectModal({
         team: members,
         documentPack: 'office',
         collaboration: {
+          execution:
+            !['codex', 'demo', 'external'].includes(provider) && draft.execution === 'container'
+              ? 'container'
+              : 'text',
           ...(draft.workflow === 'software' ? { deliveryMode: draft.deliveryMode || 'build' } : {}),
           researchEnabled: !!draft.researchEnabled,
           exploration:
@@ -148,7 +153,7 @@ export default function ProjectModal({
           <strong>Model: {model || provider}</strong>
           <p>
             The selected model writes the plan and performs text assignments. File editing and
-            command execution require Codex tools.
+            command execution require an enabled Linux workspace or Codex tools.
           </p>
           {onConfigure && (
             <button type="button" className="text-button" onClick={onConfigure}>
@@ -199,7 +204,13 @@ export default function ProjectModal({
             onChange={(e) => change({ workflow: e.target.value as Workflow })}
           >
             {Object.entries(WORKFLOWS).map(([id, w]) => (
-              <option value={id} key={id} disabled={id === 'software' && provider !== 'codex'}>
+              <option
+                value={id}
+                key={id}
+                disabled={
+                  id === 'software' && provider !== 'codex' && draft.execution !== 'container'
+                }
+              >
                 {w.label}
               </option>
             ))}
@@ -302,6 +313,18 @@ export default function ProjectModal({
             ))}
           </div>
         </details>
+        {!['codex', 'demo', 'external'].includes(provider) && (
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              aria-label="Enable isolated Linux tools for this project"
+              checked={draft.execution === 'container'}
+              onChange={(e) => change({ execution: e.target.checked ? 'container' : 'text' })}
+            />
+            Enable shared Linux files and commands. Specialists can build and run tools without
+            routine approval prompts. Requires rootless Docker; this mode is offline.
+          </label>
+        )}
         <label>
           Working style
           <select
@@ -314,8 +337,8 @@ export default function ProjectModal({
           </select>
           <span className="field-hint">
             Creative exploration can challenge the plan, invent approaches and test software ideas
-            with available tools. Venture projects default to this style. Tool access is configured
-            separately; text-only connections cannot run code.
+            with available tools. Venture projects default to this style. Enable Linux tools here or
+            select an executor later; text-only connections cannot run code.
           </span>
         </label>
         {provider === 'codex' && (

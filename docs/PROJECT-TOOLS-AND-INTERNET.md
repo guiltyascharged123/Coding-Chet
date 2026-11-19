@@ -1,5 +1,10 @@
 # Build and use project tools, connectors and internet sources
 
+Direct models can also enable an **isolated Linux workspace** for local file and
+command tools without Codex. It currently runs offline. See
+[General-purpose specialist execution](AUTONOMOUS-EXECUTION.md). The internet
+instructions below apply to the Codex executor, not that offline mode.
+
 The execution path is: choose a useful action, build or reuse the needed software, run it, inspect the result and continue. A plan, pitch or document is not a substitute for that action.
 
 ## Turn on a real executor

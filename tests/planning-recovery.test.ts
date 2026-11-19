@@ -52,7 +52,11 @@ function fixture(reply: (input: any, call: number) => unknown) {
     engine = new Engine(store, 1),
     requests: any[] = [],
     traces: string[] = [];
-  store.state.policy = { ...structuredClone(defaultPolicy), maxInputBytes: 60000 };
+  store.state.policy = {
+    ...structuredClone(defaultPolicy),
+    unlimitedWorkflow: false,
+    maxInputBytes: 60000,
+  };
   engine.on('console', (entry) => traces.push(entry.entry.text));
   globalThis.fetch = (async (url, init) => {
     assert.match(String(url), /\/api\/chat$/, 'No other provider or paid fallback is allowed');

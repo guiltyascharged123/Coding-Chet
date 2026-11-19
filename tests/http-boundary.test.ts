@@ -135,10 +135,10 @@ test('HTTP rejects untrusted authority and missing session before parsing bodies
       '/api/policy',
       'POST',
       headers,
-      JSON.stringify({ ...state.data.state.policy, maxTasks: 101, expectedRevision: 1 }),
+      JSON.stringify({ ...state.data.state.policy, maxTasks: -1, expectedRevision: 1 }),
     );
     assert.equal(invalidLimits.status, 400);
-    assert.match(invalidLimits.data.error, /maxTasks.*100.*received 101/);
+    assert.match(invalidLimits.data.error, /maxTasks/);
     const catalog = await http('/api/limits', 'GET', headers);
     assert.equal(catalog.status, 200);
     assert.ok(
