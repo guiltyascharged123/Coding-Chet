@@ -7,6 +7,7 @@ import { defaultPolicy } from '../shared/schemas.js';
 import type { ConsoleEvent, ModelProgress } from '../shared/console.js';
 import { saveResponseIssue } from './work-results.js';
 import { communityConnection } from './community-provider.js';
+import { ProviderRequestError } from './provider-errors.js';
 
 export type GenerationContext = {
   requestPurpose?: ModelProgress['purpose'];
@@ -354,9 +355,13 @@ export async function guarded(
     if (attempt && store && !completionConfirmed)
       store.putAttempt({
         ...attempt,
-        status: 'uncertain',
-        error:
-          'No confirmed completion receipt. Review before retrying; usage may have been consumed.',
+        ...(error instanceof ProviderRequestError && error.rejectedBeforeInference
+          ? { status: 'acknowledged' as const, actualUsd: 0, reservedUsd: 0, error: error.message }
+          : {
+              status: 'uncertain' as const,
+              error:
+                'No confirmed completion receipt. Review before retrying; usage may have been consumed.',
+            }),
       });
     throw error;
   }

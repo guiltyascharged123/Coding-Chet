@@ -124,3 +124,18 @@ uncertain intent and a visible warning that the command may still be running,
 including after user cancellation. Docker's unconfined seccomp profile is rejected.
 Regressions use model/CLI fixtures and harmless process-lifecycle fixtures; they
 do not establish new live-model quality or resolve unsupported host prerequisites.
+
+## AI Horde capacity rejections
+
+An anonymous request can receive HTTP 403 `KudosUpfront` when its output allowance
+requires kudos held upfront. This is distinct from a bad API key. Project requests
+now respect the advertised model output ceiling. After an explicit pre-inference
+capacity rejection stating a smaller free allowance, Workroom can send one smaller
+request to the same model, honoring Retry-After. Other 403s, rate limits and network
+failures are not automatically retried. Provider diagnostics are bounded and
+credential-redacted. The configured workspace budget is preserved, and known
+pre-inference rejections do not leave misleading uncertain-inference receipts.
+A live anonymous test starting with an 8,000-token budget negotiated the current
+provider allowance and returned HTTP 200. No paid fallback or replacement model
+was used. Existing historical uncertain receipts still need review: their original
+responses were not retained, so they cannot safely be reclassified automatically.

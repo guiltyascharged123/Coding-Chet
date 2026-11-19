@@ -34,6 +34,7 @@ export const managedInfo = {
   codexMessage: codexReadiness(false, { output: '', available: true }, '').message,
   ollamaModels: undefined as string[] | undefined,
   compatibleModels: undefined as string[] | undefined,
+  compatibleOutputLimits: {} as Record<string, number>,
   ollamaReady: false,
   ollamaMessage: 'Set OLLAMA_MODEL and run Ollama locally.',
   compatibleReady: false,
@@ -220,6 +221,7 @@ export async function refreshManagedInfo(
   }
   next.compatibleReady = false;
   next.compatibleModels = [];
+  next.compatibleOutputLimits = {};
   if (process.env.COMPATIBLE_API_URL)
     try {
       const community = communityConnection();
@@ -234,8 +236,20 @@ export async function refreshManagedInfo(
             : {},
         signal: AbortSignal.timeout(2500),
       });
-      const data = (await response.json()) as { data?: { id: string }[] };
+      const data = (await response.json()) as {
+        data?: { id: string; top_provider?: { max_completion_tokens?: number } }[];
+      };
       next.compatibleReady = response.ok && Array.isArray(data.data);
+      if (next.compatibleReady)
+        next.compatibleOutputLimits = Object.fromEntries(
+          data
+            .data!.filter(
+              (m) =>
+                Number.isSafeInteger(m.top_provider?.max_completion_tokens) &&
+                m.top_provider!.max_completion_tokens! > 0,
+            )
+            .map((m) => [m.id, m.top_provider!.max_completion_tokens!]),
+        );
       next.compatibleModels = next.compatibleReady
         ? data.data!.map((m) => m.id).filter((id) => typeof id === 'string')
         : [];

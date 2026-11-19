@@ -15,7 +15,8 @@ import {
   SUBPIPELINE_INSTRUCTION,
 } from './local-artifact.js';
 import { calculate } from './calculator.js';
-import { communityConnection, compatibleKey } from './community-provider.js';
+import { communityConnection, compatibleKey, communityCompletion } from './community-provider.js';
+import { providerResponseError } from './provider-errors.js';
 import { isCommunityEndpoint } from '../shared/community.js';
 import { z } from 'zod';
 import { qualityStandard } from '../shared/quality.js';
@@ -310,28 +311,45 @@ async function generate(
             provider === 'compatible'
               ? `${serviceUrl(process.env.COMPATIBLE_API_URL || '', process.env.COMPATIBLE_BILLING === 'local').href.replace(/\/$/, '')}/chat/completions`
               : 'https://api.openai.com/v1/chat/completions';
-          response = await fetch(endpoint, {
-            method: 'POST',
-            signal: combined,
-            headers: {
-              Authorization: `Bearer ${provider === 'compatible' ? compatibleKey() : process.env.OPENAI_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model,
-              ...(provider === 'compatible'
-                ? { max_tokens: maxTokens }
-                : { max_completion_tokens: maxTokens }),
-              messages: [
-                { role: 'system', content: system },
-                { role: 'user', content: user },
-              ],
-              ...(json ? { response_format: { type: 'json_object' } } : {}),
-            }),
-          });
+          const body = {
+            model,
+            ...(provider === 'compatible'
+              ? { max_tokens: maxTokens }
+              : { max_completion_tokens: maxTokens }),
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: user },
+            ],
+            ...(json ? { response_format: { type: 'json_object' } } : {}),
+          };
+          if (provider === 'compatible' && communityConnection()) {
+            response = await communityCompletion(
+              { ...body, max_tokens: maxTokens },
+              combined,
+              managedInfo.compatibleOutputLimits[model],
+              (tokens, reason) =>
+                ctx.onTrace?.({
+                  type: 'status',
+                  status: 'output_limit_adjusted',
+                  text: `AI Horde: using an output allowance of ${tokens} tokens because of ${reason}. The selected model, prompt and configured budget are unchanged; no paid fallback is used.`,
+                  progress: { stage: 'waiting', outputLimitTokens: tokens },
+                }),
+            );
+          } else {
+            response = await fetch(endpoint, {
+              method: 'POST',
+              signal: combined,
+              headers: {
+                Authorization: `Bearer ${provider === 'compatible' ? compatibleKey() : process.env.OPENAI_API_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(body),
+            });
+          }
           if (!response.ok)
-            throw new Error(
-              `${provider === 'compatible' ? 'Compatible model server' : 'OpenAI'} returned HTTP ${response.status}. Check the server’s key, model access, and quota.`,
+            throw await providerResponseError(
+              response,
+              provider === 'compatible' ? 'Compatible model server' : 'OpenAI',
             );
           const data = (await response.json()) as {
             choices?: { message?: { content?: string }; finish_reason?: string }[];
@@ -340,7 +358,9 @@ async function generate(
           const output = data.choices?.[0]?.message?.content;
           const outputLimitReached = data.choices?.[0]?.finish_reason === 'length';
           if (!output?.trim() && !outputLimitReached)
-            throw new Error('OpenAI returned no text. Retry or choose a compatible chat model.');
+            throw new Error(
+              `${provider === 'compatible' ? (communityConnection() ? 'AI Horde' : 'Compatible model server') : 'OpenAI'} returned no text. Retry or choose a compatible chat model.`,
+            );
           return {
             text: output || '',
             inputTokens: data.usage?.prompt_tokens,

@@ -6,6 +6,7 @@ import {
   COMMUNITY_EXAMPLE_MODEL,
 } from '../shared/community.js';
 import { chatRequestSchema } from './local-chat.js';
+import { communityCompletion } from './community-provider.js';
 
 export async function communityModels(signal?: AbortSignal) {
   const response = await fetch(`${COMMUNITY_API_URL}/models`, {
@@ -80,15 +81,8 @@ export function communityChatRoute(): RequestHandler {
       res.setHeader('Content-Type', 'application/x-ndjson');
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
-      const response = await fetch(`${COMMUNITY_API_URL}/chat/completions`, {
-        method: 'POST',
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(900000)]),
-        headers: {
-          Authorization: `Bearer ${COMMUNITY_ANONYMOUS_KEY}`,
-          'Content-Type': 'application/json',
-          'Client-Agent': 'Workroom:0.1.0:https://github.com/guiltyascharged123/Coding-Chet',
-        },
-        body: JSON.stringify({
+      const response = await communityCompletion(
+        {
           model,
           messages: [
             {
@@ -100,14 +94,9 @@ export function communityChatRoute(): RequestHandler {
           ],
           max_tokens: selected.maxTokens,
           stream: false,
-        }),
-      });
-      if (!response.ok) {
-        const retry = response.headers.get('Retry-After');
-        throw new Error(
-          `The community service returned HTTP ${response.status}. Its model may be busy or unavailable.${retry ? ` Retry after ${retry} seconds.` : ''} No other provider was used.`,
-        );
-      }
+        },
+        AbortSignal.any([controller.signal, AbortSignal.timeout(900000)]),
+      );
       const body = (await response.json()) as {
         model?: string;
         choices?: { message?: { content?: string }; finish_reason?: string }[];
