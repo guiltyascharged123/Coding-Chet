@@ -5,6 +5,12 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { unzipSync, strFromU8 } from 'fflate';
 
+// These cases exercise the animated studio. Lightweight defaults are verified
+// separately without loading the graphics engine.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('workroom-lightweight', 'false'));
+});
+
 test('workspace limits, verified memory, backup downloads and validated restore work in the browser', async ({
   page,
   request,
@@ -54,6 +60,7 @@ test('a project runs through revision, human approval, outputs, and persistent r
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Workspace', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '3D view', exact: true }).click();
   await expect(page.locator('canvas')).toBeVisible();
   await expect(page.locator('.scene-agent-label')).toHaveCount(4);
   await page.getByRole('button', { name: 'Floor plan', exact: true }).click();
@@ -259,6 +266,7 @@ test('walking agents, readable surfaces, office documents, and native exports wo
   page.on('pageerror', (error) => errors.push(error.message));
   await request.post('/api/runtime', { data: { provider: 'demo' } });
   await page.goto('/');
+  await page.getByRole('button', { name: '3D view', exact: true }).click();
   await expect(page.locator('.scene-agent-label')).toHaveCount(4);
   const initial = await page.locator('.scene-agent-label').evaluateAll((labels) =>
     labels.map((label) => ({
@@ -434,7 +442,7 @@ test('failed AI planning remains visible after reload and retries the saved proj
   await page.getByRole('button', { name: 'Create project', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Retry planning', exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.locator('.planning-banner')).toContainText('Your project and brief are saved');
+  await expect(page.getByRole('alert')).toContainText('Your project and brief are saved');
   await expect(page.getByRole('button', { name: 'Resume team', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Review usage', exact: true }).click();
   const usage = page.getByRole('dialog');

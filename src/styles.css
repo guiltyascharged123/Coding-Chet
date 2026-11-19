@@ -2574,6 +2574,16 @@ textarea {
   color: #b9c5d0;
   text-align: center;
 }
+.office-roster {
+  overflow: auto;
+  justify-content: flex-start;
+  padding: 64px 24px 24px;
+}
+.office-roster .fallback-desks {
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 24px;
+}
 .spin {
   animation: spin 1.2s linear infinite;
 }

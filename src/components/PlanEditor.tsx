@@ -5,7 +5,7 @@ import { api, saveBlob } from '../api';
 import type { PlanTask } from '../../shared/plan-definition';
 import Modal from './Modal';
 import { useSavedDraft } from '../drafts';
-import { hasProjectTools } from '../../shared/capabilities';
+import { hasProjectTools, taskCapabilities } from '../../shared/capabilities';
 import NumberField from './NumberField';
 
 export default function PlanEditor({
@@ -36,6 +36,7 @@ export default function PlanEditor({
     },
   );
   const { rows, network, effort, meetings, cadence } = draft;
+  const capabilities = taskCapabilities(project);
   const setRows = (update: Task[] | ((rows: Task[]) => Task[])) =>
     saveDraft({ ...draft, rows: typeof update === 'function' ? update(rows) : update });
   const setNetwork = (network: boolean) => saveDraft({ ...draft, network });
@@ -345,26 +346,34 @@ export default function PlanEditor({
                   ))}
                 </select>
               </label>
-              {hasProjectTools(project) && (
-                <label>
-                  Work type
-                  <select
-                    aria-label={`Task ${i + 1} work type`}
-                    value={t.workType || ''}
-                    onChange={(e) =>
-                      change(t.id, { workType: (e.target.value || undefined) as Task['workType'] })
-                    }
-                  >
-                    <option value="">Existing assignment · substantive tool evidence</option>
-                    <option value="plan">Planning · useful report</option>
-                    <option value="implementation">
-                      Implementation · file changes and verification
-                    </option>
-                    <option value="review">Review · independent file inspection</option>
-                    <option value="tests">Testing · executed verification</option>
-                  </select>
-                </label>
-              )}
+              <label>
+                Work type
+                <select
+                  aria-label={`Task ${i + 1} work type`}
+                  value={t.workType || ''}
+                  onChange={(e) =>
+                    change(t.id, { workType: (e.target.value || undefined) as Task['workType'] })
+                  }
+                >
+                  <option value="">
+                    Existing assignment ·{' '}
+                    {capabilities.commands ? 'substantive tool evidence' : 'useful report'}
+                  </option>
+                  <option value="plan">Planning · useful report</option>
+                  <option value="implementation" disabled={!capabilities.commands}>
+                    Implementation · file changes and verification
+                  </option>
+                  <option value="review">
+                    Review ·{' '}
+                    {capabilities.fileInspection
+                      ? 'independent file inspection'
+                      : 'supplied material'}
+                  </option>
+                  <option value="tests" disabled={!capabilities.commands}>
+                    Testing · executed verification
+                  </option>
+                </select>
+              </label>
               <details>
                 <summary>Acceptance evidence ({t.acceptanceCriteria?.length || 0})</summary>
                 <p className="field-hint">

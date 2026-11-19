@@ -8,10 +8,18 @@ export default defineConfig({
     rollupOptions: {
       output: {
         onlyExplicitManualChunks: true,
-        manualChunks: {
-          'three-engine': ['three'],
-          'three-bindings': ['@react-three/fiber'],
-          'three-ui': ['@react-three/drei'],
+        manualChunks(id) {
+          // Keep shared React and Vite helpers outside graphics chunks. Otherwise
+          // the main UI imports a helper from a 3D chunk and eagerly loads it.
+          if (
+            /\/node_modules\/(?:react|react-dom|react-is|scheduler)\//.test(id) ||
+            id.includes('vite/preload-helper') ||
+            id.includes('commonjsHelpers')
+          )
+            return 'ui-runtime';
+          if (id.includes('/node_modules/three/')) return 'three-engine';
+          if (id.includes('/node_modules/@react-three/fiber/')) return 'three-bindings';
+          if (id.includes('/node_modules/@react-three/drei/')) return 'three-ui';
         },
       },
     },

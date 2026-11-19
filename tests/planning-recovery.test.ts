@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { rmSync } from 'node:fs';
 import { Store } from '../server/store.js';
 import { Engine } from '../server/engine.js';
 import { defaultPolicy, backupSchema } from '../shared/schemas.js';
@@ -8,6 +9,8 @@ import { DEFAULT_LOCAL_MODEL } from '../shared/defaults.js';
 import { managedInfo } from '../server/managed.js';
 import { planOutputSchema, validatePlan } from '../server/planning.js';
 import { agents } from '../server/seed.js';
+import { containerInfo } from '../server/container-sandbox.js';
+import { projectWorkspace } from '../server/workspaces.js';
 
 const longTitle =
   'Competitive and market research: competitor analysis, acquisition effort/cost, delivery cost, unit economics, time‑to‑first‑validation';
@@ -78,7 +81,7 @@ function fixture(reply: (input: any, call: number) => unknown) {
     engine,
     requests,
     traces,
-    async create() {
+    async create(execution?: 'auto' | 'text') {
       return engine.createProject(
         'Useful local planning',
         'Compare supplied options A at $20 and B at $35. Label demand unknown.',
@@ -86,6 +89,13 @@ function fixture(reply: (input: any, call: number) => unknown) {
         'ai',
         randomUUID(),
         'venture',
+        execution
+          ? {
+              execution,
+              reasoningEffort: 'medium',
+              meetingPolicy: { enabled: false, everyTasks: 3 },
+            }
+          : undefined,
       );
     },
     async close() {
@@ -291,6 +301,8 @@ test('automatic format correction controls allow zero or two repairs without hid
 
 test('a text-only planner corrects unsupported execution into preparation and a pre-execution review (HTTP fixture)', async () => {
   const h = fixture((input, call) => {
+    assert.deepEqual(input.planningRules.allowedWorkTypes, ['plan', 'review']);
+    assert.match(input.planningRules.workTypeMeaning, /Drafting prose assets.*is plan/);
     assert.equal(input.availableTaskCapabilities.commands, false);
     assert.equal(input.availableTaskCapabilities.externalActions, false);
     assert.match(input.evidenceBoundary.reviewScope, /actual supplied/);
@@ -319,6 +331,121 @@ test('a text-only planner corrects unsupported execution into preparation and a 
     );
     assert.ok(tasks.every((t) => t.acceptanceCriteria!.every((c) => c.evidence === 'report')));
   } finally {
+    await h.close();
+  }
+});
+
+test('text asset drafting uses one request and a capability-specific response schema (HTTP fixture)', async () => {
+  const h = fixture(() => {
+    const value = plan();
+    value.tasks[0].title = 'Draft pilot assets and execution plan';
+    value.tasks[0].description =
+      'Produce a product outline, sales copy and service pitch. List payment/platform dependencies and critique the proposed procedure; do not claim it has run.';
+    return value;
+  });
+  try {
+    const project = await h.create();
+    await until(() => project.planningStatus !== 'planning');
+    assert.equal(project.planningStatus, 'ready', project.planningError);
+    assert.equal(h.requests.length, 1);
+    assert.deepEqual(h.requests[0].request.format.properties.tasks.items.properties.workType.enum, [
+      'plan',
+      'review',
+    ]);
+    assert.deepEqual(
+      planOutputSchema(agents, 30, true).properties.tasks.items.properties.workType.enum,
+      ['plan', 'implementation', 'review', 'tests'],
+    );
+    const rejected = plan();
+    rejected.tasks[0].workType = 'implementation';
+    const result = validatePlan(JSON.stringify(rejected), { provider: 'compatible' }, agents, 30);
+    assert.match(result.issues.join(' '), /requires project execution tools/);
+    assert.match(result.issues.join(' '), /isolated Linux workspace/);
+    assert.equal(result.tasks[0].workType, 'implementation', 'Never silently downgrade execution');
+  } finally {
+    await h.close();
+  }
+});
+
+test('automatic workspaces save an executable plan before setup while still blocking unsupported execution (HTTP fixture)', async () => {
+  const previous = { ...containerInfo };
+  Object.assign(containerInfo, {
+    ready: false,
+    message: 'Fixture: rootless Docker setup required',
+  });
+  const h = fixture((input) => {
+    assert.equal(input.availableTaskCapabilities.commands, true);
+    assert.equal(input.executionReadiness.ready, false);
+    assert.match(input.executionReadiness.planning, /Do not replace requested implementation/);
+    assert.deepEqual(input.planningRules.allowedWorkTypes, [
+      'plan',
+      'implementation',
+      'review',
+      'tests',
+    ]);
+    const value = plan();
+    value.tasks[0].workType = 'implementation';
+    value.tasks[0].acceptanceCriteria[0].evidence = 'artifact';
+    return value;
+  });
+  try {
+    const project = await h.create('auto');
+    await until(() => project.planningStatus !== 'planning');
+    assert.equal(project.planningStatus, 'ready', project.planningError);
+    assert.equal(project.workMode, 'container');
+    assert.equal(project.provider, 'ollama');
+    assert.equal(h.store.attempts().length, 1, 'Only planning used inference');
+    assert.throws(() => h.engine.runProject(project.id), /rootless Docker setup required/);
+    assert.equal(h.store.attempts().length, 1, 'Unavailable execution never spends another call');
+    const retried = await h.engine.createProject(
+      project.title,
+      project.brief,
+      'office',
+      'ai',
+      project.id,
+      'venture',
+      {
+        execution: 'auto',
+        reasoningEffort: 'medium',
+        meetingPolicy: { enabled: false, everyTasks: 3 },
+      },
+    );
+    assert.equal(retried.id, project.id);
+    assert.equal(h.requests.length, 1, 'A duplicate submission does not restart planning');
+  } finally {
+    for (const project of h.store.state.projects)
+      if (project.workspaceFolder)
+        rmSync(projectWorkspace(h.store.path, project), { recursive: true, force: true });
+    await h.close();
+    Object.assign(containerInfo, previous);
+  }
+});
+
+test('automatic Codex projects receive workspace tools without a separate executor', async () => {
+  const h = fixture(() => assert.fail('Manual planning must not request inference'));
+  try {
+    h.store.state.provider = 'codex';
+    const project = await h.engine.createProject(
+      'General-purpose team',
+      'Build a useful tool and independently test the result.',
+      'office',
+      'manual',
+      randomUUID(),
+      'office',
+      {
+        execution: 'auto',
+        reasoningEffort: 'medium',
+        meetingPolicy: { enabled: false, everyTasks: 3 },
+      },
+    );
+    assert.equal(project.workMode, 'workspace');
+    assert.equal(project.executor, undefined);
+    assert.equal(project.provider, 'codex');
+    assert.equal(h.store.attempts().length, 0);
+  } finally {
+    for (const project of h.store.state.projects)
+      if (project.workspaceFolder)
+        rmSync(projectWorkspace(h.store.path, project), { recursive: true, force: true });
     await h.close();
   }
 });

@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures';
+import { randomUUID } from 'node:crypto';
 
-test('unsupported resource isolation blocks tool enablement without changing the model or running work', async ({
+test('workspace selection is saved before setup; unsupported isolation blocks execution without spending inference', async ({
   page,
   request,
 }) => {
@@ -36,14 +37,40 @@ test('unsupported resource isolation blocks tool enablement without changing the
     await selector
       .getByRole('button', { name: 'Use this model for this project', exact: true })
       .click();
-    expect((await response).status()).toBe(400);
-    await expect(selector.getByRole('status')).toContainText('Isolated execution unavailable');
+    expect((await response).status()).toBe(200);
     const after = await (await request.get('/api/state')).json(),
       saved = after.state.projects.find((p: any) => p.id === project.id);
-    expect(saved.workMode).not.toBe('container');
+    expect(saved.workMode).toBe('container');
     expect(saved.provider).toBe(project.provider);
     expect(saved.model).toBe(project.model);
     expect(after.attempts.filter((a: any) => a.projectId === project.id)).toHaveLength(0);
+    expect(
+      (
+        await request.put(`/api/projects/${project.id}/plan`, {
+          data: {
+            tasks: [
+              {
+                id: randomUUID(),
+                title: 'Build and test a utility',
+                description: 'Create and verify a real project utility.',
+                agentId: 'sol',
+                dependencies: [],
+                requiresApproval: false,
+                workType: 'implementation',
+                acceptanceCriteria: [
+                  { id: 'c1', description: 'Write an actual source file.', evidence: 'artifact' },
+                ],
+              },
+            ],
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    const run = await request.post(`/api/projects/${project.id}/run`, { data: {} });
+    expect(run.status()).toBe(400);
+    expect(await run.text()).toContain('Isolated execution unavailable');
+    const blocked = await (await request.get('/api/state')).json();
+    expect(blocked.attempts.filter((a: any) => a.projectId === project.id)).toHaveLength(0);
   } finally {
     expect((await request.post('/api/restore', { data: original })).ok()).toBe(true);
   }

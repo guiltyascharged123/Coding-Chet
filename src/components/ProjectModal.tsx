@@ -18,7 +18,7 @@ type Draft = {
   reasoningEffort?: ReasoningEffort;
   meetings?: boolean;
   researchEnabled?: boolean;
-  execution?: 'text' | 'container';
+  execution?: 'auto' | 'text' | 'container';
   exploration?: 'focused' | 'expansive';
   officeCapacity?: 4 | 8 | 12;
   members?: Agent[];
@@ -32,6 +32,7 @@ const fresh = (): Draft => ({
   requestId: crypto.randomUUID(),
   reasoningEffort: 'medium',
   meetings: false,
+  execution: 'auto',
 });
 function readDraft(provider: Provider): Draft {
   try {
@@ -46,6 +47,9 @@ function readDraft(provider: Provider): Draft {
     )
       return {
         ...d,
+        // Preserve older drafts and their submission IDs, including a lost
+        // server response. New drafts use automatic execution by default.
+        execution: d.execution || 'text',
         planning: d.planning === 'template' && provider !== 'demo' ? 'manual' : d.planning,
       };
   } catch {
@@ -63,6 +67,7 @@ export default function ProjectModal({
   model,
   onConfigure,
   baseTeam,
+  executionStatus,
 }: {
   onClose: () => void;
   onCreated: (id: string) => void;
@@ -70,6 +75,7 @@ export default function ProjectModal({
   model?: string;
   onConfigure?: () => void;
   baseTeam: Agent[];
+  executionStatus?: { ready: boolean; message: string };
 }) {
   const [draft, setDraft] = useState(() => readDraft(provider));
   const [storage, setStorage] = useState('');
@@ -112,9 +118,7 @@ export default function ProjectModal({
         documentPack: 'office',
         collaboration: {
           execution:
-            !['codex', 'demo', 'external'].includes(provider) && draft.execution === 'container'
-              ? 'container'
-              : 'text',
+            ['demo', 'external'].includes(provider) || draft.execution === 'text' ? 'text' : 'auto',
           ...(draft.workflow === 'software' ? { deliveryMode: draft.deliveryMode || 'build' } : {}),
           researchEnabled: !!draft.researchEnabled,
           exploration:
@@ -208,7 +212,8 @@ export default function ProjectModal({
                 value={id}
                 key={id}
                 disabled={
-                  id === 'software' && provider !== 'codex' && draft.execution !== 'container'
+                  id === 'software' &&
+                  (['demo', 'external'].includes(provider) || draft.execution === 'text')
                 }
               >
                 {w.label}
@@ -313,17 +318,27 @@ export default function ProjectModal({
             ))}
           </div>
         </details>
-        {!['codex', 'demo', 'external'].includes(provider) && (
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              aria-label="Enable isolated Linux tools for this project"
-              checked={draft.execution === 'container'}
-              onChange={(e) => change({ execution: e.target.checked ? 'container' : 'text' })}
-            />
-            Enable shared Linux files and commands. Specialists can build and run tools without
-            routine approval prompts. Requires rootless Docker; this mode is offline.
-          </label>
+        {!['demo', 'external'].includes(provider) && (
+          <>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                aria-label="Enable isolated Linux tools for this project"
+                disabled={draft.workflow === 'software'}
+                checked={draft.execution !== 'text'}
+                onChange={(e) => change({ execution: e.target.checked ? 'auto' : 'text' })}
+              />
+              Enable shared files and commands. Specialists can build, test and reuse tools without
+              routine approval prompts. Tools start only when needed.
+            </label>
+            {draft.execution !== 'text' && provider !== 'codex' && (
+              <p className="field-hint" role="status">
+                {executionStatus?.ready
+                  ? 'Linux workspace ready. Commands run in an isolated, offline environment.'
+                  : `Your goal and plan can be saved now. Commands require execution setup: ${executionStatus?.message || 'Refresh Model connections to check rootless Docker.'}`}
+              </p>
+            )}
+          </>
         )}
         <label>
           Working style

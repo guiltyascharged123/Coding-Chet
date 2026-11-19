@@ -59,6 +59,109 @@ test('the reported long planner title keeps twelve editable assignments and cons
   ).toBeVisible();
 });
 
+test('text project work types can be edited without enabling execution', async ({
+  page,
+  request,
+}) => {
+  const project = await create(request, 'Compare the supplied options; prepare a useful report.');
+  await open(page, project.id);
+  await page.getByRole('button', { name: /^Edit plan ·/ }).click();
+  const workType = page.getByLabel('Task 1 work type', { exact: true });
+  await expect(workType).toBeVisible();
+  await expect(workType.locator('option[value="implementation"]')).toHaveAttribute('disabled', '');
+  await expect(workType.locator('option[value="tests"]')).toHaveAttribute('disabled', '');
+  await workType.selectOption('review');
+  await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.reload();
+  await page.getByRole('button', { name: /^Edit plan ·/ }).click();
+  await expect(page.getByLabel('Task 1 work type', { exact: true })).toHaveValue('review');
+  const data = await (await request.get('/api/state')).json();
+  const saved = data.state.projects.find((p: any) => p.id === project.id);
+  expect(saved.workMode || 'text').toBe('text');
+  expect(saved.executor).toBeUndefined();
+});
+
+test('lightweight view avoids loading the 3D office and preserves the preference', async ({
+  page,
+  request,
+}) => {
+  const loaded: string[] = [];
+  page.on('request', (r) => loaded.push(r.url()));
+  const project = await create(request, 'Compare supplied alternatives and label all assumptions.');
+  await open(page, project.id);
+  await expect(page.getByLabel('Lightweight team view', { exact: true })).toBeVisible();
+  expect(loaded.some((url) => /\/assets\/(Office-|three-)/.test(url))).toBe(false);
+  await page.getByRole('button', { name: '3D view', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Lightweight', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await expect.poll(() => loaded.some((url) => /\/assets\/Office-/.test(url))).toBe(true);
+  await page.getByRole('button', { name: 'Lightweight', exact: true }).click();
+  await page.reload();
+  await expect(page.getByLabel('Lightweight team view', { exact: true })).toBeVisible();
+});
+
+test('new direct-model projects default to tool execution and retain their plan while host setup is missing', async ({
+  page,
+  request,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(
+    dialog.getByLabel('Enable isolated Linux tools for this project', { exact: true }),
+  ).toBeChecked();
+  await dialog.getByLabel('Project name', { exact: true }).fill('Default tool team');
+  await dialog
+    .getByLabel('The brief', { exact: true })
+    .fill('Build a useful local tool, inspect its actual files and run meaningful tests.');
+  await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const data = await (await request.get('/api/state')).json();
+  const project = data.state.projects.find((p: any) => p.title === 'Default tool team');
+  expect(project.workMode).toBe('container');
+  expect(project.provider).toBe('compatible');
+  expect(project.brief).toContain('Build a useful local tool');
+  if (!data.runtime.container?.ready) {
+    await expect(
+      page.getByText('Workspace setup required before execution', { exact: true }),
+    ).toBeVisible();
+  }
+  await expect(page.locator('.project-capabilities')).toContainText('Linux workspace');
+});
+
+test('a pre-update draft retains its submission identity after a lost create response', async ({
+  page,
+  request,
+}) => {
+  const draft = {
+    title: 'Legacy draft identity',
+    brief: 'Preserve this project and its original request identity across an application update.',
+    workflow: 'office',
+    planning: 'manual',
+    requestId: crypto.randomUUID(),
+  };
+  expect((await request.post('/api/projects', { data: draft })).ok()).toBe(true);
+  await page.goto('/');
+  await page.evaluate(
+    (d) => localStorage.setItem('workroom-project-draft-v1', JSON.stringify(d)),
+    draft,
+  );
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(
+    dialog.getByLabel('Enable isolated Linux tools for this project', { exact: true }),
+  ).not.toBeChecked();
+  await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const data = await (await request.get('/api/state')).json();
+  const saved = data.state.projects.filter((p: any) => p.title === draft.title);
+  expect(saved).toHaveLength(1);
+  expect(saved[0].id).toBe(draft.requestId);
+});
+
 test('rejected planner details name the field and size, survive reload, export, and inform retry', async ({
   page,
   request,

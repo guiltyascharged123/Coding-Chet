@@ -222,7 +222,7 @@ export class Engine extends EventEmitter {
     workflow?: Workflow,
     collaboration?: {
       researchEnabled?: boolean;
-      execution?: 'text' | 'container';
+      execution?: 'auto' | 'text' | 'container';
       exploration?: 'focused' | 'expansive';
       requestTimeoutSeconds?: number;
       deliveryMode?: 'build' | 'design';
@@ -232,6 +232,17 @@ export class Engine extends EventEmitter {
     officeCapacity: OfficeCapacity = 4,
     selectedTeam?: Agent[],
   ) {
+    const execution = collaboration?.execution;
+    const workMode =
+      execution === 'auto'
+        ? this.state.provider === 'codex'
+          ? 'workspace'
+          : ['demo', 'external'].includes(this.state.provider)
+            ? undefined
+            : 'container'
+        : execution === 'container'
+          ? 'container'
+          : undefined;
     const existing = requestId && this.state.projects.find((p) => p.id === requestId);
     if (existing) {
       if (
@@ -240,7 +251,7 @@ export class Engine extends EventEmitter {
         existing.workflow !== workflow ||
         existing.documentPack !== documentPack ||
         existing.planning !== planning ||
-        (existing.workMode === 'container') !== (collaboration?.execution === 'container') ||
+        (existing.workMode || 'text') !== (workMode || 'text') ||
         (existing.officeCapacity || 4) !== officeCapacity
       )
         throw new AppError(
@@ -252,7 +263,6 @@ export class Engine extends EventEmitter {
     if (collaboration?.execution === 'container') {
       if (['codex', 'demo', 'external'].includes(this.state.provider))
         throw new AppError('Isolated Linux execution needs a direct text model.');
-      if (!containerInfo.ready) throw new AppError(containerInfo.message, 400, 'connections');
     }
     const project: Project = {
       id: requestId || randomUUID(),
@@ -264,7 +274,7 @@ export class Engine extends EventEmitter {
       documentPack,
       planning,
       workflow,
-      workMode: collaboration?.execution === 'container' ? 'container' : undefined,
+      workMode,
       reasoningEffort: collaboration?.reasoningEffort || 'medium',
       meetingPolicy: collaboration?.meetingPolicy,
       researchEnabled: !!collaboration?.researchEnabled,
@@ -292,6 +302,12 @@ export class Engine extends EventEmitter {
     // Durability comes before any model request. A failed plan is a saved project.
     this.state.projects.unshift(project);
     this.event(project.id, 'system', 'Project and original brief saved.');
+    if (workMode === 'container' && !containerInfo.ready)
+      this.event(
+        project.id,
+        'system',
+        `Execution setup required before running: ${containerInfo.message}`,
+      );
     this.commit();
     if (planning === 'ai') this.startPlanning(project);
     else
@@ -809,7 +825,6 @@ export class Engine extends EventEmitter {
       throw new AppError(
         'Choose a direct text model without a separate executor for isolated Linux execution.',
       );
-    if (container && !containerInfo.ready) throw new AppError(containerInfo.message);
     const tools =
       p.workflow === 'software' ||
       ['workspace', 'container'].includes(workMode || p.workMode || '');
@@ -861,6 +876,8 @@ export class Engine extends EventEmitter {
       'system',
       `Project model set to ${provider}${p.model ? ` / ${p.model}` : ''}${execution ? ` for planning and meetings; tasks explicitly use Codex / ${execution.model} in the project workspace` : ''}. Existing work and usage history retained.`,
     );
+    if (container && !containerInfo.ready)
+      this.event(id, 'system', `Execution setup required before running: ${containerInfo.message}`);
     this.commit();
   }
   updateInstructions(id: string, text: string, reason: string, expectedRevision?: number) {

@@ -307,7 +307,7 @@ app.post(
         collaboration: collaborationSchema
           .extend({
             exploration: z.enum(['focused', 'expansive']).optional(),
-            execution: z.enum(['text', 'container']).optional(),
+            execution: z.enum(['auto', 'text', 'container']).optional(),
           })
           .optional(),
         officeCapacity: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(4),

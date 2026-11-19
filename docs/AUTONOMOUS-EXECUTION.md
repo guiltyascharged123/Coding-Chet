@@ -29,14 +29,40 @@ anyone, or run its proposed business activities. Original records stay intact.
 
 ## What is implemented
 
-In **New project**, enable **shared Linux files and commands** before AI planning,
-so the planner can assign execution work from the start. For existing projects,
-use **Models & sign-in → Selected project model**. Direct Ollama, compatible,
+**New project** enables shared files and commands by default: Codex projects use
+their Codex workspace, while direct models use the isolated Linux executor.
+Turn this off explicitly for text-only work. Tools start on demand; specialists
+do not each keep a separate execution process running. If Linux setup is missing,
+the goal and full task plan can still be saved; commands remain blocked until
+the execution prerequisite is ready. The dashboard names that prerequisite.
+This does not grant network access or external-service credentials.
+
+For existing projects, use **Models & sign-in → Selected project model**. Direct Ollama, compatible,
 OpenAI and Gemini connections can explicitly enable **Let this model build and
 run tools in an isolated Linux workspace**. The primary model remains selected;
 there is no switch to Codex or paid fallback. Existing text projects are not
 automatically migrated. Enable this for a paused project, then revise assignments
 that previously assumed a text-only connection before resuming.
+
+The planner's schema and instructions reflect the execution selection. In text
+mode, drafting assets/procedures uses `plan`, and critiquing supplied work uses
+`review`; `implementation` and `tests` require workspace tools. Genuine execution
+requirements stay visible; no task is silently relabeled to claim completion.
+The manual plan editor exposes work type for text projects too.
+
+The default lightweight office view skips loading the 3D office and graphics
+engine. Specialist activity and inspection remain available. Select **3D view**
+or **Floor plan** when desired; the preference survives reload. No quantitative
+memory reduction is claimed without measuring the user's browser.
+
+Validation of this update: production build, 241 passing unit checks (five host
+skips), 50 passing full-suite browser checks (two host skips), and three final
+compatibility checks covering fresh defaults, graphics downloads and an older
+draft's retained submission ID. Model responses in those tests are fixtures.
+A separate anonymous live AI Horde planning request using
+`koboldcpp/G4-MeroMero-26B-A4B-it-uncensored-heretic` did not return before the
+90-second smoke-test deadline; live planner behavior remains unverified in this
+pass. The smoke-test deadline does not change project timeout settings.
 
 The model receives a small action interface: `read`, `write`, `run`, `finish`.
 Each turn executes an actual action and supplies its observation to the next

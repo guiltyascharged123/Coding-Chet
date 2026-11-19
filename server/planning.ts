@@ -35,9 +35,16 @@ export const planSchema = z.object({
 });
 export type PlannedTask = z.infer<typeof planSchema>['tasks'][number];
 
+export function planWorkTypes(canExecute: boolean) {
+  return canExecute
+    ? (['plan', 'implementation', 'review', 'tests'] as const)
+    : (['plan', 'review'] as const);
+}
+
 /** Grammar constraints and prompt rules match the application validator. */
-export function planOutputSchema(team: Agent[], maxTasks: number) {
+export function planOutputSchema(team: Agent[], maxTasks: number, canExecute = true) {
   const task = planSchema.shape.tasks.element.omit({ documentKind: true }).extend({
+    workType: z.enum(planWorkTypes(canExecute)),
     agentId: z.enum(team.map((agent) => agent.id) as [string, ...string[]]),
     dependencies: z.array(
       z
@@ -144,7 +151,7 @@ export function validatePlan(
       const capabilities = taskCapabilities({ ...project, provider: project.provider });
       if (!capabilities.commands && ['implementation', 'tests'].includes(task.workType || ''))
         issues.push(
-          `Task ${index + 1} · workType: ${task.workType} requires project execution tools. This connection can produce supplied-material analysis or a proposed artifact, not executed implementation/tests. Configure an explicit Codex workspace executor or plan a useful preparation milestone; preserve the capability gap.`,
+          `Task ${index + 1} · workType: ${task.workType} requires project execution tools. For drafting text assets or a procedure, use plan with report evidence; for critiquing supplied material, use review. Real file changes or executed tests require an isolated Linux workspace or an explicit Codex workspace executor. Preserve the remaining execution gap; changing a label does not provide tools.`,
         );
       if (
         !capabilities.fileInspection &&

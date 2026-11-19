@@ -66,7 +66,7 @@ import { SPECIALISTS } from '../shared/specialists';
 import WorkspaceControls from './components/WorkspaceControls';
 import WorkEvidence from './components/WorkEvidence';
 import BrandMark from './components/BrandMark';
-import { hasProjectTools } from '../shared/capabilities';
+import { hasProjectTools, taskCapabilities } from '../shared/capabilities';
 import RuntimeModal from './components/RuntimeModal';
 import EditProjectModal from './components/EditProjectModal';
 import ProjectModal from './components/ProjectModal';
@@ -77,6 +77,7 @@ import ActivityTimeline from './components/ActivityTimeline';
 import { modelReadiness } from '../shared/model-readiness';
 import LiveConsole from './components/LiveConsole';
 import OfficeWork from './components/OfficeWork';
+import OfficeRoster from './components/OfficeRoster';
 import { useProjectConsole } from './useProjectConsole';
 import { officeWork } from './office/work';
 import { BASE_AGENT_INSTRUCTIONS, roleProcedure } from '../shared/role-protocol';
@@ -155,6 +156,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [lightweight, setLightweight] = useSavedDraft('workroom-lightweight', true);
   const [officeMoving, setOfficeMoving] = useState(
     () => !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -704,11 +706,14 @@ export default function App() {
                   ? 'Simulation · no model calls'
                   : project.provider === 'external'
                     ? 'Worker-managed capabilities · inspect worker receipts'
-                    : (project.provider === 'codex' || project.executor) && hasProjectTools(project)
-                      ? 'Workspace tools · project files and commands'
-                      : project.provider === 'codex' && project.researchEnabled
-                        ? 'Text and web research · no file execution'
-                        : 'Text only · supplied material; no browsing or file execution'}
+                    : project.workMode === 'container'
+                      ? 'Linux workspace · shared project files and commands'
+                      : (project.provider === 'codex' || project.executor) &&
+                          hasProjectTools(project)
+                        ? 'Workspace tools · project files and commands'
+                        : project.provider === 'codex' && project.researchEnabled
+                          ? 'Text and web research · no file execution'
+                          : 'Text only · supplied material; no browsing or file execution'}
               </small>
             </div>
             <div className="project-progress">
@@ -851,6 +856,36 @@ export default function App() {
               </button>
             </div>
           )}
+          {project.workMode === 'container' && !data.runtime.container?.ready && (
+            <div className="planning-banner" role="status">
+              <div>
+                <strong>Workspace setup required before execution</strong>
+                <p>
+                  {data.runtime.container?.message ||
+                    'Check Linux workspace readiness in Model connections.'}
+                </p>
+                <p>Your goal and plan are saved. Execution waits until workspace setup is ready.</p>
+              </div>
+              <button className="button secondary small" onClick={() => openConnections()}>
+                Set up execution
+              </button>
+            </div>
+          )}
+          {!taskCapabilities(project).commands &&
+            !['demo', 'external'].includes(project.provider) && (
+              <div className="planning-banner">
+                <div>
+                  <strong>This saved project is configured for text work</strong>
+                  <p>
+                    Enable a shared workspace in Model connections to let specialists create files,
+                    build tools and run tests.
+                  </p>
+                </div>
+                <button className="button secondary small" onClick={() => openConnections()}>
+                  Enable project tools
+                </button>
+              </div>
+            )}
           {project.planningStatus === 'failed' && (
             <div className="planning-banner error-banner" role="alert">
               <div>
@@ -1000,49 +1035,72 @@ export default function App() {
                               : 'OFFICE VIEW'}
                       </span>
                     </div>
-                    <div className="view-toggle" aria-label="Camera view">
+                    <div className="view-toggle" aria-label="Office view">
                       <button
-                        className={cameraMode === 'orbit' ? 'selected' : ''}
-                        onClick={() => setCameraMode('orbit')}
+                        className={lightweight ? 'selected' : ''}
+                        onClick={() => setLightweight(true)}
+                        aria-pressed={lightweight}
+                      >
+                        Lightweight
+                      </button>
+                      <button
+                        className={!lightweight && cameraMode === 'orbit' ? 'selected' : ''}
+                        onClick={() => {
+                          setLightweight(false);
+                          setCameraMode('orbit');
+                        }}
                       >
                         3D view
                       </button>
                       <button
-                        className={cameraMode === 'top' ? 'selected' : ''}
-                        onClick={() => setCameraMode('top')}
+                        className={!lightweight && cameraMode === 'top' ? 'selected' : ''}
+                        onClick={() => {
+                          setLightweight(false);
+                          setCameraMode('top');
+                        }}
                       >
                         Floor plan
                       </button>
                     </div>
                   </div>
                   <div className="office-scene">
-                    <Suspense
-                      fallback={
-                        <div className="scene-loading">
-                          <Box size={30} />
-                          <span>Opening the studio…</span>
-                        </div>
-                      }
-                    >
-                      <Office
-                        key={project.id}
+                    {lightweight ? (
+                      <OfficeRoster
                         agents={state.agents}
-                        tasks={tasks}
-                        activities={activities}
-                        meeting={currentMeeting}
                         work={work}
-                        capacity={project.officeCapacity || 4}
-                        ideas={(state.ideas || []).filter((idea) => idea.projectId === project.id)}
-                        onIdeaBoard={() => setView('ideas')}
-                        mode={cameraMode}
-                        zoom={zoom}
-                        reset={resetCamera}
-                        moving={officeMoving}
-                        rendering={!modal && !selectedTask && !selectedAgent && !selectedReview}
                         onAgentClick={openAgentConsole}
-                        onTaskClick={setTaskId}
                       />
-                    </Suspense>
+                    ) : (
+                      <Suspense
+                        fallback={
+                          <div className="scene-loading">
+                            <Box size={30} />
+                            <span>Opening the studio…</span>
+                          </div>
+                        }
+                      >
+                        <Office
+                          key={project.id}
+                          agents={state.agents}
+                          tasks={tasks}
+                          activities={activities}
+                          meeting={currentMeeting}
+                          work={work}
+                          capacity={project.officeCapacity || 4}
+                          ideas={(state.ideas || []).filter(
+                            (idea) => idea.projectId === project.id,
+                          )}
+                          onIdeaBoard={() => setView('ideas')}
+                          mode={cameraMode}
+                          zoom={zoom}
+                          reset={resetCamera}
+                          moving={officeMoving}
+                          rendering={!modal && !selectedTask && !selectedAgent && !selectedReview}
+                          onAgentClick={openAgentConsole}
+                          onTaskClick={setTaskId}
+                        />
+                      </Suspense>
+                    )}
                     <div className="scene-top">
                       <span className={`scene-status ${project.status}`}>
                         <i />
@@ -1063,53 +1121,57 @@ export default function App() {
                         {state.agents.length} agents
                       </span>
                     </div>
-                    <div className="scene-controls">
-                      <button
-                        onClick={() => setOfficeMoving((moving) => !moving)}
-                        aria-label={
-                          officeMoving ? 'Pause office movement' : 'Resume office movement'
-                        }
-                        title={
-                          officeMoving
-                            ? 'Pause office movement (tasks continue)'
-                            : 'Resume office movement'
-                        }
-                        aria-pressed={!officeMoving}
-                      >
-                        {officeMoving ? <Pause size={16} /> : <Play size={16} />}
-                      </button>
-                      <span />
-                      <button
-                        onClick={() => setZoom((z) => Math.max(0.65, z - 0.15))}
-                        aria-label="Zoom out"
-                        title="Zoom out"
-                      >
-                        <ZoomOut size={16} />
-                      </button>
-                      <button
-                        onClick={() => setZoom((z) => Math.min(1.9, z + 0.15))}
-                        aria-label="Zoom in"
-                        title="Zoom in"
-                      >
-                        <ZoomIn size={16} />
-                      </button>
-                      <span />
-                      <button
-                        onClick={() => {
-                          setZoom(1);
-                          setResetCamera((v) => v + 1);
-                        }}
-                        aria-label="Reset camera"
-                        title="Reset camera"
-                      >
-                        <RotateCcw size={15} />
-                      </button>
-                    </div>
-                    <span className="scene-hint">
-                      {cameraMode === 'orbit'
-                        ? 'Drag to orbit · Scroll to zoom'
-                        : 'Drag to pan · Scroll to zoom'}
-                    </span>
+                    {!lightweight && (
+                      <>
+                        <div className="scene-controls">
+                          <button
+                            onClick={() => setOfficeMoving((moving) => !moving)}
+                            aria-label={
+                              officeMoving ? 'Pause office movement' : 'Resume office movement'
+                            }
+                            title={
+                              officeMoving
+                                ? 'Pause office movement (tasks continue)'
+                                : 'Resume office movement'
+                            }
+                            aria-pressed={!officeMoving}
+                          >
+                            {officeMoving ? <Pause size={16} /> : <Play size={16} />}
+                          </button>
+                          <span />
+                          <button
+                            onClick={() => setZoom((z) => Math.max(0.65, z - 0.15))}
+                            aria-label="Zoom out"
+                            title="Zoom out"
+                          >
+                            <ZoomOut size={16} />
+                          </button>
+                          <button
+                            onClick={() => setZoom((z) => Math.min(1.9, z + 0.15))}
+                            aria-label="Zoom in"
+                            title="Zoom in"
+                          >
+                            <ZoomIn size={16} />
+                          </button>
+                          <span />
+                          <button
+                            onClick={() => {
+                              setZoom(1);
+                              setResetCamera((v) => v + 1);
+                            }}
+                            aria-label="Reset camera"
+                            title="Reset camera"
+                          >
+                            <RotateCcw size={15} />
+                          </button>
+                        </div>
+                        <span className="scene-hint">
+                          {cameraMode === 'orbit'
+                            ? 'Drag to orbit · Scroll to zoom'
+                            : 'Drag to pan · Scroll to zoom'}
+                        </span>
+                      </>
+                    )}
                   </div>
                   <div className="office-footer">
                     <span>
@@ -1537,6 +1599,7 @@ export default function App() {
       {modal === 'project' && (
         <ProjectModal
           baseTeam={data.state.agents}
+          executionStatus={data.runtime.container}
           onClose={() => setModal(null)}
           provider={state.provider}
           model={
