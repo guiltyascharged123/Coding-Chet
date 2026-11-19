@@ -834,7 +834,7 @@ export async function codexWork(
       if (event.type === 'error') throw codexFailure(event.message);
     }
     if (!completed) throw new CodexWorkerError('CODEX_NO_RECEIPT');
-    usage.observations = observations.slice(-100);
+    usage.observations = observations;
     if (structured) {
       // Keep the confirmed usage receipt even if the work record is inconsistent.
       let value: unknown;

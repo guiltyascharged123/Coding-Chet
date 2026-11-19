@@ -121,9 +121,13 @@ export async function runToolLoop(
     ],
     ...(correction ? { actionCorrection: correction } : {}),
   });
-  for (let step = 0; ; step++) {
+  let actions = 0;
+  for (;;) {
     signal.throwIfAborted();
-    const raw = await ask(input(maxActions ? Math.max(0, maxActions - step) : null), !!correction);
+    const raw = await ask(
+      input(maxActions ? Math.max(0, maxActions - actions) : null),
+      !!correction,
+    );
     const parsed = actionSchema.safeParse(jsonValue(raw));
     if (!parsed.success) {
       if (++repairs > (ctx.store?.state.policy?.maxFormatCorrections ?? 1))
@@ -139,6 +143,7 @@ export async function runToolLoop(
       continue;
     }
     correction = '';
+    repairs = 0;
     const action = parsed.data;
     if (action.action === 'finish') {
       const checked = await nativeResult(
@@ -162,8 +167,7 @@ export async function runToolLoop(
       if (
         action.result.outcome === 'complete' &&
         checked.outcome === 'blocked' &&
-        completionRepairs++ < (limits.maxFormatCorrections ?? 1) &&
-        (!maxActions || step < maxActions)
+        completionRepairs++ < (limits.maxFormatCorrections ?? 1)
       ) {
         correction = `The executor could not verify completion: ${checked.summary} Perform the missing real inspection/tests within the remaining action budget, delegate feasible work, or finish with an honest blocker. Do not ask the human for checks these tools can perform.`;
         continue;
@@ -172,7 +176,7 @@ export async function runToolLoop(
       ctx.onContext?.();
       return checked.deliverable;
     }
-    if (maxActions && step >= maxActions)
+    if (maxActions && actions >= maxActions)
       throw new Error(
         'Sandbox action allowance reached. Saved files and receipts remain available; narrow the assignment or review before retrying.',
       );
@@ -190,6 +194,7 @@ export async function runToolLoop(
       output: '',
     };
     task.sandboxJournal.push(entry);
+    actions++;
     ctx.onContext?.(); // Commit intent before executing a possibly mutating action.
     ctx.onTrace?.({ type: 'command', text: `${action.action}: ${reference}`, status: 'started' });
     let reply: SandboxReply;
@@ -222,6 +227,7 @@ export async function runToolLoop(
       output: reply.output.slice(0, 16000),
       exitCode: reply.exitCode,
     });
+    completionRepairs = 0;
     lastToolResult = {
       action: action.action,
       reference,

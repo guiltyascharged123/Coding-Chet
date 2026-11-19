@@ -37,7 +37,7 @@ import { jsonValue, normalizeWorkReply } from './work-results.js';
 import { attachLocalArtifact } from './local-artifact.js';
 import { hasProjectTools, taskExecutionProject } from '../shared/capabilities.js';
 import { taskCapabilities } from '../shared/capabilities.js';
-import { containerInfo } from './container-sandbox.js';
+import { containerInfo, ContainerShutdownError } from './container-sandbox.js';
 import type { ConsoleEvent } from '../shared/console.js';
 import type { CostPolicy } from '../shared/types.js';
 
@@ -1998,6 +1998,7 @@ export class Engine extends EventEmitter {
     this.commit();
   }
   private async execute(task: Task, controller: AbortController) {
+    let shutdownUnconfirmed = false;
     const project = taskExecutionProject(this.project(task.projectId));
     const agent = (project.team || this.state.agents).find((a) => a.id === task.agentId)!;
     try {
@@ -2073,10 +2074,11 @@ export class Engine extends EventEmitter {
         } else this.complete(task, output);
       }
     } catch (error) {
-      if (!controller.signal.aborted)
+      if (error instanceof ContainerShutdownError) shutdownUnconfirmed = true;
+      if (!controller.signal.aborted || shutdownUnconfirmed)
         this.fail(task, error instanceof Error ? error.message : 'The task failed. Please retry.');
     } finally {
-      if (controller.signal.aborted && task.attemptId) {
+      if (controller.signal.aborted && task.attemptId && !shutdownUnconfirmed) {
         const response = this.store.attemptResult(task.attemptId);
         task.status = 'failed';
         task.recovery = {

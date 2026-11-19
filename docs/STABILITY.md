@@ -114,3 +114,13 @@ and saved model replies. It also checks a valid JSON file between 25 MB and 25 M
 server/proxy errors, invalid success responses, recovery after an export failure,
 and real source-file preview/ZIP downloads after session loss. These tests use
 local HTTP/model fixtures and do not claim live-model or external campaign results.
+
+## Execution review follow-up
+
+Tool-action budgets count dispatched actions, not format corrections or completion
+assessment. Native coding receipts retain early file evidence across long jobs.
+Container cancellation waits for removal confirmation; cleanup failures preserve
+uncertain intent and a visible warning that the command may still be running,
+including after user cancellation. Docker's unconfined seccomp profile is rejected.
+Regressions use model/CLI fixtures and harmless process-lifecycle fixtures; they
+do not establish new live-model quality or resolve unsupported host prerequisites.

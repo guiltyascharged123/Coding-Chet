@@ -69,6 +69,13 @@ test('execution fails closed when rootless Docker cannot enforce the promised re
     PidsLimit: true,
   };
   assert.equal(containerCapabilityIssue(capable), undefined);
+  assert.match(
+    containerCapabilityIssue({
+      ...capable,
+      SecurityOptions: ['name=rootless', 'name=seccomp,profile=unconfined'],
+    })!,
+    /seccomp/,
+  );
   for (const field of ['MemoryLimit', 'CPUCfsQuota', 'PidsLimit'] as const)
     assert.match(containerCapabilityIssue({ ...capable, [field]: false })!, /blocked/);
   assert.match(

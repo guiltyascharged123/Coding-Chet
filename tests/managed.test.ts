@@ -368,6 +368,35 @@ test('coding workers preserve their shared folder, stream tool evidence, reject 
     );
     assert.equal(JSON.parse(output.text).outcome, 'complete');
     assert.equal(output.inputTokens, 80);
+    const manyEvents: ThreadEvent[] = [
+      {
+        type: 'item.completed',
+        item: {
+          id: 'first-change',
+          type: 'file_change',
+          status: 'completed',
+          changes: [{ path: 'src/original.mjs', kind: 'update' }],
+        },
+      },
+    ];
+    for (let i = 0; i < 110; i++)
+      manyEvents.push({ ...command, item: { ...command.item, id: `check-${i}` } });
+    const longRun = await codexWork(
+      'Role: engineer',
+      'Implement this project',
+      'gpt-6.1-sol',
+      directory,
+      undefined,
+      undefined,
+      false,
+      false,
+      () => factory([...manyEvents, message('complete'), receipt]),
+    );
+    assert.equal(
+      longRun.observations?.[0].reference,
+      'src/original.mjs',
+      'Early file-change evidence must survive long jobs.',
+    );
     assert.equal(existsSync(directory), true);
     assert.deepEqual(entries, [
       { id: 'cmd', type: 'command', detail: 'node --test\nExit code: 0', status: 'completed' },

@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promisify } from 'node:util';
 import { realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -20,7 +20,11 @@ export function containerCapabilityIssue(info: {
 }) {
   if (!info.SecurityOptions?.includes('name=rootless'))
     return 'Use a rootless Docker daemon under the Workroom user account.';
-  if (!info.SecurityOptions.some((s) => s.startsWith('name=seccomp')))
+  if (
+    !info.SecurityOptions.some(
+      (s) => s.startsWith('name=seccomp') && !/(?:^|,)profile=unconfined(?:,|$)/.test(s),
+    )
+  )
     return 'Docker seccomp protection must be enabled.';
   if (info.CgroupVersion !== '2' || !info.MemoryLimit || !info.CPUCfsQuota || !info.PidsLimit)
     return 'Docker cannot enforce memory, CPU and process budgets on this host. Configure rootless Docker with delegated cgroup v2 controllers; autonomous execution is blocked.';
@@ -195,20 +199,74 @@ export async function sandboxAction(
         ]
       : ['node', '-e', verifyResources + fileProgram]),
   ];
+  return runContainerProcess(
+    name,
+    args,
+    action.action === 'run' ? undefined : JSON.stringify(action),
+    signal,
+    budget.timeoutSeconds || 0,
+    action.action === 'write',
+  );
+}
+
+export interface ContainerDriver {
+  spawn(args: string[]): ChildProcessWithoutNullStreams;
+  remove(name: string): Promise<unknown>;
+}
+export class ContainerShutdownError extends Error {
+  constructor(cause: unknown) {
+    super(
+      'Container shutdown could not be confirmed. A command may still be running. Inspect Docker and explicitly retry this task before further work.',
+      { cause },
+    );
+  }
+}
+const defaultDriver: ContainerDriver = {
+  spawn: (args) => spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] }),
+  remove: async (name) => {
+    try {
+      await exec('docker', ['rm', '--force', name], { timeout: 5000 });
+    } catch (error) {
+      if (
+        !/No such container|not found/i.test(String((error as { stderr?: string }).stderr || error))
+      )
+        throw error;
+    }
+  },
+};
+
+/** Process lifecycle is separate from capability checks so shutdown behavior can
+ * be tested without relaxing the production sandbox or running a live model. */
+export function runContainerProcess(
+  name: string,
+  args: string[],
+  input: string | undefined,
+  signal: AbortSignal,
+  timeoutSeconds: number,
+  writeAction = false,
+  driver: ContainerDriver = defaultDriver,
+): Promise<SandboxReply> {
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = driver.spawn(args);
     let output = '',
       bytes = 0,
       stopping = false,
       timer: ReturnType<typeof setTimeout> | undefined;
+    let shutdown: Promise<{ error?: unknown }> | undefined;
     const stop = () => {
       if (stopping) return;
       stopping = true;
       // Removing the container stops its entire process tree. Never kill only
       // the Docker client and leave an agent process running in the background.
-      execFile('docker', ['rm', '--force', name], { timeout: 5000 }, () => {
-        child.kill('SIGKILL');
-      });
+      shutdown = Promise.resolve()
+        .then(() => driver.remove(name))
+        .then(
+          () => ({}),
+          (error) => ({ error }),
+        )
+        .finally(() => {
+          child.kill('SIGKILL');
+        });
     };
     const collect = (chunk: Buffer) => {
       const remaining = Math.max(0, 64000 - bytes);
@@ -219,8 +277,8 @@ export async function sandboxAction(
     child.stderr.on('data', collect);
     child.stdin.on('error', () => {});
     child.on('error', reject);
-    if (budget.timeoutSeconds) {
-      const deadline = Date.now() + budget.timeoutSeconds * 1000;
+    if (timeoutSeconds) {
+      const deadline = Date.now() + timeoutSeconds * 1000;
       const check = () => {
         const left = deadline - Date.now();
         if (left <= 0) stop();
@@ -230,9 +288,11 @@ export async function sandboxAction(
     }
     signal.addEventListener('abort', stop, { once: true });
     if (signal.aborted) stop();
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
       clearTimeout(timer);
       signal.removeEventListener('abort', stop);
+      const cleanup = await shutdown;
+      if (cleanup && 'error' in cleanup) return reject(new ContainerShutdownError(cleanup.error));
       if (signal.aborted)
         return reject(
           new Error(
@@ -247,7 +307,7 @@ export async function sandboxAction(
           exitCode: 124,
         });
       let changed: boolean | undefined;
-      if (action.action === 'write' && code === 0) {
+      if (writeAction && code === 0) {
         try {
           changed = JSON.parse(output).changed === true;
         } catch {}
@@ -262,6 +322,6 @@ export async function sandboxAction(
         changed,
       });
     });
-    child.stdin.end(action.action === 'run' ? undefined : JSON.stringify(action));
+    child.stdin.end(input);
   });
 }
