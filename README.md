@@ -59,6 +59,17 @@ A direct text connection can also keep local planning while explicitly selecting
 
 Normal startup never runs canned work or falls back to Demo. Historical simulation projects and their outputs remain saved; choose a real project connection before running them. The old `npm run demo` command is a compatibility alias for the real workspace. Simulation is retained only as an explicitly enabled automated-test fixture.
 
+On Ubuntu, prepare the agents' private execution workspace once:
+
+```bash
+npm run setup:workspace
+```
+
+Run this as your normal user. It installs missing rootless Docker prerequisites,
+prepares Node.js/Python/Git tools, verifies actual project-only execution, and keeps
+your selected model and saved projects. Then restart with `npm run local`.
+See [Ubuntu setup and troubleshooting](docs/AUTONOMOUS-EXECUTION.md#install-the-execution-prerequisite).
+
 ## Configure and update
 
 `main` is the current branch for installation and normal updates. Existing

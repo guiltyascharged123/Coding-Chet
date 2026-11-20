@@ -1,9 +1,8 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { promisify } from 'node:util';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { dockerExec, spawnDocker } from './docker-runtime.js';
 import { realpathSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
-const exec = promisify(execFile);
 export const containerInfo = {
   ready: false,
   message: 'Isolated Linux execution has not been checked.',
@@ -49,12 +48,12 @@ export async function refreshContainerInfo() {
   };
   let nextImageId = '';
   try {
-    const { stdout } = await exec('docker', ['info', '--format', '{{json .}}'], {
+    const { stdout } = await dockerExec(['info', '--format', '{{json .}}'], {
       timeout: 5000,
     });
     const issue = containerCapabilityIssue(JSON.parse(stdout));
     if (issue) throw new Error(issue);
-    const image = await exec('docker', ['image', 'inspect', next.image, '--format', '{{.Id}}'], {
+    const image = await dockerExec(['image', 'inspect', next.image, '--format', '{{.Id}}'], {
       timeout: 5000,
     });
     nextImageId = image.stdout.trim();
@@ -63,7 +62,13 @@ export async function refreshContainerInfo() {
     next.ready = true;
     next.message = `Rootless Docker, cgroup resource controls and ${next.image} are available. Jobs run offline with a read-only system. Each job checks its actual resource controls before running model-selected code. This check did not run a model.`;
   } catch (error) {
-    next.message = `Isolated execution unavailable: ${error instanceof Error ? error.message : 'Docker check failed'}. Install rootless Docker and pull ${next.image}, then refresh Model connections. No host-command fallback is used.`;
+    const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
+    const reason = missing
+      ? 'Docker has not been installed, or Workroom cannot find its executable.'
+      : error instanceof Error
+        ? error.message
+        : 'Docker check failed.';
+    next.message = `Isolated execution unavailable: ${reason} On Ubuntu, stop Workroom and run npm run setup:workspace in its project folder, then restart Workroom. Your project and selected model are saved.`;
   }
   if (generation === refreshGeneration) {
     Object.assign(containerInfo, next);
@@ -93,7 +98,7 @@ function sandboxName(root: string, actionId: string) {
 }
 export async function stopSandboxAction(root: string, actionId: string) {
   try {
-    await exec('docker', ['rm', '--force', sandboxName(root, actionId)], { timeout: 5000 });
+    await dockerExec(['rm', '--force', sandboxName(root, actionId)], { timeout: 5000 });
   } catch (error) {
     if (
       !/No such container|not found/i.test(String((error as { stderr?: string }).stderr || error))
@@ -222,10 +227,10 @@ export class ContainerShutdownError extends Error {
   }
 }
 const defaultDriver: ContainerDriver = {
-  spawn: (args) => spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] }),
+  spawn: spawnDocker,
   remove: async (name) => {
     try {
-      await exec('docker', ['rm', '--force', name], { timeout: 5000 });
+      await dockerExec(['rm', '--force', name], { timeout: 5000 });
     } catch (error) {
       if (
         !/No such container|not found/i.test(String((error as { stderr?: string }).stderr || error))

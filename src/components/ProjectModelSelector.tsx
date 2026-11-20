@@ -211,12 +211,25 @@ export default function ProjectModelSelector({
               Let this model build and run tools in an isolated Linux workspace
             </label>
             <p className="field-hint">
-              Specialists share real files, run commands, save action receipts and continue without
-              routine approval prompts. The workspace is offline; the host and its credentials are
-              not exposed. Rootless Docker and the sandbox image are required.{' '}
+              Agents build and run tools inside this project’s shared Linux workspace. Other project
+              folders, your home folder and host credentials are not mounted. Internet access inside
+              the workspace is currently disabled.{' '}
               {data.runtime.container?.message ||
                 'Refresh Model connections to check isolated execution.'}
             </p>
+            {!data.runtime.container?.ready && (
+              <div className="field-hint">
+                <strong>Ubuntu setup — run once in your Workroom folder:</strong>
+                <pre>
+                  <code>npm run setup:workspace</code>
+                </pre>
+                <span>
+                  Installs rootless Docker if needed, prepares Node.js/Python tools and verifies
+                  real isolated execution. Ubuntu may ask for your administrator password in the
+                  terminal. Restart Workroom after setup.
+                </span>
+              </div>
+            )}
             <label className="check-row">
               <input
                 type="checkbox"

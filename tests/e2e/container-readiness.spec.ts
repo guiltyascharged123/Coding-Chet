@@ -29,6 +29,7 @@ test('workspace selection is saved before setup; unsupported isolation blocks ex
     await page.reload();
     await page.getByRole('button', { name: 'Models & sign-in', exact: true }).click();
     const selector = page.getByRole('region', { name: 'Selected project model', exact: true });
+    await expect(selector.locator('pre code')).toHaveText('npm run setup:workspace');
     await selector.getByLabel('Use isolated Linux workspace', { exact: true }).check();
     const response = page.waitForResponse(
       (r) =>

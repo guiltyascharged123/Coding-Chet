@@ -20,6 +20,7 @@
     "tests",
     "scripts/evaluate-local.ts",
     "scripts/audit-backup.ts",
+    "scripts/setup-workspace.ts",
     "vite.config.ts"
   ]
 }

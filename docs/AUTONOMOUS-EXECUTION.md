@@ -91,6 +91,78 @@ artifact receipt. Reviewers get a read-only mount and inspect the real files.
 
 ## Install the execution prerequisite
 
+On Ubuntu, stop Workroom and run this in the repository as your normal user:
+
+```bash
+npm run setup:workspace
+npm run local
+```
+
+Setup installs missing Ubuntu prerequisites (sudo may ask for your password in
+the terminal), installs Docker in rootless mode using a pinned, checksum-verified
+official installer, and starts that user's Docker service. It preserves any
+previous Docker context and saves Workroom's own connection in `.env` only after
+verification passes. Existing models, provider keys, projects and files are kept.
+Do not run the entire npm command with sudo.
+
+The prepared `workroom-tools:local` image includes Node.js/npm, Python, Git,
+SQLite, curl, jq and ripgrep. Its build context contains only `sandbox/`, not your
+project records or credentials. This downloads packages during setup; agent
+commands run offline afterward. Tools run inside the project container, rather
+than being installed by agents on your Ubuntu system. Edit `sandbox/Dockerfile`
+and rerun setup to add required image-level tools.
+
+Setup uses the production executor to write a script, run it and read its saved
+result. It checks real cgroup limits before execution and verifies that a
+synthetic file outside the project mount, a host environment canary and the Docker
+socket are absent inside. It removes its temporary test files and reports success
+only after these checks pass. These are execution checks, not live-model tests.
+
+To inspect an existing installation without package/image/configuration changes:
+
+```bash
+npm run setup:workspace -- --check
+```
+
+If ready, check mode also runs the temporary isolated execution check. Each
+project has its own shared folder; specialists collaborate within that folder.
+Host directories and credentials are not mounted. A surrounding Ubuntu VM with
+bounded CPU, RAM and disk gives a stronger outer boundary when desired.
+
+Installer verification: production build, the unit suite and focused browser
+checks passed. Installation orchestration tests use simulated command runners.
+The pinned official installer was downloaded and its checksum verified. The real
+`--check` run on this cloud machine stopped at unsupported cgroup enforcement;
+no agent code was run. Complete first-time installation and successful isolated
+execution still need validation on a capable Ubuntu host. Setup performs that
+execution test on the user's machine before saving ready settings.
+
+### Ubuntu setup troubleshooting
+
+If the user service is unavailable, log in as your normal Ubuntu user and check
+`systemctl --user status docker`. Follow any installer instructions for missing
+user namespaces/AppArmor profiles; do not disable the host's protections globally.
+The official [rootless troubleshooting guide](https://docs.docker.com/engine/security/rootless/troubleshoot/)
+describes the Ubuntu-specific profile and subordinate user/group requirements.
+
+If CPU/memory/process enforcement is unavailable on a systemd Ubuntu host, the
+current user's service may need controller delegation. As a system administrator,
+apply this override to that user only:
+
+```bash
+sudo mkdir -p "/etc/systemd/system/user@$(id -u).service.d"
+printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee "/etc/systemd/system/user@$(id -u).service.d/workroom-delegation.conf"
+sudo systemctl daemon-reload
+```
+
+Save your work, restart Ubuntu, and rerun setup. The installer does not restart
+your user session or stop another Docker service automatically. Restricted cloud
+containers without systemd/delegated cgroups cannot provide this executor; use a
+normal Ubuntu installation or VM. Missing host support is reported as a failed
+check, never as successful isolation.
+
+### Manual installation
+
 Run Workroom as your normal user, with a **rootless Docker daemon under the same
 user account**, and pull the image once:
 
@@ -111,7 +183,7 @@ The runtime blocks hosts without resource enforcement. Each job also checks its
 actual cgroup limits before running model-selected code, so a misleading daemon
 capability report cannot silently bypass the configured budgets.
 
-This small Linux image includes Node.js, npm and shell. It is Alpine, not Ubuntu.
+The manual `node:24-alpine` option includes Node.js, npm and shell. It is Alpine, not Ubuntu.
 `WORKROOM_SANDBOX_IMAGE` can select an explicitly prepared compatible Linux image
 with Node.js, shell, `timeout` and additional required tools; refresh readiness after changing it.
 The resolved local image ID is used for execution, avoiding a registry pull or tag
