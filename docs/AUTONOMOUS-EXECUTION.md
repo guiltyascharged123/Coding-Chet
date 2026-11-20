@@ -139,6 +139,15 @@ execution test on the user's machine before saving ready settings.
 
 ### Ubuntu setup troubleshooting
 
+Identify installer prerequisites without installing or changing anything:
+
+```bash
+npm run setup:workspace -- --diagnose
+```
+
+This reports the kernel, PID 1, systemd marker and cgroup v2 mount separately. It
+does not print environment variables or mark the executor ready.
+
 If the user service is unavailable, log in as your normal Ubuntu user and check
 `systemctl --user status docker`. Follow any installer instructions for missing
 user namespaces/AppArmor profiles; do not disable the host's protections globally.
@@ -160,6 +169,34 @@ your user session or stop another Docker service automatically. Restricted cloud
 containers without systemd/delegated cgroups cannot provide this executor; use a
 normal Ubuntu installation or VM. Missing host support is reported as a failed
 check, never as successful isolation.
+
+### Ubuntu 20.04 cgroup v2 activation
+
+Ubuntu 20.04 with `systemd` as PID 1 and `tmpfs` at `/sys/fs/cgroup` uses a legacy
+or hybrid cgroup layout. This is a host configuration issue, not a requirement
+to replace the machine or install systemd. Its usual 5.15 kernel supports v2.
+For the standard Ubuntu GRUB installation, use dedicated Workroom drop-ins to
+preserve existing boot settings and delegate controllers to the current user:
+
+```bash
+sudo mkdir -p /etc/default/grub.d
+sudo tee /etc/default/grub.d/99-workroom-cgroups.cfg >/dev/null <<'EOF'
+GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX} systemd.unified_cgroup_hierarchy=1"
+EOF
+sudo mkdir -p "/etc/systemd/system/user@$(id -u).service.d"
+printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee "/etc/systemd/system/user@$(id -u).service.d/workroom-delegation.conf" >/dev/null
+sudo update-grub
+```
+
+Only continue if these commands succeed. Save your work and restart Ubuntu.
+`stat -fc %T /sys/fs/cgroup` should then report `cgroup2fs`. Run
+`npm run setup:workspace` again. These are one-time administrator configuration
+changes; agent commands still run inside their project container.
+
+The cgroup mode is system-wide and can affect software expecting cgroup v1.
+An Ubuntu VM is an alternative if the existing host configuration must stay as
+it is. To undo these changes, remove only the two Workroom drop-ins created
+above, run `sudo update-grub`, and restart Ubuntu.
 
 ### Manual installation
 

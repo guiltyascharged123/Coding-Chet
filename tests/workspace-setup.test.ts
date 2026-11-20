@@ -9,6 +9,8 @@ import {
   setupWorkspace,
   saveWorkspaceSettings,
   verifyInstaller,
+  workspacePrerequisites,
+  workspacePrerequisiteIssue,
 } from '../scripts/setup-workspace.js';
 
 const readyInfo = {
@@ -72,6 +74,23 @@ function fixture() {
     },
   };
 }
+
+test('Ubuntu 20.04 legacy cgroups are distinguished from missing systemd', () => {
+  const facts = workspacePrerequisites((path) => path === '/run/systemd/system');
+  const issue = workspacePrerequisiteIssue(facts)!;
+  assert.equal(facts.systemd, true);
+  assert.equal(facts.cgroupV2, false);
+  assert.match(issue, /systemd is running, but cgroup v2 is not active/);
+  assert.match(issue, /Ubuntu 20.04/);
+  assert.ok(!issue.includes('systemd is not running'));
+});
+
+test('missing systemd does not incorrectly imply that cgroup v2 is missing', () => {
+  const issue = workspacePrerequisiteIssue({ systemd: false, cgroupV2: true })!;
+  assert.match(issue, /cgroup v2 is available, but systemd is not running/);
+  assert.match(issue, /WSL/);
+  assert.equal(workspacePrerequisiteIssue({ systemd: true, cgroupV2: true }), undefined);
+});
 
 test('Ubuntu setup builds project tools and persists only its verified connection, preserving model settings (fixture)', async () => {
   const h = fixture();

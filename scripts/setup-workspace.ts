@@ -15,7 +15,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, release } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -32,6 +32,43 @@ export const INSTALLER_SHA256 = 'cfee984e1a9e5e337a692af12c543889f126e9b88b4d2f9
 export const DOCKER_VERSION = '29.10.0';
 const TOOL_IMAGE = 'workroom-tools:local';
 type Run = (command: string, args: string[], inherit?: boolean) => Promise<string>;
+
+export function workspacePrerequisites(exists: (path: string) => boolean = existsSync) {
+  return {
+    systemd: exists('/run/systemd/system'),
+    cgroupV2: exists('/sys/fs/cgroup/cgroup.controllers'),
+  };
+}
+
+export function workspacePrerequisiteIssue(facts: ReturnType<typeof workspacePrerequisites>) {
+  if (facts.systemd && facts.cgroupV2) return undefined;
+  const details = facts.systemd
+    ? 'systemd is running, but cgroup v2 is not active. Ubuntu 20.04 commonly uses the older cgroup layout; enable cgroup v2 in its boot configuration, rather than installing systemd or replacing the laptop.'
+    : facts.cgroupV2
+      ? 'cgroup v2 is available, but systemd is not running in this environment. For WSL, enable systemd in /etc/wsl.conf and restart WSL; for a container/chroot, run setup on the Ubuntu host or in a systemd-enabled VM.'
+      : 'Neither a running systemd installation nor a cgroup v2 mount was detected. Identify whether this is WSL, a container/chroot or a full Ubuntu installation before changing its configuration.';
+  const section = facts.systemd
+    ? 'ubuntu-2004-cgroup-v2-activation'
+    : 'ubuntu-setup-troubleshooting';
+  return `${details}\nSee docs/AUTONOMOUS-EXECUTION.md#${section}. Nothing was installed or reconfigured.`;
+}
+
+function printHostDiagnostics() {
+  const facts = workspacePrerequisites();
+  let pid1 = 'unavailable';
+  try {
+    pid1 = readFileSync('/proc/1/comm', 'utf8').trim();
+  } catch {
+    /* Not Linux. */
+  }
+  console.log(
+    `Kernel: ${release()}\nPID 1: ${pid1}\nsystemd running: ${facts.systemd ? 'yes' : 'no'}\ncgroup v2 active: ${facts.cgroupV2 ? 'yes' : 'no'}`,
+  );
+  console.log(
+    workspacePrerequisiteIssue(facts) ||
+      'Installer prerequisites are present. Docker resource enforcement and the isolated execution test must still pass.',
+  );
+}
 
 const run: Run = async (command, args, inherit = false) => {
   const env = dockerConnection().env;
@@ -242,10 +279,8 @@ export async function setupWorkspace(
       throw new Error(
         'A running rootless Docker service was not found. Run npm run setup:workspace to install and prepare it.',
       );
-    if (!d.exists('/sys/fs/cgroup/cgroup.controllers') || !d.exists('/run/systemd/system'))
-      throw new Error(
-        'This Ubuntu instance lacks systemd or cgroup v2. Use a normal Ubuntu installation/VM with these enabled; a restricted nested cloud container cannot provide this executor. Nothing was installed.',
-      );
+    const prerequisiteIssue = workspacePrerequisiteIssue(workspacePrerequisites(d.exists));
+    if (prerequisiteIssue) throw new Error(prerequisiteIssue);
     const missing = ['curl', 'newuidmap', 'newgidmap', 'iptables', 'slirp4netns'].some(
       (name) => !d.executable(name),
     );
@@ -415,11 +450,13 @@ export async function setupWorkspace(
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  setupWorkspace(
-    fileURLToPath(new URL('../', import.meta.url)),
-    process.argv.includes('--check'),
-  ).catch((error) => {
-    console.error(`Workspace setup: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
-  });
+  if (process.argv.includes('--diagnose')) printHostDiagnostics();
+  else
+    setupWorkspace(
+      fileURLToPath(new URL('../', import.meta.url)),
+      process.argv.includes('--check'),
+    ).catch((error) => {
+      console.error(`Workspace setup: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    });
 }
